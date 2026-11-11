@@ -49,6 +49,7 @@ describe("dependency rules", () => {
 			"module-contracts-stand-alone: modules/lists/contracts/bad.ts -> modules/lists/server/index.ts",
 			"module-imports-only-contracts-of-others: modules/lists/server/bad.ts -> modules/calendar/server/index.ts",
 			"module-no-data-or-ai-libs: modules/lists/server/db.ts -> node_modules/better-sqlite3/index.js",
+			"module-no-data-or-ai-libs: modules/lists/server/drizzle.ts -> node_modules/drizzle-orm/index.js",
 			"module-server-and-web-stay-apart: modules/lists/server/bad.ts -> modules/lists/web/index.ts",
 			"module-tests-use-only-test-utils: modules/lists/tests/bad.test.ts -> packages/platform/src/index.ts",
 			"module-uses-only-module-sdk: modules/lists/server/bad.ts -> packages/platform/src/index.ts",

@@ -1,3 +1,9 @@
-// The only part of platform a module may use. Phase 1a brings defineModule and prefixed tables over Drizzle
-// (docs/architecture/adr/0021-datos-de-los-modulos-y-migraciones.md); each later subphase adds its piece.
-export {};
+// The only part of platform a module may use (ADR 0021). Phase 1a brings defineModule and, in
+// @domus/module-sdk/db, prefixed tables over Drizzle; each later subphase adds its piece.
+export {
+	checkModules,
+	defineModule,
+	type ModuleDefinition,
+	type ModuleMigration,
+	type ModuleSchema,
+} from "./module";

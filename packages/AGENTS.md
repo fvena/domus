@@ -4,7 +4,7 @@ Shared code. Packages never import an app or a module. Each exposes its TypeScri
 
 - `platform`: the door (`http`: `createHttpHandler`), identity, authorization, audit, jobs and scheduled tasks, events, notifications, storage. The rest is built in phase 1.
 - `platform/contracts` (`@domus/platform/contracts`): the platform's own contracts, such as `status` and `PROTOCOL`. Pure: no Node, no other part of platform. The only part of platform that `web`, `assistant` and `voice-gateway` may import.
-- `module-sdk`: the only part of platform a module may use. Its shape is designed in phase 1a.
+- `module-sdk`: the only part of platform a module may use: `defineModule` and `checkModules`; `@domus/module-sdk/db` re-exports what a module needs of Drizzle and adds `moduleTables(id)` and `id()` (ADR 0021).
 - `ui`: the design system, Vue components (phase 2).
 - `i18n`: translation runtime and catalogs.
 - `utils`: one business-free topic per folder, imported as `@domus/utils/<topic>`. A topic enters when it knows nothing of the business and two places use it; a topic imports another only through a named exception in `.dependency-cruiser.cjs`. Topics: `connection` (connecting, ready, incompatible, with a 10 s limit per check); `program` (port and address reading, the `/health` server, shutdown on signals); `date-time` (`date-fns`, `Intl`) comes in phase 1.
