@@ -6,7 +6,7 @@ Read `docs/architecture/README.md` before changing structure, permissions or how
 
 ## Phase
 
-The project is built in phases (`docs/architecture/README.md` §6). Phase 0 (the empty skeleton) is built; running it on the Pi is still pending. Build only what the current phase asks for: each feature enters after its own grilling review.
+The project is built in phases (`docs/architecture/README.md` §6). Phase 0 (the empty skeleton) is done and runs on the Pi; next is phase 1. Build only what the current phase asks for: each feature enters after its own grilling review.
 
 ## Setup and commands
 
@@ -22,6 +22,8 @@ Node 22 (`.nvmrc`) with corepack, which installs the pnpm `packageManager` names
 | `pnpm type-check`                   | tsc (tsgo) and vue-tsc in every package      |
 | `pnpm test`                         | Vitest in every package that has tests       |
 | `docker compose up -d --build`      | The three containers as on the Pi            |
+
+Deploying to and checking the Raspberry Pi: `docs/despliegue.md`.
 
 Required gates:
 
