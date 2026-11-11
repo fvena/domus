@@ -62,7 +62,7 @@ Ver [ADR 0001](adr/0001-domus-con-kira-dentro.md) y [ADR 0002](adr/0002-vue-spa-
 
 ## 5. Estructura del repositorio
 
-Ver [ADR 0017](adr/0017-estructura-del-repositorio.md), [ADR 0020](adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md) y [ADR 0018](adr/0018-patrones-de-openclaw-y-hermes.md).
+Ver [ADR 0017](adr/0017-estructura-del-repositorio.md), [ADR 0020](adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md), [ADR 0021](adr/0021-datos-de-los-modulos-y-migraciones.md) y [ADR 0018](adr/0018-patrones-de-openclaw-y-hermes.md).
 
 ```
 domus/
@@ -99,7 +99,9 @@ domus/
 
 Además, `tooling/scripts` comprueba el índice y los enlaces de los ADR, el tamaño de los `AGENTS.md`, y que ningún fichero nombre código anterior al proyecto. Un hook de pre-commit (`.githooks/`) busca secretos con gitleaks en lo que se va a confirmar y pasa lint, formato y tipos; la CI repite todo en cada PR y revisa con gitleaks todos los commits de la rama, porque el repositorio es público. Las normas que piden criterio están en `CODING_STANDARDS.md`.
 
-**Registro de módulos:** lista fija generada en el build, sin carga en tiempo de ejecución, tienda ni instalación. El generador llega en la fase 1a con el primer módulo; hasta entonces no hay lista.
+**Registro de módulos** ([ADR 0021](adr/0021-datos-de-los-modulos-y-migraciones.md)): lista fija, sin carga en tiempo de ejecución, tienda ni instalación. `pnpm modules:generate` la escribe con el `server/index.ts` de cada módulo que no es `testOnly`, se guarda en git y una prueba de `tooling/scripts` comprueba que está al día. Por ahora solo existe la de `api`; la de la web llega con la primera pantalla de un módulo. El módulo de prueba `probe` lleva `testOnly` y queda fuera.
+
+**Datos** ([ADR 0021](adr/0021-datos-de-los-modulos-y-migraciones.md)): un solo fichero SQLite (`domus.db` en `DOMUS_DATA_DIR`) con `better-sqlite3`, WAL y claves ajenas, abierto por `platform`. Los módulos llegan a Drizzle solo por `@domus/module-sdk/db`; cada tabla lleva el id de su módulo como prefijo (`probe_notes`) y las de la plataforma, `platform_`, y las claves ajenas no salen del módulo. Es disciplina comprobada, no una barrera de seguridad. Las migraciones se generan con `pnpm db:generate`, se guardan en git como datos y un ejecutor propio las aplica al arrancar en una sola transacción, tras validar el historial de `platform_migrations`.
 
 **`utils`:** entra solo lo que no sabe nada del negocio y usan al menos dos sitios, y un tema no importa otro sin motivo. Temas: `connection` (los estados conectando, listo e incompatible de los programas que hablan con la api) y `program` (puerto, direcciones, `/health` y parada de los tres programas); en la fase 1 llega `date-time`: fechas en la hora de la casa sobre `date-fns` y formatos sobre `Intl`. No lleva intérprete de lenguaje; el tiempo meteorológico va a su módulo.
 
@@ -140,3 +142,4 @@ El plan por fases, con lo que incluye cada una, cuándo se da por terminada y su
 | [0018](adr/0018-patrones-de-openclaw-y-hermes.md)                       | Patrones de OpenClaw y Hermes                       |
 | [0019](adr/0019-oxlint-y-oxfmt.md)                                      | Oxlint y Oxfmt para lint y formato                  |
 | [0020](adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md) | Composición de la API y comunicación entre procesos |
+| [0021](adr/0021-datos-de-los-modulos-y-migraciones.md)                  | Datos de los módulos y migraciones                  |

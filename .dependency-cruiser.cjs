@@ -49,7 +49,7 @@ module.exports = {
 		{
 			name: "api-reaches-modules-through-server-entry",
 			comment:
-				"apps/api starts each module through its server entry (the registry generated at build time, from phase 1a), never its internals.",
+				"apps/api starts each module through its server entry (the module list written by pnpm modules:generate and kept in git, ADR 0021), never its internals.",
 			severity: "error",
 			from: { path: "^apps/api/" },
 			to: { path: "^modules/", pathNot: "^modules/[^/]+/server/index\\.ts$" },

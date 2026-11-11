@@ -34,6 +34,14 @@ _Evitar_: comando, endpoint.
 La cara pública de un módulo o de la plataforma: qué acciones ofrece y la forma de su entrada y su salida.
 _Evitar_: API, esquema (para el conjunto).
 
+**Migración** (`migration`):
+Un cambio de las tablas de un módulo o de la plataforma, generado con `drizzle-kit`, guardado en git y aplicado una sola vez al arrancar, en orden, y anotado en el historial. Una migración aplicada no se cambia nunca: un cambio nuevo es otra migración.
+_Evitar_: script de base de datos, cambio de esquema a mano.
+
+**Módulo de prueba** (`testOnly`):
+Un módulo con todas las reglas de un módulo que solo existe para las pruebas: la lista de módulos de producción lo deja fuera. El de la fase 1 es `probe`.
+_Evitar_: módulo falso, mock.
+
 **Puerta** (`platform/http`):
 El único punto de entrada a Domus: autentica cada canal y sirve las acciones.
 _Evitar_: gateway, backend.
