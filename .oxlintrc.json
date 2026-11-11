@@ -1,0 +1,8 @@
+{
+	"$schema": "./node_modules/oxlint/configuration_schema.json",
+	"ignorePatterns": ["node_modules", "dist", "tooling/scripts/fixtures"],
+	"options": {
+		"typeAware": true,
+		"typeCheck": true
+	}
+}

@@ -1,0 +1,29 @@
+{
+	"$schema": "https://turbo.build/schema.json",
+	"agentGuidance": false,
+	"globalDependencies": ["**/.env.*local"],
+	"globalEnv": ["*"],
+	"globalPassThroughEnv": ["COREPACK_HOME"],
+	"cacheMaxAge": "7d",
+	"cacheMaxSize": "5GB",
+	"tasks": {
+		"build": {
+			"dependsOn": ["^build"],
+			"outputs": ["dist/**"]
+		},
+		"type-check": {},
+		"clean": {
+			"cache": false
+		},
+		"dev": {
+			"cache": false,
+			"persistent": true
+		},
+		"test": {
+			"outputs": ["coverage/**"]
+		},
+		"@domus/scripts#test": {
+			"cache": false
+		}
+	}
+}

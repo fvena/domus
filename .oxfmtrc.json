@@ -1,0 +1,21 @@
+{
+	"$schema": "./node_modules/oxfmt/configuration_schema.json",
+	"arrowParens": "always",
+	"printWidth": 100,
+	"singleQuote": false,
+	"jsxSingleQuote": false,
+	"semi": true,
+	"trailingComma": "all",
+	"vueIndentScriptAndStyle": true,
+	"sortImports": {
+		"groups": [
+			"builtin",
+			"external",
+			["internal", "subpath"],
+			["parent", "sibling", "index"],
+			"style",
+			"unknown"
+		]
+	},
+	"sortPackageJson": true
+}

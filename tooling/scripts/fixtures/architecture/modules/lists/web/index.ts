@@ -1,0 +1,1 @@
+import "../contracts/index.ts";

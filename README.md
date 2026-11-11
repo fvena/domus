@@ -1,0 +1,10 @@
+# Domus
+
+Organizador familiar privado para una casa, alojado en una Raspberry Pi 5, con Kira (el asistente de voz y texto) dentro.
+
+- Arquitectura y decisiones: [`docs/architecture/README.md`](docs/architecture/README.md).
+- Instrucciones para agentes y comandos: [`AGENTS.md`](AGENTS.md).
+
+Arranque local con Docker: `docker compose up -d --build` y abrir http://localhost:3000.
+
+Licencia MIT.

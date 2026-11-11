@@ -1,0 +1,16 @@
+{
+	"name": "@domus/scripts",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"type-check": "tsc --noEmit",
+		"test": "vitest run"
+	},
+	"devDependencies": {
+		"@domus/tsconfig": "workspace:*",
+		"@types/node": "catalog:",
+		"typescript": "catalog:",
+		"vitest": "catalog:"
+	}
+}

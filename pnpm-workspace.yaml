@@ -1,0 +1,35 @@
+packages:
+    - apps/*
+    - modules/*
+    - packages/*
+    - tooling/*
+
+minimumReleaseAge: 1440
+
+catalog:
+    "@hono/node-server": ^2.1.6
+    "@orpc/client": ^1.16.1
+    "@orpc/contract": ^1.16.1
+    "@orpc/server": ^1.16.1
+    "@types/node": 26.6.6
+    "@vitejs/plugin-vue": ^6.0.10
+    "@vue/test-utils": ^2.5.1
+    dependency-cruiser: ^18.7.2
+    dotenv-cli: ^11.1.0
+    esbuild: ^0.28.2
+    happy-dom: ^21.0.4
+    hono: ^4.13.16
+    oxfmt: 0.75.0
+    oxlint: 1.90.0
+    oxlint-tsgolint: ^7.0.2005
+    tsx: ^4.23.15
+    turbo: ^2.11.10
+    typescript: npm:typescript-native-bridge@6.0.3-bridge.19.tsgo.7.0.2
+    vite: 8.3.5
+    vitest: ^5.1.0
+    vue: 3.5.44
+    vue-tsc: ^3.3.14
+    zod: ^4.6.7
+
+allowBuilds:
+    esbuild: true

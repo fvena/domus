@@ -1,0 +1,23 @@
+{
+	"name": "@domus/utils",
+	"version": "0.0.0",
+	"private": true,
+	"exports": {
+		"./*": "./*/index.ts"
+	},
+	"scripts": {
+		"clean": "git clean -xdf .cache .turbo dist node_modules",
+		"type-check": "tsc --noEmit",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@hono/node-server": "catalog:",
+		"hono": "catalog:"
+	},
+	"devDependencies": {
+		"@domus/tsconfig": "workspace:*",
+		"@types/node": "catalog:",
+		"typescript": "catalog:",
+		"vitest": "catalog:"
+	}
+}
