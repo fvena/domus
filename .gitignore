@@ -41,3 +41,6 @@ node-compile-cache
 # local overrides and agent worktrees
 docker-compose.override.yml
 .claude/worktrees
+
+# a stand-in library the dependency-rule fixtures resolve
+!tooling/scripts/fixtures/architecture/node_modules

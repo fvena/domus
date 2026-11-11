@@ -15,9 +15,7 @@
 	"dependencies": {
 		"@domus/api-client": "workspace:*",
 		"@domus/platform": "workspace:*",
-		"@domus/utils": "workspace:*",
-		"@hono/node-server": "catalog:",
-		"hono": "catalog:"
+		"@domus/utils": "workspace:*"
 	},
 	"devDependencies": {
 		"@domus/test-utils": "workspace:*",

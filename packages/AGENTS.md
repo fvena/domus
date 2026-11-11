@@ -7,7 +7,7 @@ Shared code. Packages never import an app or a module. Each exposes its TypeScri
 - `module-sdk`: the only part of platform a module may use. Its shape is designed in phase 1a.
 - `ui`: the design system, Vue components (phase 2).
 - `i18n`: translation runtime and catalogs.
-- `utils`: one business-free topic per folder, imported as `@domus/utils/<topic>`. A topic enters when it knows nothing of the business and two places use it; a topic imports another only through a named exception in `.dependency-cruiser.cjs`. Topics: `connection` (connecting, ready, incompatible); `date-time` (`date-fns`, `Intl`) comes in phase 1.
+- `utils`: one business-free topic per folder, imported as `@domus/utils/<topic>`. A topic enters when it knows nothing of the business and two places use it; a topic imports another only through a named exception in `.dependency-cruiser.cjs`. Topics: `connection` (connecting, ready, incompatible, with a 10 s limit per check); `program` (port and address reading, the `/health` server, shutdown on signals); `date-time` (`date-fns`, `Intl`) comes in phase 1.
 - `test-utils`: what tests use instead of real infrastructure: the door in process (`createTestHttpHandler`), and from phase 1 the in-memory platform, fake model and fake channel. Only tests import it.
 - `api-client`: `clientFor(contract, transport)`, a thin oRPC link. It holds no contract: callers pass theirs. Authentication and retries belong to the caller.
 

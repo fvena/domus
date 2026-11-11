@@ -66,3 +66,15 @@ jobs:
               run: pnpm install
             - name: Run unit tests
               run: pnpm test
+
+    docker:
+        name: Build the images
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                target: [api, assistant, voice-gateway]
+        steps:
+            - uses: actions/checkout@v4
+            - name: Build ${{ matrix.target }}
+              run: docker build --file docker/Dockerfile --target ${{ matrix.target }} .

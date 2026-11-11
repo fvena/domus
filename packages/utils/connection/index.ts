@@ -3,11 +3,17 @@
 
 export type ConnectionState = "connecting" | "ready" | "incompatible";
 
+/** What a check found: the other side answered in a version this program speaks, or in another. */
+export type CheckResult = "ready" | "incompatible";
+
 export interface WatchOptions {
-	/** Resolves with what the other side answered; throws when it cannot be reached. */
-	check: () => Promise<"ready" | "incompatible">;
+	/**
+	 * Asks the other side once. Throws when it cannot be reached. The signal aborts when the check
+	 * takes too long; the watch stops waiting then even if the check ignores it.
+	 */
+	check: (signal: AbortSignal) => Promise<CheckResult>;
 	onChange?: (state: ConnectionState) => void;
-	/** How to wait; tests pass one that returns at once. */
+	/** How to wait between checks; tests pass one that returns at once. */
 	sleep?: (ms: number) => Promise<void>;
 }
 
@@ -22,8 +28,28 @@ export interface ConnectionWatch {
 const RETRY_DELAYS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
 /** Wait before checking again once it answered, ready or incompatible. */
 const RECHECK_MS = 30_000;
+/** A check that has not answered by then counts as unreachable. */
+const CHECK_TIMEOUT_MS = 10_000;
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+async function checkWithTimeout(check: WatchOptions["check"]): Promise<CheckResult> {
+	const controller = new AbortController();
+	const timer = setTimeout(
+		() => controller.abort(new Error("check timed out")),
+		CHECK_TIMEOUT_MS,
+	);
+	try {
+		return await new Promise<CheckResult>((resolve, reject) => {
+			controller.signal.addEventListener("abort", () => reject(controller.signal.reason), {
+				once: true,
+			});
+			check(controller.signal).then(resolve, reject);
+		});
+	} finally {
+		clearTimeout(timer);
+	}
+}
 
 export function watchConnection({
 	check,
@@ -44,7 +70,7 @@ export function watchConnection({
 		while (!stopped) {
 			let delay: number;
 			try {
-				set(await check());
+				set(await checkWithTimeout(check));
 				failures = 0;
 				delay = RECHECK_MS;
 			} catch {

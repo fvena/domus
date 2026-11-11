@@ -49,7 +49,7 @@ module.exports = {
 		{
 			name: "api-reaches-modules-through-server-entry",
 			comment:
-				"apps/api starts each module through its server entry (the generated registry), never its internals.",
+				"apps/api starts each module through its server entry (the registry generated at build time, from phase 1a), never its internals.",
 			severity: "error",
 			from: { path: "^apps/api/" },
 			to: { path: "^modules/", pathNot: "^modules/[^/]+/server/index\\.ts$" },
@@ -220,7 +220,7 @@ module.exports = {
 	],
 	options: {
 		doNotFollow: { path: "node_modules" },
-		exclude: { path: "(^|/)(node_modules|dist|generated)/" },
+		exclude: { path: "^(apps|packages|modules|tooling)/[^/]+/(dist|generated)/" },
 		tsPreCompilationDeps: true,
 		tsConfig: { fileName: "tsconfig.json" },
 		enhancedResolveOptions: {

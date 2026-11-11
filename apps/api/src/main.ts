@@ -1,3 +1,4 @@
+import { onShutdown } from "@domus/utils/program";
 import { serve } from "@hono/node-server";
 
 import { createApp } from "./app";
@@ -8,6 +9,4 @@ const server = serve({ fetch: createApp(config).fetch, port: config.port }, ({ p
 	console.log(`api listening on port ${port}`);
 });
 
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-	process.on(signal, () => server.close(() => process.exit(0)));
-}
+onShutdown(() => new Promise<void>((resolve) => server.close(() => resolve())));

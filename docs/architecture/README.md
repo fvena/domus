@@ -2,7 +2,7 @@
 
 Domus es el organizador privado de una casa de dos adultos en España, alojado en una Raspberry Pi 5, con Kira (el asistente de voz y texto) dentro del mismo producto. Este documento recoge las decisiones de arquitectura tomadas en grilling el 2026-11-11 (preguntas P1–P55). Cada decisión importante tiene su ADR en [`adr/`](adr/); si este documento y un ADR no coinciden, manda el ADR más reciente, y se corrigen los dos en el mismo commit.
 
-Idioma: documentos y conversación en español; código, identificadores y commits en inglés. El vocabulario compartido está en [`GLOSSARY.md`](../../GLOSSARY.md).
+Idioma: documentos, conversación y el texto que ve la familia en español; código, identificadores, commits y los mensajes de log para quien opera el sistema en inglés. Las instrucciones para agentes (`AGENTS.md`, `docs/agents/`) van en inglés, como el código que describen. El vocabulario compartido está en [`GLOSSARY.md`](../../GLOSSARY.md).
 
 ## 1. Producto y forma de trabajar
 
@@ -97,9 +97,9 @@ domus/
 - `assistant` y `voice-gateway` solo hablan con `api`: no importan `module-sdk`, `ui` ni módulos, y de `platform` solo sus contratos (`@domus/platform/contracts`), igual que `web`. Una regla de alcance lo comprueba también por caminos indirectos.
 - Los contratos son puros (sin Node), y toda importación tiene que resolverse: un paquete no declarado no se cuela.
 
-**Registro de módulos:** lista fija generada en el build, sin carga en tiempo de ejecución, tienda ni instalación.
+**Registro de módulos:** lista fija generada en el build, sin carga en tiempo de ejecución, tienda ni instalación. El generador llega en la fase 1a con el primer módulo; hasta entonces no hay lista.
 
-**`utils`:** entra solo lo que no sabe nada del negocio y usan al menos dos sitios, y un tema no importa otro sin motivo. El primer tema es `date-time`: fechas en la hora de la casa sobre `date-fns` y formatos sobre `Intl`. No lleva intérprete de lenguaje; el tiempo meteorológico va a su módulo.
+**`utils`:** entra solo lo que no sabe nada del negocio y usan al menos dos sitios, y un tema no importa otro sin motivo. Temas: `connection` (los estados conectando, listo e incompatible de los programas que hablan con la api) y `program` (puerto, direcciones, `/health` y parada de los tres programas); en la fase 1 llega `date-time`: fechas en la hora de la casa sobre `date-fns` y formatos sobre `Intl`. No lleva intérprete de lenguaje; el tiempo meteorológico va a su módulo.
 
 **Patrones de OpenClaw y Hermes** (P40): skills como carpetas; cada canal declara su formato; pruebas de escenario con canal falso y modelo falso; una prueba de que el prompt y las tools no cambian entre turnos; un `AGENTS.md` por carpeta con tamaño máximo; la «escalera» de dónde va una funcionalidad nueva (en `AGENTS.md`). No se adoptan tiendas de plugins, proveedores de sobra, «un agent por persona» ni manifiestos enormes.
 

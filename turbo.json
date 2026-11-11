@@ -21,6 +21,9 @@
 		},
 		"test": {
 			"outputs": ["coverage/**"]
+		},
+		"@domus/scripts#test": {
+			"cache": false
 		}
 	}
 }

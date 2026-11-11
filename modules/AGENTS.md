@@ -12,4 +12,4 @@ A module's parts:
 
 A module reaches platform only through `@domus/module-sdk`, and other modules only through their `contracts/`. It may also use `utils` and `i18n`; its `web/` adds `ui` and `api-client`, its `tests/` adds `test-utils`. Data and AI libraries arrive through `module-sdk`. Details and reasons: ADR 0017.
 
-The module registry is a fixed list generated at build time; there is no runtime loading or installing.
+The module registry is a fixed list generated at build time; there is no runtime loading or installing. The generator arrives in phase 1a with the first module.

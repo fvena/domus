@@ -44,7 +44,7 @@ Apps only wire programs together; business logic lands in a module or in platfor
 
 ## Rules
 
-- Code, identifiers and commits in English; docs and user-facing text in Spanish.
+- Code, identifiers, commits and log messages for the operator in English; docs and text the family sees in Spanish. Agent instructions (`AGENTS.md`, `docs/agents/`) in English.
 - Layering is enforced by `.dependency-cruiser.cjs` and proved by `tooling/scripts/architecture.test.ts`. Fix the import; a rule changes only with an ADR.
 - Permission, confirmation and visibility are decided only in `platform/authorization` (ADR 0010).
 - Secrets live outside the repository; runtime data lives in the `api` data volume.

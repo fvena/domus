@@ -21,6 +21,7 @@ catalog:
     hono: ^4.13.16
     oxfmt: 0.75.0
     oxlint: 1.90.0
+    oxlint-tsgolint: ^7.0.2005
     tsx: ^4.23.15
     turbo: ^2.11.10
     typescript: npm:typescript-native-bridge@6.0.3-bridge.19.tsgo.7.0.2

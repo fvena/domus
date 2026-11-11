@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { type ConnectionState, watchConnection } from ".";
 
@@ -63,5 +63,32 @@ describe("watchConnection", () => {
 	it("starts again from one second after a failure that follows an answer", async () => {
 		const { waits } = await script(["down", "down", "ready", "down"]);
 		expect(waits).toEqual([1_000, 2_000, 30_000, 1_000]);
+	});
+
+	describe("a check that never answers", () => {
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it("leaves ready after 10 seconds without an answer, and aborts the check", async () => {
+			vi.useFakeTimers();
+			const signals: AbortSignal[] = [];
+			const states: ConnectionState[] = [];
+			let sleeps = 0;
+			const watch = watchConnection({
+				check: (signal) => {
+					signals.push(signal);
+					return signals.length === 1 ? Promise.resolve("ready") : new Promise(() => {});
+				},
+				onChange: (state) => states.push(state),
+				sleep: async () => {
+					if (++sleeps === 2) watch.stop();
+				},
+			});
+			await vi.advanceTimersByTimeAsync(10_000);
+			await watch.done;
+			expect(states).toEqual(["ready", "connecting"]);
+			expect(signals[1]?.aborted).toBe(true);
+		});
 	});
 });

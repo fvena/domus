@@ -4,14 +4,14 @@ import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { AnyContractRouter, ContractRouterClient } from "@orpc/contract";
 
-type Headers = Record<string, string>;
+type HeaderValues = Record<string, string>;
 
 export interface Transport {
 	/** Where the api listens, such as http://api:3000. In the browser it defaults to the page's origin. */
 	baseUrl?: string | URL;
 	fetch?: (request: Request) => Promise<Response>;
 	/** A function is read on every call, for credentials that change. */
-	headers?: Headers | (() => Headers | Promise<Headers>);
+	headers?: HeaderValues | (() => HeaderValues | Promise<HeaderValues>);
 }
 
 const RPC_PATH = "/api/rpc";

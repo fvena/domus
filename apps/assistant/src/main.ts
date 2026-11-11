@@ -1,12 +1,12 @@
 import { PROTOCOL } from "@domus/platform/contracts";
 import { watchConnection } from "@domus/utils/connection";
-import { serve } from "@hono/node-server";
+import { onShutdown, serveHealth } from "@domus/utils/program";
 
 import { checkApi } from "./api";
-import { createApp } from "./app";
 import { readConfig } from "./config";
 
 const config = readConfig();
+const origin = config.apiUrl.origin;
 
 // Nothing that depends on the api runs unless `api.state` is "ready".
 const api = watchConnection({
@@ -14,21 +14,19 @@ const api = watchConnection({
 	onChange: (state) => {
 		if (state === "incompatible") {
 			console.error(
-				`api at ${config.apiUrl.origin} does not speak protocol ${PROTOCOL}; waiting for a matching version`,
+				`api at ${origin} does not speak protocol ${PROTOCOL}; waiting for a matching version`,
 			);
 		} else {
-			console.log(`api at ${config.apiUrl.origin}: ${state}`);
+			console.log(`api at ${origin}: ${state}`);
 		}
 	},
 });
 
-const server = serve({ fetch: createApp().fetch, port: config.port }, ({ port }) => {
-	console.log(`assistant listening on port ${port}`);
-});
+const closeHealth = serveHealth(config.port, (port) =>
+	console.log(`assistant listening on port ${port}`),
+);
 
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-	process.on(signal, () => {
-		api.stop();
-		server.close(() => process.exit(0));
-	});
-}
+onShutdown(async () => {
+	api.stop();
+	await closeHealth();
+});

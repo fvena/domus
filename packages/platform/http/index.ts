@@ -14,10 +14,10 @@ export interface HttpHandler {
 /** Where RPC procedures live; @domus/api-client calls the same path. */
 const RPC_PREFIX = "/api/rpc";
 
-const os = implement(platformContract);
+const procedures = implement(platformContract);
 
-const router = os.router({
-	status: os.status.handler(() => ({ service: "domus" as const, protocol: PROTOCOL })),
+const router = procedures.router({
+	status: procedures.status.handler(() => ({ service: "domus" as const, protocol: PROTOCOL })),
 });
 
 export function createHttpHandler(): HttpHandler {

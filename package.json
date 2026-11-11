@@ -23,7 +23,7 @@
 		"dotenv-cli": "catalog:",
 		"oxfmt": "catalog:",
 		"oxlint": "catalog:",
-		"oxlint-tsgolint": "^7.0.2005",
+		"oxlint-tsgolint": "catalog:",
 		"turbo": "catalog:",
 		"typescript": "catalog:"
 	},
