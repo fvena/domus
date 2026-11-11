@@ -1,0 +1,61 @@
+# Domus: `docker compose up -d --build`, then open http://localhost:3000.
+# Three containers, each restarted on its own (docs/architecture/adr/0003-procesos-y-contenedores.md).
+# The web app is not a container of its own: the api serves its built files.
+name: domus
+
+x-hardening: &hardening
+    read_only: true
+    tmpfs:
+        - /tmp
+    cap_drop:
+        - ALL
+    security_opt:
+        - no-new-privileges:true
+    restart: unless-stopped
+
+services:
+    api:
+        <<: *hardening
+        build:
+            context: .
+            dockerfile: docker/Dockerfile
+            target: api
+        image: domus-api:local
+        ports:
+            - "3000:3000"
+        volumes:
+            - domus-data:/data
+        environment:
+            TZ: ${TZ:-Europe/Madrid}
+
+    assistant:
+        <<: *hardening
+        build:
+            context: .
+            dockerfile: docker/Dockerfile
+            target: assistant
+        image: domus-assistant:local
+        # No data volume, by construction: Kira reaches Domus only through the api (adr/0005-kira-aislada.md).
+        environment:
+            DOMUS_API_URL: http://api:3000
+            TZ: ${TZ:-Europe/Madrid}
+        depends_on:
+            api:
+                condition: service_healthy
+
+    voice-gateway:
+        <<: *hardening
+        build:
+            context: .
+            dockerfile: docker/Dockerfile
+            target: voice-gateway
+        image: domus-voice-gateway:local
+        environment:
+            DOMUS_API_URL: http://api:3000
+            TZ: ${TZ:-Europe/Madrid}
+        depends_on:
+            api:
+                condition: service_healthy
+
+volumes:
+    domus-data:

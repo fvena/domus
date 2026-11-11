@@ -1,0 +1,9 @@
+{
+	"extends": "@domus/tsconfig/base.json",
+	"compilerOptions": {
+		"types": ["node", "vite/client"],
+		"jsx": "preserve"
+	},
+	"include": ["**/*.ts", "**/*.vue"],
+	"exclude": ["dist", "build", "node_modules"]
+}

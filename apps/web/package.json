@@ -1,0 +1,30 @@
+{
+	"name": "@domus/web",
+	"version": "0.0.0",
+	"private": true,
+	"license": "MIT",
+	"type": "module",
+	"scripts": {
+		"clean": "git clean -xdf .cache .turbo dist node_modules",
+		"dev": "vite",
+		"build": "vite build",
+		"preview": "vite preview",
+		"type-check": "vue-tsc --noEmit",
+		"test": "vitest run",
+		"test:watch": "vitest"
+	},
+	"dependencies": {
+		"vue": "catalog:"
+	},
+	"devDependencies": {
+		"@domus/tsconfig": "workspace:*",
+		"@types/node": "catalog:",
+		"@vitejs/plugin-vue": "catalog:",
+		"@vue/test-utils": "catalog:",
+		"happy-dom": "catalog:",
+		"typescript": "catalog:",
+		"vite": "catalog:",
+		"vitest": "catalog:",
+		"vue-tsc": "catalog:"
+	}
+}

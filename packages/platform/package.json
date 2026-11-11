@@ -1,0 +1,28 @@
+{
+	"name": "@domus/platform",
+	"version": "0.0.0",
+	"private": true,
+	"exports": {
+		".": "./index.ts",
+		"./contracts": "./contracts/index.ts"
+	},
+	"scripts": {
+		"clean": "git clean -xdf .cache .turbo dist node_modules",
+		"type-check": "tsc --noEmit",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@orpc/contract": "catalog:",
+		"@orpc/server": "catalog:",
+		"hono": "catalog:",
+		"zod": "catalog:"
+	},
+	"devDependencies": {
+		"@domus/api-client": "workspace:*",
+		"@domus/tsconfig": "workspace:*",
+		"@hono/node-server": "catalog:",
+		"@types/node": "catalog:",
+		"typescript": "catalog:",
+		"vitest": "catalog:"
+	}
+}

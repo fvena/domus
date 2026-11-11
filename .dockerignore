@@ -1,0 +1,24 @@
+**/node_modules
+**/dist
+**/.turbo
+**/coverage
+.git
+.vitest
+data
+docs
+# Local-only files: secrets, overrides, agent and editor state never belong in a layer.
+.env
+.env.*
+!.env.example
+docker-compose.override.yml
+.claude
+.agents
+.codex
+.cursor
+.vscode
+.idea
+.github
+.DS_Store
+*.pem
+*.key
+*.log

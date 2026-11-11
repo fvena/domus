@@ -1,0 +1,43 @@
+# dependencies
+node_modules
+
+# testing
+coverage
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+.pnpm-debug.log*
+
+# local env files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+**/.env
+
+# turbo
+.turbo
+
+# IDEs
+.idea
+
+# build
+dist
+build
+
+# runtime data
+/data
+
+# typescript
+*.tsbuildinfo
+
+# node compile cache
+node-compile-cache
+
+# local overrides and agent worktrees
+docker-compose.override.yml
+.claude/worktrees

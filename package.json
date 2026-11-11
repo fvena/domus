@@ -1,0 +1,34 @@
+{
+	"name": "domus",
+	"version": "0.0.0",
+	"private": true,
+	"license": "MIT",
+	"type": "module",
+	"scripts": {
+		"build": "dotenv -c -- turbo build",
+		"dev": "dotenv -c -- turbo dev",
+		"start": "pnpm run dev",
+		"lint": "oxlint && depcruise --config .dependency-cruiser.cjs apps packages modules",
+		"lint:fix": "oxlint --fix",
+		"clean": "turbo clean",
+		"format": "oxfmt",
+		"format:check": "oxfmt --check",
+		"type-check": "dotenv -c -- turbo type-check",
+		"test": "dotenv -c -- turbo test"
+	},
+	"devDependencies": {
+		"@domus/tsconfig": "workspace:*",
+		"@types/node": "catalog:",
+		"dependency-cruiser": "catalog:",
+		"dotenv-cli": "catalog:",
+		"oxfmt": "catalog:",
+		"oxlint": "catalog:",
+		"oxlint-tsgolint": "^7.0.2005",
+		"turbo": "catalog:",
+		"typescript": "catalog:"
+	},
+	"engines": {
+		"node": ">=22"
+	},
+	"packageManager": "pnpm@12.4.2"
+}
