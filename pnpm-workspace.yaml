@@ -11,9 +11,11 @@ catalog:
     "@orpc/client": ^1.16.1
     "@orpc/contract": ^1.16.1
     "@orpc/server": ^1.16.1
+    "@types/better-sqlite3": ^9.6.0
     "@types/node": 26.6.6
     "@vitejs/plugin-vue": ^6.0.10
     "@vue/test-utils": ^2.5.1
+    better-sqlite3: ^13.0.3
     dependency-cruiser: ^18.7.2
     dotenv-cli: ^11.1.0
     esbuild: ^0.28.2
@@ -32,4 +34,5 @@ catalog:
     zod: ^4.6.7
 
 allowBuilds:
+    better-sqlite3: true
     esbuild: true

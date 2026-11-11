@@ -1,3 +1,5 @@
-// Platform: the door (http), identity, authorization, audit, jobs and scheduled tasks, events,
-// notifications and storage. Its contracts are a separate entry: @domus/platform/contracts.
+// Platform: the door (http), the database, identity, authorization, audit, jobs and scheduled tasks,
+// events, notifications and storage. createPlatform opens the SQLite file (ADR 0021); the door takes
+// the platform from phase 1a. Its contracts are a separate entry: @domus/platform/contracts.
 export { createHttpHandler, type HttpHandler } from "./http";
+export { createPlatform, type Platform, type PlatformOptions } from "./platform";

@@ -38,6 +38,7 @@ describe("dependency rules", () => {
 		expect(await violations()).toEqual([
 			"api-reaches-modules-through-server-entry: apps/api/src/bad.ts -> modules/lists/server/internal.ts",
 			"apps-hold-no-business-logic: apps/api/src/db.ts -> node_modules/better-sqlite3/index.js",
+			"apps-hold-no-business-logic: apps/api/src/drizzle.ts -> node_modules/drizzle-orm/index.js",
 			"assistant-and-voice-gateway-only-talk-to-api: apps/assistant/src/bad.ts -> modules/lists/contracts/index.ts",
 			"assistant-and-voice-gateway-only-talk-to-api: apps/assistant/src/bad.ts -> packages/platform/src/index.ts",
 			"business-free-packages-stay-business-free: packages/api-client/index.ts -> packages/platform/contracts/index.ts",

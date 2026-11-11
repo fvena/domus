@@ -6,7 +6,8 @@
 	"types": "./index.ts",
 	"scripts": {
 		"clean": "git clean -xdf .cache .turbo dist node_modules",
-		"type-check": "tsc --noEmit"
+		"type-check": "tsc --noEmit",
+		"test": "vitest run"
 	},
 	"dependencies": {
 		"@domus/platform": "workspace:*"
@@ -14,6 +15,7 @@
 	"devDependencies": {
 		"@domus/tsconfig": "workspace:*",
 		"@types/node": "catalog:",
-		"typescript": "catalog:"
+		"typescript": "catalog:",
+		"vitest": "catalog:"
 	}
 }

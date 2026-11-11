@@ -5,7 +5,8 @@
  */
 
 /** Libraries that hold data or run AI. Apps reach them only through platform; modules only through module-sdk. */
-const DATA_AND_AI_LIBS = "node_modules/(better-sqlite3|kysely|ai|@ai-sdk|@anthropic-ai)/";
+const DATA_AND_AI_LIBS =
+	"node_modules/(better-sqlite3|drizzle-orm|kysely|ai|@ai-sdk|@anthropic-ai)/";
 
 /** The one part of platform that the browser, assistant and voice-gateway may import. */
 const PLATFORM_CONTRACTS = "packages/platform/contracts/";

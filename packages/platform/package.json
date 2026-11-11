@@ -14,6 +14,7 @@
 	"dependencies": {
 		"@orpc/contract": "catalog:",
 		"@orpc/server": "catalog:",
+		"better-sqlite3": "catalog:",
 		"hono": "catalog:",
 		"zod": "catalog:"
 	},
@@ -21,6 +22,7 @@
 		"@domus/api-client": "workspace:*",
 		"@domus/tsconfig": "workspace:*",
 		"@hono/node-server": "catalog:",
+		"@types/better-sqlite3": "catalog:",
 		"@types/node": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:"
