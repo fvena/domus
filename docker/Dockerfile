@@ -7,6 +7,10 @@ ARG NODE_VERSION=22
 # on the builder's own platform instead of under emulation for each target.
 FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-trixie-slim AS build
 ENV TURBO_TELEMETRY_DISABLED=1 DO_NOT_TRACK=1
+# better-sqlite3 compiles from source when it installs (node-gyp, no prebuilt binary).
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 make g++ \
+  && rm -rf /var/lib/apt/lists/*
 WORKDIR /repo
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 # Corepack installs the pnpm that package.json's packageManager names.
