@@ -97,7 +97,7 @@ domus/
 - `assistant` y `voice-gateway` solo hablan con `api`: no importan `module-sdk`, `ui` ni módulos, y de `platform` solo sus contratos (`@domus/platform/contracts`), igual que `web`. Una regla de alcance lo comprueba también por caminos indirectos.
 - Los contratos son puros (sin Node), y toda importación tiene que resolverse: un paquete no declarado no se cuela.
 
-Además, `tooling/scripts` comprueba el índice y los enlaces de los ADR, el tamaño de los `AGENTS.md`, y que ningún fichero nombre código anterior al proyecto. Un hook de pre-commit (`.githooks/`) pasa lint, formato y tipos antes de cada commit, y la CI repite todo en cada PR. Las normas que piden criterio están en `CODING_STANDARDS.md`.
+Además, `tooling/scripts` comprueba el índice y los enlaces de los ADR, el tamaño de los `AGENTS.md`, y que ningún fichero nombre código anterior al proyecto. Un hook de pre-commit (`.githooks/`) busca secretos con gitleaks en lo que se va a confirmar y pasa lint, formato y tipos; la CI repite todo en cada PR y revisa con gitleaks todos los commits de la rama, porque el repositorio es público. Las normas que piden criterio están en `CODING_STANDARDS.md`.
 
 **Registro de módulos:** lista fija generada en el build, sin carga en tiempo de ejecución, tienda ni instalación. El generador llega en la fase 1a con el primer módulo; hasta entonces no hay lista.
 
