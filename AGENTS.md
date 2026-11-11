@@ -10,7 +10,7 @@ The project is built in phases (`docs/architecture/README.md` §6). Phase 0 (the
 
 ## Setup and commands
 
-Node 22 (`.nvmrc`) with corepack, which installs the pnpm `packageManager` names. Copy `.env.local.example` to `.env.local`; the root scripts load it through dotenv-cli.
+Node 22 (`.nvmrc`) with corepack, which installs the pnpm `packageManager` names. Copy `.env.local.example` to `.env.local`; the root scripts load it through dotenv-cli. `pnpm install` turns on the pre-commit hook (`.githooks/pre-commit`: lint, format, types); if it is off, run `pnpm run prepare`.
 
 | Command                             | Purpose                                      |
 | ----------------------------------- | -------------------------------------------- |
@@ -44,7 +44,7 @@ Apps only wire programs together; business logic lands in a module or in platfor
 
 ## Rules
 
-- Code, identifiers, commits and log messages for the operator in English; docs and text the family sees in Spanish. Agent instructions (`AGENTS.md`, `docs/agents/`) in English.
+- Code in English; docs and text the family sees in Spanish. The full language rule and the other review-time standards: `CODING_STANDARDS.md`.
 - Layering is enforced by `.dependency-cruiser.cjs` and proved by `tooling/scripts/architecture.test.ts`. Fix the import; a rule changes only with an ADR.
 - Permission, confirmation and visibility are decided only in `platform/authorization` (ADR 0010).
 - Secrets live outside the repository; runtime data lives in the `api` data volume.

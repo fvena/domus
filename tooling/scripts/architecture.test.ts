@@ -1,5 +1,6 @@
-// Proves the rules in .dependency-cruiser.cjs fire: a fixture repository with allowed imports and one
-// forbidden import per rule, cruised with the real rule set. A rule that stops firing fails this test.
+// Proves the rules in .dependency-cruiser.cjs fire: a fixture repository with allowed imports and at
+// least one forbidden import per rule, cruised with the real rules and options. A rule that stops
+// firing, or a new rule without a case here, fails this test.
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
@@ -17,6 +18,7 @@ async function violations(): Promise<string[]> {
 		ruleSet: { forbidden: config.forbidden },
 		validate: true,
 		doNotFollow: options.doNotFollow,
+		exclude: options.exclude,
 		tsPreCompilationDeps: true,
 		enhancedResolveOptions: options.enhancedResolveOptions,
 	});
@@ -24,7 +26,14 @@ async function violations(): Promise<string[]> {
 	return output.summary.violations.map((v) => `${v.rule.name}: ${v.from} -> ${v.to}`).sort();
 }
 
+const ruleNames: string[] = config.forbidden.map((rule: { name: string }) => rule.name);
+
 describe("dependency rules", () => {
+	it("each fire at least once on the fixture", async () => {
+		const fired = new Set((await violations()).map((line) => line.split(":")[0]));
+		expect(ruleNames.filter((name) => !fired.has(name))).toEqual([]);
+	});
+
 	it("flag exactly the forbidden imports of the fixture", async () => {
 		expect(await violations()).toEqual([
 			"api-reaches-modules-through-server-entry: apps/api/src/bad.ts -> modules/lists/server/internal.ts",
