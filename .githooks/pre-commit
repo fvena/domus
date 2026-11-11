@@ -1,7 +1,21 @@
 #!/bin/sh
-# Runs before every commit: the same lint, format and type checks as CI. Tests stay in CI.
-# Skip once with `git commit --no-verify`, only when you know why.
+# Runs before every commit: no secrets in the staged changes, then the same lint, format and type
+# checks as CI. Tests stay in CI. Skip once with `git commit --no-verify`, only when you know why.
 set -e
+
+# The repository is public: a secret has to be stopped here, before it is pushed.
+# gitleaks from PATH (brew install gitleaks), or its Docker image with the same pinned version.
+GITLEAKS_IMAGE=zricethezav/gitleaks:v8.24.3
+if command -v gitleaks >/dev/null 2>&1; then
+	gitleaks git --pre-commit --staged --redact --no-banner .
+elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+	# git in the image refuses a checkout owned by another user unless told it is safe.
+	docker run --rm -v "$PWD:/repo" -w /repo -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0="*" \
+		"$GITLEAKS_IMAGE" git --pre-commit --staged --redact --no-banner /repo
+else
+	echo "pre-commit: cannot scan for secrets: install gitleaks (brew install gitleaks) or start Docker." >&2
+	exit 1
+fi
 
 if command -v pnpm >/dev/null 2>&1; then
 	run() { pnpm "$@"; }

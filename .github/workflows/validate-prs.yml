@@ -9,6 +9,20 @@ env:
     DO_NOT_TRACK: "1"
 
 jobs:
+    secrets:
+        name: Secret scan
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+            # Every commit of the branch, not only the last: the repository is public.
+            - name: Scan with gitleaks
+              run: >-
+                  docker run --rm -v "$PWD:/repo"
+                  -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0="*"
+                  zricethezav/gitleaks:v8.24.3 git /repo --redact --no-banner
+
     lint:
         name: Lint and format check
         runs-on: ubuntu-latest

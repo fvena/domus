@@ -1,6 +1,6 @@
 # Coding standards
 
-Read during review. Mechanical rules live in tooling and are not repeated here: oxlint and oxfmt, the dependency rules (`.dependency-cruiser.cjs`) and the repository checks in `tooling/scripts` (ADR index and links, AGENTS.md caps, no references to code from before the project). This file holds the judgement calls.
+Read during review. Mechanical rules live in tooling and are not repeated here: oxlint and oxfmt, the dependency rules (`.dependency-cruiser.cjs`) the repository checks in `tooling/scripts` (ADR index and links, AGENTS.md caps, no references to code from before the project), and gitleaks for secrets (pre-commit hook and CI). This file holds the judgement calls.
 
 ## Language
 
