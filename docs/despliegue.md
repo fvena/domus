@@ -1,13 +1,13 @@
 # Despliegue en la Raspberry Pi
 
-La Pi se llama `kira`: `kira.local` en casa y `kira.taildd967b.ts.net` por Tailscale. Se entra con `ssh kira` (usuario `fvena`, con `sudo` sin contraseña).
+La Pi se llama `kira`: `kira.local` en casa y `kira.taildd967b.ts.net` por Tailscale. Se entra con `ssh kira`.
 
-| Qué          | Dónde                                                                                                               |
-| ------------ | ------------------------------------------------------------------------------------------------------------------- |
-| Código       | `/home/fvena/domus`, un clon de `fvena/domus` en la rama `main`                                                     |
-| Contenedores | `api`, `assistant` y `voice-gateway`, del proyecto de compose `domus`                                               |
-| Datos        | el volumen `domus_domus-data`, montado solo en `api`                                                                |
-| Acceso       | `http://kira.local:3000` en casa; `https://kira.taildd967b.ts.net:8443` por Tailscale (`tailscale serve` → `:3000`) |
+| Qué          | Dónde                                                                                                                                 |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Código       | `/home/fvena/domus`, un clon de `fvena/domus` en la rama `main`                                                                       |
+| Contenedores | `api`, `assistant` y `voice-gateway`, del proyecto de compose `domus`                                                                 |
+| Datos        | el volumen `domus_domus-data`, montado solo en `api`                                                                                  |
+| Acceso       | `http://kira.local:3000` en casa; `https://kira.taildd967b.ts.net` por Tailscale, solo dentro de la red (`tailscale serve` → `:3000`) |
 
 Las imágenes se construyen en la propia Pi, que es arm64, en unos 30 segundos. Docker arranca con el sistema y los contenedores tienen `restart: unless-stopped`, así que vuelven solos tras un corte de luz.
 
