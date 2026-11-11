@@ -3,6 +3,7 @@
 Written in Spanish, except `agents/`.
 
 - `agents/`: instructions for the agent skills (issue tracker, triage labels, domain docs). In English, like the `AGENTS.md` files.
+- `plan.md`: the plan by phases, the only place it is written: what each includes, when it is done, its state. Update a phase's state there when it changes.
 - `despliegue.md`: how the Raspberry Pi runs Domus, and how to update and check it. Keep it in step with what is really on the Pi.
 - `architecture/README.md`: the architecture in one document, with the index of ADRs.
 - `architecture/adr/NNNN-slug.md`: one decision each, in the shape of the existing ones: a title, one short paragraph with the decision and its reason (a few when the decision has several parts), then the date and the grilling questions it comes from.

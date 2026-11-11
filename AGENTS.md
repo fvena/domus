@@ -6,7 +6,7 @@ Read `docs/architecture/README.md` before changing structure, permissions or how
 
 ## Phase
 
-The project is built in phases (`docs/architecture/README.md` §6). Phase 0 (the empty skeleton) is done and runs on the Pi; next is phase 1. Build only what the current phase asks for: each feature enters after its own grilling review.
+The project is built in phases. `docs/plan.md` is the only source of the plan: what each phase includes, when it is done, and its state. Build only what the current phase asks for: each feature enters after its own grilling review.
 
 ## Setup and commands
 
