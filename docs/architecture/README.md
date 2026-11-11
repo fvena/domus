@@ -109,18 +109,7 @@ Además, `tooling/scripts` comprueba el índice y los enlaces de los ADR, el tam
 
 ## 6. Fases
 
-0. **Esqueleto.** Herramientas, reglas de dependencias, CI y Docker con los programas vacíos; las decisiones en `docs/architecture` y en los ADR; `AGENTS.md`. Terminada cuando las comprobaciones pasan y una app vacía corre en la Pi.
-1. **Núcleo.** 1a base de datos y módulos; 1b acciones; 1c identidad y autorización; 1d segundo plano (cola, tareas programadas, eventos en directo, avisos, archivos); 1e llaves de API. Terminada cuando un módulo de prueba cubre todos los casos de permiso, confirmación y visibilidad.
-2. **Sistema de diseño.** Grilling del aspecto; componentes Vue, plantillas, estructura de la app, claro/oscuro, PWA.
-3. **Personas, cuentas y aparatos.** Inicio de sesión, perfiles y permisos, tabla de la IA, emparejar aparatos.
-4. **Módulo piloto: listas y compra.** Ciclo completo: revisión → pantallas → servidor y web → pruebas → Pi.
-5. **Kira básica.** 5a puerta de la conversación (chat en la app y Telegram); 5b runtime con dos motores, ventanilla única de tools, confirmaciones, skills, consumo por conversación, escenarios; 5c voz (satélites, STT/TTS, quién habla, huellas). Terminada cuando «añade leche» desde la cocina reconoce a quien habla, pide confirmación y aparece en el móvil.
-6. **Los demás módulos, uno a uno.** Calendario (con «compartir con Kira»), tareas de casa, cocina y menú, tablón, documentos, Home Assistant… El orden se decide al llegar.
-7. **Memoria de Kira.**
-8. **Especialistas.** El entrenador primero, con AimHarder.
-9. **Iniciativa y domótica por voz.**
-
-En paralelo, desde ya: una prueba corta para ver si el reconocimiento de quién habla distingue a Paco de Rocío en la cocina. Es el mayor riesgo del proyecto (P55).
+El plan por fases, con lo que incluye cada una, cuándo se da por terminada y su estado, está en [`docs/plan.md`](../plan.md).
 
 ## 7. Abierto
 
