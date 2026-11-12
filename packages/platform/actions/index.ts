@@ -41,13 +41,14 @@ import {
 	type AreaPolicy,
 	type AuthorizationRequest,
 	type Authorizer,
+	type Decision,
 	decisionOf,
 	isVerified,
 	newOwnership,
 	type VerifiedContext,
 	visibleTo,
 } from "../authorization";
-import { checkTransition, editableTo } from "../authorization/writes";
+import { checkTransition, editableTo, type RecordArea } from "../authorization/writes";
 import { answeringWith, type ConfirmationCall } from "./answering";
 import type { Capture, CapturedTransition } from "./capture";
 import { type ConfirmationTimes, type Confirmations, type NewPending } from "./confirmations";
@@ -275,11 +276,7 @@ export function createActions({
 	 * whatever it opened rolled back.
 	 */
 	function authorize(request: AuthorizationRequest): void {
-		const decision = decisionOf(authorizer, request);
-		if (decision === "confirm") throw new ConfirmationNeeded(false);
-		if (decision === "confirm-in-context") throw new ConfirmationNeeded(true);
-		if (decision === "step-up") throw stepUpRequired();
-		if (decision !== "allow") throw new ORPCError("FORBIDDEN");
+		ANSWERS[decisionOf(authorizer, request)]();
 	}
 
 	/**
@@ -292,7 +289,7 @@ export function createActions({
 			return operation();
 		} catch (error) {
 			if (!(error instanceof ConfirmationNeeded)) throw error;
-			contextOnly = error.contextOnly;
+			contextOnly = error.confirmedIn === "context-only";
 		}
 		const id = connection.transaction(() => {
 			const { kind, origin, fingerprint, key } = pending;
@@ -313,13 +310,12 @@ export function createActions({
 
 	/** Runs a handler; only an error its contract declares leaves as it is. */
 	function runHandler(parts: ModuleParts, actor: Actor, input: unknown, now: number): unknown {
-		/** The policy of one of the module's owned tables; any other table is a mistake of the handler. */
-		const areaOf = (table: OwnedTable): AreaPolicy => {
+		/** The area of one of the module's owned tables; any other table is a mistake of the handler. */
+		const areaOf = (table: OwnedTable): RecordArea => {
 			const area = parts.ownedTables.get(table);
 			if (!area) throw new Error("not an owned table of this module");
 			return area;
 		};
-		let denial: ORPCError<string, unknown> | undefined;
 		let outcome: unknown;
 		try {
 			outcome = parts.handler({
@@ -332,15 +328,13 @@ export function createActions({
 					areaOf(table);
 					return visibleTo(table, actor.account);
 				},
-				editable: (table) => {
-					const area = { id: ownedTableOf(table)?.area ?? "", policy: areaOf(table) };
-					return editableTo(table, actor.account, area, view);
-				},
-				forbidden: () => (denial = new ORPCError("FORBIDDEN")),
-				ownership: (table) => newOwnership(actor.account, areaOf(table).defaultVisibility),
+				editable: (table) => editableTo(table, actor.account, areaOf(table), view),
+				forbidden: () => new HandlerForbidden(),
+				ownership: (table) =>
+					newOwnership(actor.account, areaOf(table).policy.defaultVisibility),
 			});
 		} catch (error) {
-			if (denial !== undefined && error === denial) throw error;
+			if (error instanceof HandlerForbidden) throw error;
 			throw declaredOrInternal(parts.errorMap, error);
 		}
 		// An async handler, which its type forbids: what it would do later falls outside the transaction.
@@ -428,10 +422,7 @@ export function createActions({
 			},
 			() =>
 				once(
-					actor,
-					idempotencyKey,
-					fingerprint,
-					proof,
+					{ actor, idempotencyKey, fingerprint, proof },
 					// A repeat is authorized again, its proof included: the one its write used still counts.
 					(earlier) =>
 						requestWith(
@@ -489,10 +480,7 @@ export function createActions({
 			},
 			() =>
 				once(
-					actor,
-					idempotencyKey,
-					fingerprint,
-					proof,
+					{ actor, idempotencyKey, fingerprint, proof },
 					// A repeated undo is authorized with the inverse its own entry ran, never with the content of the entry
 					// it undid, whose annotation gives only the context. The inverse's input is its own entry's content,
 					// so once that expired the request goes without it.
@@ -556,10 +544,7 @@ export function createActions({
 	 * the earlier entry. A new key goes to `fresh`, which authorizes, runs and logs.
 	 */
 	function once(
-		actor: Actor,
-		idempotencyKey: string | undefined,
-		fingerprint: string,
-		proof: string | undefined,
+		{ actor, idempotencyKey, fingerprint, proof }: KeyedWrite,
 		repeated: (earlier: NumberedEntry) => AuthorizationRequest,
 		fresh: (idempotencyKey: string) => WriteReceipt,
 	): WriteOutcome {
@@ -726,20 +711,20 @@ interface ModuleParts {
 	readonly db: ModuleDatabase<ModuleSchema>;
 	/** The errors its contract declares: the only ones its handler's throws leave with. */
 	readonly errorMap: ErrorMap;
-	/** The owned tables of its module, with the policy of each one's area. */
-	readonly ownedTables: ReadonlyMap<OwnedTable, AreaPolicy>;
+	/** The owned tables of its module, with each one's area. */
+	readonly ownedTables: ReadonlyMap<OwnedTable, RecordArea>;
 }
 
-/** The owned tables of a module, which `checkModules` has accepted, each with the policy of its area. */
+/** The owned tables of a module, which `checkModules` has accepted, each with its area. */
 function ownedTablesOf(
 	module: ModuleDefinition,
 	areas: ReadonlyMap<string, AreaPolicy>,
-): ReadonlyMap<OwnedTable, AreaPolicy> {
-	const owned = new Map<OwnedTable, AreaPolicy>();
+): ReadonlyMap<OwnedTable, RecordArea> {
+	const owned = new Map<OwnedTable, RecordArea>();
 	for (const value of Object.values(module.schema)) {
 		const info = ownedTableOf(value);
-		const area = info && areas.get(info.area);
-		if (area) owned.set(value as OwnedTable, area);
+		const policy = info && areas.get(info.area);
+		if (info && policy) owned.set(value as OwnedTable, { id: info.area, policy });
 	}
 	return owned;
 }
@@ -758,13 +743,51 @@ function guarded<T>(operation: () => T): T {
 	}
 }
 
+/** A write as {@link once} keys it: who asks, under which key, for which operation, with which proof. */
+interface KeyedWrite {
+	readonly actor: Actor;
+	readonly idempotencyKey: string | undefined;
+	readonly fingerprint: string;
+	readonly proof: string | undefined;
+}
+
 /**
- * Authorization asked for confirmation: whatever was opened rolls back and the operation waits. `contextOnly`
- * when only the channel `contexto` may confirm it, inside its window (the shared device rule).
+ * Where a pending confirmation may be answered: by the app or in context, or `context-only`, by the channel
+ * `contexto` inside its window (the shared device rule).
+ */
+type ConfirmedIn = "app-or-context" | "context-only";
+
+/**
+ * Authorization asked for confirmation: whatever was opened rolls back and the operation waits, to be answered
+ * where `confirmedIn` says.
  */
 class ConfirmationNeeded extends Error {
-	constructor(readonly contextOnly: boolean) {
+	constructor(readonly confirmedIn: ConfirmedIn) {
 		super("confirmation needed");
+	}
+}
+
+/** What the path does with each decision of authorization: go on, or throw what stops the operation. */
+const ANSWERS: Readonly<Record<Decision, () => void>> = {
+	allow: () => undefined,
+	deny: () => {
+		throw new ORPCError("FORBIDDEN");
+	},
+	confirm: () => {
+		throw new ConfirmationNeeded("app-or-context");
+	},
+	"confirm-in-context": () => {
+		throw new ConfirmationNeeded("context-only");
+	},
+	"step-up": () => {
+		throw stepUpRequired();
+	},
+};
+
+/** The denial a handler throws through `forbidden()`, the one error of its own that leaves as it is. */
+class HandlerForbidden extends ORPCError<"FORBIDDEN", undefined> {
+	constructor() {
+		super("FORBIDDEN");
 	}
 }
 

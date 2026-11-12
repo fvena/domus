@@ -103,12 +103,17 @@ export interface AccessView {
 	area(id: string): AreaPolicy | undefined;
 }
 
+/** Every decision, the one list the type and the fail-closed check of {@link decisionOf} come from. */
+const DECISIONS = ["allow", "deny", "confirm", "confirm-in-context", "step-up"] as const;
+
 /**
  * Allow, deny, ask the person to confirm first (a pending confirmation), or ask for a step-up proof of this
  * exact operation (GLOSSARY: comprobante). `confirm-in-context` asks for a confirmation that only the channel
  * `contexto` answers, inside its window, and that expires when the window closes: the shared device rule's.
  */
-export type Decision = "allow" | "deny" | "confirm" | "confirm-in-context" | "step-up";
+export type Decision = (typeof DECISIONS)[number];
+
+const KNOWN_DECISIONS: ReadonlySet<unknown> = new Set(DECISIONS);
 
 export type Authorizer = (request: AuthorizationRequest) => Decision;
 
@@ -237,13 +242,8 @@ export function isAllowed(authorizer: Authorizer, request: AuthorizationRequest)
 /** The authorizer's decision, failing closed: a throw or any answer it does not know denies. */
 export function decisionOf(authorizer: Authorizer, request: AuthorizationRequest): Decision {
 	try {
-		const decision = authorizer(request);
-		return decision === "allow" ||
-			decision === "confirm" ||
-			decision === "confirm-in-context" ||
-			decision === "step-up"
-			? decision
-			: "deny";
+		const decision: unknown = authorizer(request);
+		return KNOWN_DECISIONS.has(decision) ? (decision as Decision) : "deny";
 	} catch {
 		return "deny";
 	}

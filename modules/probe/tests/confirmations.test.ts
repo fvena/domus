@@ -72,6 +72,32 @@ describe("asking for confirmation", () => {
 		).not.toBe(first);
 	});
 
+	it("answers another conversation of the same session its own pending read, which it can confirm", async () => {
+		const { test } = household();
+		await using _ = test;
+		test.prepare.delegation("ana", "probe", "read", "confirm");
+		const onKitchen = (conversation: string) =>
+			test.context("ana", { ...IN_CONVERSATION, session: "kitchen", conversation });
+
+		const first = pendingFrom(() => test.invoke(onKitchen("c1"), "probe.listNotes"));
+		const second = pendingFrom(() => test.invoke(onKitchen("c2"), "probe.listNotes"));
+
+		expect(second).not.toBe(first);
+		expect(pendingFrom(() => test.invoke(onKitchen("c1"), "probe.listNotes"))).toBe(first);
+		expect(test.confirm(onKitchen("c2"), second)).toEqual([]);
+	});
+
+	it("never answers the same pending read to two reads without session or conversation", async () => {
+		const { test } = household();
+		await using _ = test;
+		test.prepare.delegation("ana", "probe", "read", "confirm");
+		const empty = test.context("ana", { ...IN_CONVERSATION, conversation: "" });
+
+		const first = pendingFrom(() => test.invoke(empty, "probe.listNotes"));
+
+		expect(pendingFrom(() => test.invoke(empty, "probe.listNotes"))).not.toBe(first);
+	});
+
 	it("answers key-reused to the same key with another input or another action", async () => {
 		const { test, kira } = household();
 		await using _ = test;

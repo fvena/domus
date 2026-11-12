@@ -329,6 +329,26 @@ describe("revoking", () => {
 		expect(test.hasSession(phone.session)).toBe(true);
 	});
 
+	it("answers a device it cannot revoke as one that does not exist, before asking for a proof", async () => {
+		await using test = await household();
+		const kitchen = test.prepare.session(test.deviceAccount);
+		const luis = test.prepare.session("luis");
+		const paco = test.context("paco");
+		const ana = test.context("ana");
+
+		for (const [context, session] of [
+			[paco, luis.session],
+			[paco, "no-such-session"],
+			[ana, kitchen.session],
+		] as const)
+			expect(() => test.revokeDevice(context, session, { idempotencyKey: "v1" })).toThrow(
+				notFound,
+			);
+		expect(test.hasSession(kitchen.session)).toBe(true);
+		expect(test.hasSession(luis.session)).toBe(true);
+		expect(test.log()).toEqual([]);
+	});
+
 	it("is denied with an identity proven by voice or by the device", async () => {
 		await using test = await household();
 		const kitchen = test.prepare.session(test.deviceAccount);
@@ -346,6 +366,34 @@ describe("revoking", () => {
 });
 
 describe("proofs and the password", () => {
+	it("ends a used proof too, so a repeat with it asks for a new one after the password changes", async () => {
+		await using test = await household();
+		const paco = test.context("paco");
+		const toNone = { account: "ana", area: "probe", level: "none" } as const;
+		const proof = await proofOf(test, paco, "setPermission", toNone);
+		test.setPermission(paco, toNone, { idempotencyKey: "p1", proof });
+		expect(test.setPermission(paco, toNone, { idempotencyKey: "p1", proof })).toMatchObject({
+			entry: 1,
+		});
+
+		const browser = test.browser();
+		expect((await browser.signIn("paco@domus.test", PASSWORD)).status).toBe(200);
+		const response = await browser.fetch(
+			new Request("http://domus.test/api/rpc/password/change", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					json: { currentPassword: PASSWORD, newPassword: "a brand new passphrase" },
+				}),
+			}),
+		);
+		expect(response.status).toBe(200);
+
+		expect(() => test.setPermission(paco, toNone, { idempotencyKey: "p1", proof })).toThrow(
+			stepUp,
+		);
+	});
+
 	it("ends every proof of the account when its password changes, also one of a session it keeps", async () => {
 		await using test = await household();
 		const kitchen = test.prepare.session(test.deviceAccount);

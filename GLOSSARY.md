@@ -60,6 +60,10 @@ _Evitar_: compartido, nivel de acceso.
 Lo que anota, durante una escritura, cada cambio de fila de las tablas con dueño (crear, editar, borrar), para comprobar antes de confirmarla que respeta el dueño y la visibilidad y que el manejador declaró todo lo que tocó. Si algo falla, la escritura entera se revierte. Las tablas sin dueño no se capturan.
 _Evitar_: auditoría, triggers (para el conjunto).
 
+**Bloqueo referencial** (`referential block`):
+La única excepción a que lo oculto no existe: un borrado puede responder que lo impiden registros que dependen del que se borra, aunque alguno no se vea, solo a quien ya ve ese registro y puede borrarlo. La respuesta dice que algo lo impide y nada más: ni cuántos, ni cuáles, ni de quién.
+_Evitar_: borrado en cascada, restricción de clave ajena.
+
 **Confirmación pendiente** (`pending confirmation`):
 Una operación exacta que la autorización ha detenido hasta que su persona diga que sí. Caduca, se usa como mucho una vez y no la confirma otra persona ni otra conversación.
 _Evitar_: aprobación, propuesta.

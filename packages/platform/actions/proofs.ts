@@ -2,7 +2,7 @@
 // `platform_proofs`. A proof is random and only its SHA-256 is stored. It is bound to the account, the session
 // and the device it was asked from and to the operation's fingerprint, it is good once and for five minutes, and
 // it is used inside the transaction of the operation it proves, so an operation that rolls back leaves it unused.
-// Revoking its session, revoking its device or changing the password ends it. Prepared statements on the one
+// Revoking its session or its device ends it while unused; changing the password ends it even once used. Prepared statements on the one
 // connection, synchronous, like the path of the actions that checks them.
 import { createHash, randomBytes } from "node:crypto";
 
@@ -129,11 +129,14 @@ export function sessionLives(connection: Database.Database, session: string): bo
 	);
 }
 
-/** Ends every proof of the account still unused, as changing its password does, inside the caller's transaction. */
+/**
+ * Ends every proof of the account, unused or already used, as changing its password does, inside the caller's
+ * transaction: a used one no longer acknowledges a repeat of its write either.
+ */
 export function endProofsOf(connection: Database.Database, account: string): void {
 	connection
 		.prepare(
-			"UPDATE platform_proofs SET state = 'ended' WHERE account = ? AND state = 'issued'",
+			"UPDATE platform_proofs SET state = 'ended' WHERE account = ? AND state IN ('issued', 'used')",
 		)
 		.run(account);
 }

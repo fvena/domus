@@ -66,8 +66,8 @@ export interface Confirmations {
 	/** The write waiting under the actor's key, whatever its state: a key names one operation. */
 	findWrite(actor: Actor, key: string): PendingConfirmation | undefined;
 	/**
-	 * A read still waiting with this fingerprint, for the same account and via, from the same session or, without
-	 * one, the same conversation.
+	 * A read still waiting with this fingerprint, for the same account and via, born where `origin` can answer it:
+	 * the same session and, when there is a conversation, the same one too. Two empty conversations never match.
 	 */
 	findRead(
 		origin: VerifiedContext,
@@ -138,14 +138,7 @@ export function createConfirmations(
 			reads
 				.all(origin.account, origin.via ?? null, fingerprint, now)
 				.map((row) => pendingOf(row))
-				.find(
-					(pending) =>
-						pending !== undefined &&
-						(origin.session === undefined
-							? pending.origin.session === undefined &&
-								pending.origin.conversation === origin.conversation
-							: pending.origin.session === origin.session),
-				),
+				.find((pending) => pending !== undefined && sameOrigin(pending.origin, origin)),
 		create: ({ kind, operation, fingerprint, key, origin, contextOnly = false }, now) => {
 			const id = randomId();
 			// Bound to its session only when that session is a real one: revoking it then ends this one.
@@ -179,6 +172,18 @@ export function createConfirmations(
 			settle.run("rejected", null, id);
 		},
 	};
+}
+
+/**
+ * A pending read born in `born` is answerable from `now`: the same session, if any, and the same conversation
+ * when there is one; without session it needs a conversation, since two empty ones never match (ADR 0023).
+ */
+function sameOrigin(born: Origin, now: VerifiedContext): boolean {
+	const conversation = now.conversation === "" ? undefined : now.conversation;
+	const bornIn = born.conversation === "" ? undefined : born.conversation;
+	if (born.session !== now.session) return false;
+	if (conversation === undefined) return now.session !== undefined && bornIn === undefined;
+	return bornIn === conversation;
 }
 
 function pendingOf(row: Row | undefined): PendingConfirmation | undefined {

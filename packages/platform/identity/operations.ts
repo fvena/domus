@@ -54,6 +54,27 @@ export function platformOperations(
 	/** Whose session it is: its owner, or, when there is none, the account that asks, which then finds nothing. */
 	const sessionSubject = ({ session }: { session: string }, context: VerifiedContext) =>
 		sessionById(session)?.account ?? context.account;
+	/**
+	 * The session the input names, when `context` may reach it and `admits` its owner. One that does not exist and
+	 * one out of reach answer the same, before anything asks for a proof: nothing tells them apart.
+	 */
+	const reachableSession =
+		(message: string, admits: (account: string) => boolean = () => true) =>
+		({ session }: { session: string }, context: VerifiedContext) => {
+			const found = sessionById(session);
+			if (
+				!found ||
+				!admits(found.account) ||
+				!reachesSettingsOf(view, context.account, found.account)
+			)
+				throw new ORPCError("NOT_FOUND", { message });
+			return found;
+		};
+	const ownSession = reachableSession("no such session");
+	const deviceSession = reachableSession(
+		"no device of the device account",
+		(account) => account === deviceAccount.get(),
+	);
 
 	return [
 		operation({
@@ -93,13 +114,8 @@ export function platformOperations(
 			sensitive: "sessions",
 			inputSchema: SENSITIVE_INPUTS.revokeSession,
 			subject: sessionSubject,
-			// One that does not exist and one out of reach (another account's, but the device account's for the
-			// admin) answer the same, before anything asks for a proof: nothing tells them apart.
-			find: ({ session }, context) => {
-				const found = sessionById(session);
-				if (!found || !reachesSettingsOf(view, context.account, found.account))
-					throw new ORPCError("NOT_FOUND", { message: "no such session" });
-			},
+			// Another account's is out of reach, but the device account's for the admin.
+			find: ownSession,
 			run: ({ session }, context) => {
 				if (session === context.session)
 					throw new ORPCError("BAD_REQUEST", {
@@ -115,12 +131,10 @@ export function platformOperations(
 			sensitive: "sessions",
 			inputSchema: SENSITIVE_INPUTS.revokeDevice,
 			subject: sessionSubject,
-			run: ({ session }) => {
-				const found = sessionById(session);
-				if (!found || found.account !== deviceAccount.get())
-					throw new ORPCError("NOT_FOUND", {
-						message: "no device of the device account",
-					});
+			// Only a session of the device account, and only for the admin.
+			find: deviceSession,
+			run: (input, context) => {
+				const found = deviceSession(input, context);
 				// Every session of that device, whoever's, and what was asked from it; then the device itself, so
 				// its cookie names none and a new sign-in there starts a new one.
 				const ended = connection

@@ -85,15 +85,18 @@ export class SessionGoneError extends Error {
 	}
 }
 
-/** Whether `password` is the account's current one. */
-export async function isCurrentPassword(
+/**
+ * The stored hash `password` was verified against, when it is the account's current one; `undefined` when it is
+ * not or the account has none. Read the hash again later to tell whether the password changed in between.
+ */
+export async function verifiedPasswordHash(
 	connection: Database.Database,
 	account: string,
 	password: string,
-): Promise<boolean> {
+): Promise<string | undefined> {
 	const hash = passwordHashOf(connection, account);
-	if (!hash) return false;
-	return verifyPassword({ hash, password });
+	if (!hash) return undefined;
+	return (await verifyPassword({ hash, password })) ? hash : undefined;
 }
 
 /**

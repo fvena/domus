@@ -110,7 +110,7 @@ Al escribir, los triggers temporales comprueban que nadie se salta las reglas de
     - Cambiar una contraseña con el comando revoca todas las sesiones de la cuenta.
     - El núcleo del comando es una función que recibe la plataforma, una forma de pedir el secreto y una salida. El envoltorio de terminal no tiene lógica.
 - **Cambiar la propia contraseña desde la app** es una operación de la plataforma, no una acción. Pide la contraseña actual y conserva solo la sesión desde la que se hace.
-- Los dos caminos invalidan todos los comprobantes y todas las confirmaciones pendientes de la cuenta.
+- Los dos caminos invalidan todos los comprobantes, también los ya usados, y todas las confirmaciones pendientes de la cuenta.
 
 ### Aparato y sesión (Q8, Q17, Q21)
 
@@ -123,6 +123,7 @@ Al escribir, los triggers temporales comprueban que nadie se salta las reglas de
     - Revocar otra sesión mía: pide comprobante.
     - Revocar las sesiones de la cuenta de aparato: solo el admin, con comprobante.
     - Revocar un aparato de la cuenta de aparato: solo el admin, con comprobante. Cierra todas las sesiones de ese aparato y caducan sus pendientes y comprobantes. Es distinto de revocar mis sesiones en un navegador, que no toca las de otras cuentas.
+    - Una sesión o un aparato que no existe y uno que no se puede revocar (de otra cuenta, o de la cuenta de aparato para quien no es admin) responden igual, «no encontrado», antes de pedir el comprobante.
 - Al revocar una sesión caducan con ella las confirmaciones pendientes y los comprobantes nacidos en esa sesión.
 - El emparejamiento con código y las credenciales de los satélites son de la fase 3.
 
@@ -248,7 +249,7 @@ Al escribir, los triggers temporales comprueban que nadie se salta las reglas de
 
     Después se responde `CONFIRMATION_REQUIRED` con el id.
 
-- **La misma petición, repetida, devuelve la misma pendiente.** Una escritura se reconoce por su cuenta, `via` y clave, con la misma huella. Una lectura, por su huella y su sesión o conversación de origen. Con la misma clave y otra huella, el conflicto es `key-reused`.
+- **La misma petición, repetida, devuelve la misma pendiente.** Una escritura se reconoce por su cuenta, `via` y clave, con la misma huella. Una lectura, por su huella y su sesión o conversación de origen, y solo donde se puede responder: con conversación, la misma sesión (si la hay) y la misma conversación; sin conversación, la misma sesión. Dos conversaciones vacías nunca coinciden, y otra conversación de la misma sesión recibe su propia pendiente. Con la misma clave y otra huella, el conflicto es `key-reused`.
 - **Confirmar** es una operación de la plataforma que recibe el id. El canal lo acredita la puerta:
     - Por `contexto` hace falta el mismo aparato, la misma conversación (no vacía) y la ventana abierta. En la 1c no se llega por HTTP: solo se prueba con un contexto sintético.
     - Por `app` hace falta la misma cuenta representada, desde cualquiera de sus sesiones vigentes.
@@ -280,7 +281,7 @@ Al escribir, los triggers temporales comprueban que nadie se salta las reglas de
     - revocar sesiones de la cuenta de aparato;
     - cualquier acción de nivel `manage`.
 - **Pedir un comprobante** es una operación de la plataforma. Recibe la contraseña y la operación que se quiere hacer (acción y entrada, o la operación de la plataforma con su entrada). Calcula la huella y devuelve un comprobante aleatorio ligado a la cuenta, la sesión, el aparato y esa huella, de un solo uso y válido 5 minutos. En la base solo se guarda su hash.
-- **Usarlo.** La operación sensible lleva el comprobante junto a su petición. Se valida y se consume en la misma transacción que la operación, así que si la operación se revierte, el comprobante sigue sin usar. Un reintento idempotente de una escritura ya hecha no gasta un comprobante nuevo: devuelve el acuse tras volver a autorizar, comprobante incluido.
+- **Usarlo.** La operación sensible lleva el comprobante junto a su petición. Se valida y se consume en la misma transacción que la operación, así que si la operación se revierte, el comprobante sigue sin usar. Un reintento idempotente de una escritura ya hecha devuelve el acuse tras volver a autorizar, comprobante incluido: vale el mismo comprobante que usó la escritura, y si trae uno nuevo y válido, ese se gasta y queda enlazado con la entrada anterior. Tras cambiar la contraseña, ni siquiera el comprobante ya usado sirve para el reintento: responde `STEP_UP_REQUIRED`.
 - Si falta, sobra o no coincide (otra operación, otra sesión, caducado o ya usado), la respuesta es `STEP_UP_REQUIRED`.
 - Ni la contraseña ni el comprobante entran en una pendiente, en el registro ni en ningún mensaje de error. Una operación sensible que además pide confirmación exige el comprobante al confirmar, no al pedirla.
 

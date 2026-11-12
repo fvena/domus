@@ -5,13 +5,12 @@
 // synchronous transaction that checks the password checked is still the current one. Neither the password nor
 // the proof is ever logged or echoed.
 import { ORPCError } from "@orpc/server";
-import { verifyPassword } from "better-auth/crypto";
 import type Database from "better-sqlite3";
 
 import type { Actions, Clock, ProvenOperation } from "../actions";
 import { type Proofs, sessionLives } from "../actions/proofs";
 import { isVerified, type VerifiedContext } from "../authorization";
-import { passwordHashOf } from "./passwords";
+import { passwordHashOf, verifiedPasswordHash } from "./passwords";
 
 export interface ProofIssuer {
 	readonly connection: Database.Database;
@@ -57,9 +56,8 @@ export async function requestProof(
 	const fingerprint = actions.fingerprintOf(operation);
 	const { session } = context;
 	const bound = session !== undefined && sessionLives(connection, session);
-	const checked = passwordHashOf(connection, context.account);
-	if (checked === undefined || !(await verifyPassword({ hash: checked, password })))
-		throw new WrongPasswordError();
+	const checked = await verifiedPasswordHash(connection, context.account, password);
+	if (checked === undefined) throw new WrongPasswordError();
 	return connection.transaction(() => {
 		if (bound && !sessionLives(connection, session)) throw new ORPCError("UNAUTHORIZED");
 		if (passwordHashOf(connection, context.account) !== checked) throw new WrongPasswordError();

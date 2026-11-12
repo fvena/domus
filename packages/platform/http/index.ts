@@ -17,7 +17,7 @@ import { READ_DELEGATION, READ_LOG } from "../actions";
 import { sealContext, type VerifiedContext } from "../authorization";
 import { PROTOCOL, platformContract } from "../contracts";
 import { AUTH_PREFIX, type AuthOptions, createAuth } from "../identity/auth";
-import { isCurrentPassword, replacePassword, SessionGoneError } from "../identity/passwords";
+import { replacePassword, SessionGoneError, verifiedPasswordHash } from "../identity/passwords";
 import { requestProof, WrongPasswordError } from "../identity/proofs";
 import { sessionsOf } from "../identity/sessions";
 import { actionsOf, clockOf, connectionOf, type Platform, proofIssuerOf } from "../platform";
@@ -120,7 +120,10 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 			change: platformProcedures.password.change.handler(
 				async ({ input, context, errors }) => {
 					const { account, session } = await signedIn(context);
-					if (!(await isCurrentPassword(connection, account, input.currentPassword)))
+					if (
+						(await verifiedPasswordHash(connection, account, input.currentPassword)) ===
+						undefined
+					)
 						throw errors.FORBIDDEN({ data: { reason: "wrong-password" } });
 					try {
 						const endedSessions = await replacePassword(
