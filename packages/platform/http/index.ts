@@ -2,7 +2,8 @@
 // lets through the routes of Better Auth that Domus uses (sign in and sign out), and serves over oRPC the
 // platform's procedures and the actions of the modules it receives, at `<module>/<action>`. Each action needs a
 // valid session: the door builds the verified context from it, ignores anything the client declares about who
-// it is, and hands it to the one path of the actions.
+// it is, and hands it to the one path of the actions. So do the platform's own operations on one's password
+// (it asks for the current one and keeps only this session) and sessions (only one's own, with their device).
 import type { ModuleDefinition } from "@domus/module-sdk";
 import { implement, ORPCError, os } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
@@ -11,7 +12,13 @@ import { Hono } from "hono";
 import { sealContext, type VerifiedContext } from "../authorization";
 import { PROTOCOL, platformContract } from "../contracts";
 import { AUTH_PREFIX, type AuthOptions, createAuth } from "../identity/auth";
-import { actionsOf, connectionOf, type Platform } from "../platform";
+import {
+	isCurrentPassword,
+	replacePassword,
+	SessionGoneError,
+	sessionsOf,
+} from "../identity/passwords";
+import { actionsOf, clockOf, connectionOf, type Platform } from "../platform";
 
 export interface HttpHandler {
 	/** A plain function, safe to pass around as `fetch`. */
@@ -45,8 +52,18 @@ const platformProcedures = implement(platformContract).$context<DoorContext>();
 const actionProcedure = os.$context<DoorContext>();
 
 export function createHttpHandler({ platform, modules, auth }: HttpHandlerOptions): HttpHandler {
-	const identity = createAuth(connectionOf(platform), auth);
+	const connection = connectionOf(platform);
+	const identity = createAuth(connection, auth);
 	const actions = actionsOf(platform);
+
+	/** The verified context of a platform operation, which always needs a session. */
+	async function signedIn(
+		context: DoorContext,
+	): Promise<VerifiedContext & { readonly session: string }> {
+		const verified = await context.verify();
+		if (!verified?.session) throw new ORPCError("UNAUTHORIZED");
+		return { ...verified, session: verified.session };
+	}
 
 	const moduleRouters: Record<string, Record<string, unknown>> = {};
 	for (const module of modules) {
@@ -75,6 +92,34 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 			service: "domus" as const,
 			protocol: PROTOCOL,
 		})),
+		password: {
+			change: platformProcedures.password.change.handler(
+				async ({ input, context, errors }) => {
+					const { account, session } = await signedIn(context);
+					if (!(await isCurrentPassword(connection, account, input.currentPassword)))
+						throw errors.FORBIDDEN({ data: { reason: "wrong-password" } });
+					try {
+						const endedSessions = await replacePassword(
+							connection,
+							account,
+							input.newPassword,
+							clockOf(platform)(),
+							session,
+						);
+						return { endedSessions };
+					} catch (error) {
+						if (error instanceof SessionGoneError) throw new ORPCError("UNAUTHORIZED");
+						throw error;
+					}
+				},
+			),
+		},
+		sessions: {
+			list: platformProcedures.sessions.list.handler(async ({ context }) => {
+				const { account, session } = await signedIn(context);
+				return sessionsOf(connection, account, session);
+			}),
+		},
 	});
 	const app = new Hono();
 

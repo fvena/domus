@@ -6,6 +6,7 @@ import {
 	type AuthorizationRequest,
 	createAuthorizer,
 	decide,
+	type Delegated,
 	type Grant,
 	isAllowed,
 	type PermissionLevel,
@@ -29,22 +30,33 @@ function policy(fields: Partial<AreaPolicy>): AreaPolicy {
 	};
 }
 
-/** A view built in the test: roles by account and stored rows by `<account>/<area>`. */
+/**
+ * A view built in the test: roles by account, stored rows by `<account>/<area>` and delegation rows by
+ * `<account>/<area>/<level>`.
+ */
 function viewOf(
 	roles: Readonly<Record<string, Role>>,
 	rows: Readonly<Record<string, Grant>> = {},
+	delegation: Readonly<Record<string, Delegated>> = {},
 ): AccessView {
 	return {
 		roleOf: (account) => roles[account],
 		storedGrant: (account, area) => rows[`${account}/${area}`],
+		delegated: (account, area, level) => delegation[`${account}/${area}/${level}`],
 		area: (id) => AREAS[id],
 	};
 }
 
-function request(account: string, area: string, level: PermissionLevel): AuthorizationRequest {
+function request(
+	account: string,
+	area: string,
+	level: PermissionLevel,
+	via?: string,
+): AuthorizationRequest {
 	return {
 		context: sealContext({
 			account,
+			...(via === undefined ? {} : { via }),
 			device: "d1",
 			deviceAccount: account,
 			channel: "app",
@@ -58,9 +70,9 @@ function request(account: string, area: string, level: PermissionLevel): Authori
 
 const LEVELS: readonly PermissionLevel[] = ["read", "write", "manage"];
 
-/** The levels an account reaches in an area, in order. */
-function reached(view: AccessView, account: string, area: string): PermissionLevel[] {
-	return LEVELS.filter((level) => decide(request(account, area, level), view) === "allow");
+/** The levels an account reaches in an area, in order, by itself or through `via`. */
+function reached(view: AccessView, account: string, area: string, via?: string): PermissionLevel[] {
+	return LEVELS.filter((level) => decide(request(account, area, level, via), view) === "allow");
 }
 
 describe("decide", () => {
@@ -119,6 +131,114 @@ describe("decide", () => {
 	});
 });
 
+describe("decide via Kira", () => {
+	it("applies each level's delegation alone: reading yes does not carry writing, nor writing yes reading", () => {
+		const view = viewOf(
+			{ ana: "member" },
+			{},
+			{
+				"ana/notes/read": "yes",
+				"ana/notes/write": "no",
+				"ana/health/read": "no",
+				"ana/health/write": "yes",
+			},
+		);
+
+		expect(reached(view, "ana", "notes", "kira")).toEqual(["read"]);
+		expect(reached(view, "ana", "health", "kira")).toEqual(["write"]);
+	});
+
+	it("denies a level whose delegation is no", () => {
+		const view = viewOf({ ana: "member" }, {}, { "ana/notes/read": "no" });
+
+		expect(reached(view, "ana", "notes", "kira")).toEqual([]);
+	});
+
+	it("denies confirm until confirmations exist", () => {
+		const view = viewOf(
+			{ ana: "member" },
+			{},
+			{ "ana/notes/read": "yes", "ana/notes/write": "confirm" },
+		);
+
+		expect(reached(view, "ana", "notes", "kira")).toEqual(["read"]);
+	});
+
+	it("takes an area or a level without a row as no", () => {
+		const view = viewOf({ ana: "member" }, {}, { "ana/notes/read": "yes" });
+
+		expect(reached(view, "ana", "notes", "kira")).toEqual(["read"]);
+		expect(reached(view, "ana", "health", "kira")).toEqual([]);
+	});
+
+	it("never goes past the account's permission, whatever the delegation says", () => {
+		const view = viewOf(
+			{ ana: "member", kitchen: "device" },
+			{ "ana/notes": "read" },
+			{
+				"ana/notes/read": "yes",
+				"ana/notes/write": "yes",
+				"ana/notes/manage": "yes",
+				"kitchen/health/read": "yes",
+			},
+		);
+
+		expect(reached(view, "ana", "notes", "kira")).toEqual(["read"]);
+		expect(reached(view, "kitchen", "health", "kira")).toEqual([]);
+	});
+
+	it("reads the delegation of the represented account, not another's", () => {
+		const view = viewOf(
+			{ ana: "member", luis: "member" },
+			{},
+			{ "luis/notes/read": "yes", "luis/notes/write": "yes" },
+		);
+
+		expect(reached(view, "ana", "notes", "kira")).toEqual([]);
+		expect(reached(view, "luis", "notes", "kira")).toEqual(["read", "write"]);
+	});
+
+	it("does not apply the delegation without via", () => {
+		const view = viewOf(
+			{ ana: "member" },
+			{},
+			{ "ana/notes/read": "no", "ana/notes/write": "no" },
+		);
+
+		expect(reached(view, "ana", "notes")).toEqual(["read", "write"]);
+	});
+});
+
+describe("decide on an account's own settings", () => {
+	const view = viewOf(
+		{ paco: "admin", ana: "member", luis: "member", kitchen: "device" },
+		{},
+		{ "ana/platform/read": "no" },
+	);
+	const about = (account: string, subject: string, via?: string) =>
+		decide(
+			{ ...request(account, "platform", "read", via), subject },
+			{ ...view, area: (id) => (id === "platform" ? policy({}) : undefined) },
+		);
+
+	it("lets each account reach its own", () => {
+		expect(about("ana", "ana")).toBe("allow");
+		expect(about("paco", "paco")).toBe("allow");
+	});
+
+	it("lets the admin reach the device account's, and nobody else's", () => {
+		expect(about("paco", "kitchen")).toBe("allow");
+		expect(about("paco", "ana")).toBe("deny");
+		expect(about("ana", "luis")).toBe("deny");
+		expect(about("ana", "kitchen")).toBe("deny");
+		expect(about("ana", "nobody")).toBe("deny");
+	});
+
+	it("still applies the permission and, via Kira, the delegation", () => {
+		expect(about("ana", "ana", "kira")).toBe("deny");
+	});
+});
+
 describe("the production authorizer", () => {
 	it("denies when reading the view throws", () => {
 		const authorizer = createAuthorizer({
@@ -126,6 +246,7 @@ describe("the production authorizer", () => {
 				throw new Error("database gone");
 			},
 			storedGrant: () => undefined,
+			delegated: () => undefined,
 			area: (id) => AREAS[id],
 		});
 

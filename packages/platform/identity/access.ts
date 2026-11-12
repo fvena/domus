@@ -1,5 +1,5 @@
-// What authorization reads, from the platform's tables: each account's role and its stored permission rows,
-// and the registered areas (ADR 0023). Every read is a prepared statement on the one connection, so the
+// What authorization reads, from the platform's tables: each account's role, its stored permission rows and its
+// delegation table, and the registered areas (ADR 0023). Every read is a prepared statement on the one connection, so the
 // decision stays synchronous inside a write's transaction and always sees the rows of that moment.
 import {
 	type AreaDefinition,
@@ -9,7 +9,7 @@ import {
 } from "@domus/module-sdk";
 import type Database from "better-sqlite3";
 
-import type { AccessView, AreaPolicy, Grant, Role } from "../authorization";
+import type { AccessView, AreaPolicy, Delegated, Grant, Role } from "../authorization";
 
 /** Every registered area: the platform's own and each module's, with what each declares. */
 export function registeredAreas(
@@ -42,9 +42,13 @@ export function accessView(
 	const stored = connection.prepare<[string, string], { level: Grant }>(
 		"SELECT level FROM platform_permissions WHERE account = ? AND area = ?",
 	);
+	const delegated = connection.prepare<[string, string, string], { value: Delegated }>(
+		"SELECT value FROM platform_delegation WHERE account = ? AND area = ? AND level = ?",
+	);
 	return {
 		roleOf: (account) => role.get(account)?.role,
 		storedGrant: (account, area) => stored.get(account, area)?.level,
+		delegated: (account, area, level) => delegated.get(account, area, level)?.value,
 		area: (id) => areas.get(id),
 	};
 }

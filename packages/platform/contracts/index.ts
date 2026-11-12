@@ -17,6 +17,39 @@ export const statusContract = oc.output(
 	}),
 );
 
+/** How long a password may be, in characters: Better Auth's own bounds, applied by every way of setting one. */
+export const PASSWORD_LENGTH = { min: 8, max: 128 } as const;
+
+/**
+ * Changing one's own password from the app: it asks for the current one, keeps only the session it comes from
+ * and ends the others. A wrong current password answers `FORBIDDEN`; no error repeats either password.
+ */
+export const changePasswordContract = oc
+	.errors({ FORBIDDEN: { data: z.object({ reason: z.literal("wrong-password") }) } })
+	.input(
+		z.object({
+			currentPassword: z.string().min(1).max(PASSWORD_LENGTH.max),
+			newPassword: z.string().min(PASSWORD_LENGTH.min).max(PASSWORD_LENGTH.max),
+		}),
+	)
+	.output(z.object({ endedSessions: z.number().int() }));
+
+/** One's own sessions, newest first, with their device; never another account's. */
+export const listSessionsContract = oc.output(
+	z.array(
+		z.object({
+			id: z.string(),
+			/** The session this request comes with. */
+			current: z.boolean(),
+			createdAt: z.number().int(),
+			expiresAt: z.number().int(),
+			device: z.object({ name: z.string().nullable(), createdAt: z.number().int() }),
+		}),
+	),
+);
+
 export const platformContract = {
 	status: statusContract,
+	password: { change: changePasswordContract },
+	sessions: { list: listSessionsContract },
 };

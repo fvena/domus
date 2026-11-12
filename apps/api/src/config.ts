@@ -23,12 +23,17 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
 	return {
 		port: readPort(env.PORT, 3000),
 		webDir: env.DOMUS_WEB_DIR || undefined,
-		databaseFile: join(readDataDir(env.DOMUS_DATA_DIR), "domus.db"),
+		databaseFile: readDatabaseFile(env),
 		auth: {
 			secret: readSecret(env.DOMUS_AUTH_SECRET),
 			origins: readOrigins(env.DOMUS_ORIGINS),
 		},
 	};
+}
+
+/** `domus.db` inside `DOMUS_DATA_DIR`: all `pnpm accounts` needs of the configuration. */
+export function readDatabaseFile(env: NodeJS.ProcessEnv = process.env): string {
+	return join(readDataDir(env.DOMUS_DATA_DIR), "domus.db");
 }
 
 function readDataDir(value: string | undefined): string {

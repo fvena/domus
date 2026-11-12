@@ -1,4 +1,5 @@
-// The rows of an account (ADR 0023): its Better Auth user, its role, its credential and its permission rows.
+// The rows of an account (ADR 0023): its Better Auth user, its role, its credential, its permission rows and,
+// from its creation, its delegation table.
 // Plain synchronous writes on the one connection, without a session or a proof: only what the platform does by
 // itself (the device account at start) and the privileged preparation of the testing entry call them. The
 // command that creates accounts (ticket 04) builds on the same functions.
@@ -6,7 +7,8 @@ import { randomBytes } from "node:crypto";
 
 import type Database from "better-sqlite3";
 
-import type { Grant, Role } from "../authorization";
+import type { AreaPolicy, Grant, Role } from "../authorization";
+import { startDelegation } from "./delegation";
 
 /** The provider of email and password in Better Auth's account table. */
 const CREDENTIAL = "credential";
@@ -27,10 +29,14 @@ export function randomId(): string {
 	return randomBytes(24).toString("base64url");
 }
 
-/** Inserts the account and its role in one transaction, and returns its id. A repeated email throws. */
+/**
+ * Inserts the account, its role and its first delegation table over the registered `areas` in one transaction,
+ * and returns its id. A repeated email throws.
+ */
 export function insertAccount(
 	connection: Database.Database,
 	{ id = randomId(), name, email, role }: NewAccount,
+	areas: ReadonlyMap<string, AreaPolicy>,
 	now: number,
 ): string {
 	connection.transaction(() => {
@@ -42,6 +48,7 @@ export function insertAccount(
 		connection
 			.prepare("INSERT INTO platform_roles (account, role) VALUES (?, ?)")
 			.run(id, role);
+		startDelegation(connection, areas, id);
 	})();
 	return id;
 }
@@ -87,16 +94,27 @@ export function setGrant(
  * The id of the one device account, created without a password when it is missing. Without a credential it
  * cannot sign in over HTTP until pairing arrives (phase 3).
  */
-export function ensureDeviceAccount(connection: Database.Database, now: number): string {
-	const found = connection
+export function ensureDeviceAccount(
+	connection: Database.Database,
+	areas: ReadonlyMap<string, AreaPolicy>,
+	now: number,
+): string {
+	return (
+		deviceAccount(connection) ??
+		insertAccount(
+			connection,
+			{ name: "Aparato compartido", email: DEVICE_ACCOUNT_EMAIL, role: "device" },
+			areas,
+			now,
+		)
+	);
+}
+
+/** The id of the one device account, if it exists. */
+export function deviceAccount(connection: Database.Database): string | undefined {
+	return connection
 		.prepare<[], { account: string }>(
 			"SELECT account FROM platform_roles WHERE role = 'device'",
 		)
-		.get();
-	if (found) return found.account;
-	return insertAccount(
-		connection,
-		{ name: "Aparato compartido", email: DEVICE_ACCOUNT_EMAIL, role: "device" },
-		now,
-	);
+		.get()?.account;
 }

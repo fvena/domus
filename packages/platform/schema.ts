@@ -199,3 +199,24 @@ export const permissions = sqliteTable(
 		),
 	],
 );
+
+/**
+ * The delegation table (ADR 0023): what an account lets Kira do on its behalf, one row per area and level, each
+ * `no`, `yes` or `confirm` on its own. Written once when the account is created; an area without a row is `no`.
+ */
+export const delegation = sqliteTable(
+	"platform_delegation",
+	{
+		account: text()
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		area: text().notNull(),
+		level: text({ enum: ["read", "write", "manage"] }).notNull(),
+		value: text({ enum: ["no", "yes", "confirm"] }).notNull(),
+	},
+	(table) => [
+		primaryKey({ columns: [table.account, table.area, table.level] }),
+		check("platform_delegation_level", sql`${table.level} IN ('read', 'write', 'manage')`),
+		check("platform_delegation_value", sql`${table.value} IN ('no', 'yes', 'confirm')`),
+	],
+);
