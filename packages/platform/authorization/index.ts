@@ -20,6 +20,12 @@ export type { PermissionLevel };
 /** What an account may have in an area: a {@link PermissionLevel}, or nothing. */
 export type Grant = PermissionLevel | "none";
 
+/**
+ * What an account lets Kira do on its behalf at one level of one area (GLOSSARY: tabla de delegación): `no`,
+ * `yes`, or `confirm`, which asks the person first. Each level stands alone: one never carries another.
+ */
+export type Delegated = "no" | "yes" | "confirm";
+
 /** What an account can do in general (GLOSSARY: perfil). */
 export type Role = "admin" | "member" | "device";
 
@@ -40,6 +46,11 @@ export interface AuthorizationRequest {
 	readonly permission: RequiredPermission;
 	readonly input: unknown;
 	readonly undoes?: UndoContext;
+	/**
+	 * For an operation of the platform on one account's own settings, such as its delegation table: that
+	 * account. Only the account itself reaches them, and the admin those of the device account.
+	 */
+	readonly subject?: string;
 }
 
 /** The entry an undo undoes: its number, the action it logged by its full name, and who asked for it. */
@@ -60,6 +71,8 @@ export interface AccessView {
 	roleOf(account: string): Role | undefined;
 	/** The row stored for the account in the area, which replaces its role's default, if there is one. */
 	storedGrant(account: string, area: string): Grant | undefined;
+	/** The account's delegation row for the level of the area, if there is one: without a row it is `no`. */
+	delegated(account: string, area: string, level: PermissionLevel): Delegated | undefined;
 	/** The area, if it is registered. */
 	area(id: string): AreaPolicy | undefined;
 }
@@ -101,12 +114,33 @@ export function reaches(grant: Grant, level: PermissionLevel): boolean {
 	return RANK[grant] >= RANK[level];
 }
 
+/** True when `account` may reach the own settings of `subject`: its own, or the device account's as admin. */
+function reachesSettingsOf(view: AccessView, account: string, subject: string): boolean {
+	if (view.roleOf(account) === undefined) return false;
+	if (account === subject) return true;
+	return view.roleOf(account) === "admin" && view.roleOf(subject) === "device";
+}
+
+/** What the account delegates for the permission: `no` when it has no row. */
+export function delegationOf(
+	view: AccessView,
+	account: string,
+	{ area, level }: RequiredPermission,
+): Delegated {
+	return view.delegated(account, area, level) ?? "no";
+}
+
 /** The decision, in the order of ADR 0023. Pure: everything it reads comes in `request` and `view`. */
 export function decide(request: AuthorizationRequest, view: AccessView): Decision {
-	const { context, permission } = request;
+	const { context, permission, subject } = request;
+	// An account's own settings: only that account, or the admin for the device account.
+	if (subject !== undefined && !reachesSettingsOf(view, context.account, subject)) return "deny";
 	// 1. The represented account's permission in the area reaches the level asked for.
 	if (!reaches(grantOf(view, context.account, permission.area), permission.level)) return "deny";
-	// 2. Via Kira, the account's delegation for that area and level (ticket 07).
+	// 2. Via Kira, the represented account's delegation for that area and level: `no` and an area without a
+	// row deny. `confirm` denies too until pending confirmations exist (ticket 08).
+	if (context.via !== undefined && delegationOf(view, context.account, permission) !== "yes")
+		return "deny";
 	// 3. Sensitive operations ask for a step-up proof (ticket 09).
 	// 4. An action that always asks for confirmation (ticket 08).
 	// 5. The shared device rule for `confirmOnSharedDevice` areas (ticket 08).

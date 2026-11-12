@@ -1,14 +1,21 @@
 // What only test-utils takes from platform (ADR 0021, ADR 0022, ADR 0023): the Drizzle client of a module, behind
 // dbFor; a platform with the real authorization and a clock the test chooses; the way to invoke its actions and
 // undo their entries with a verified context; synthetic verified contexts; the privileged preparation of
-// accounts, roles, passwords and permission rows, without a session or a proof; and a read of its action log. A
-// rule of .dependency-cruiser.cjs keeps every other importer out, production code of platform included; the
-// main entry offers none of it.
+// accounts, roles, passwords, permission rows and delegation rows, without a session or a proof; the platform's
+// real read of a delegation table; and a read of its action log. A rule of .dependency-cruiser.cjs keeps every
+// other importer out, production code of platform included; the main entry offers none of it.
 import { hashPassword } from "better-auth/crypto";
 
 import type { ActionCall, Clock, UndoCall, WriteOutcome } from "../actions";
 import type { LogEntry } from "../audit";
-import { type Grant, type Role, sealContext, type VerifiedContext } from "../authorization";
+import {
+	type Delegated,
+	type Grant,
+	type PermissionLevel,
+	type Role,
+	sealContext,
+	type VerifiedContext,
+} from "../authorization";
 import {
 	ensureDeviceAccount,
 	insertAccount,
@@ -16,9 +23,12 @@ import {
 	setGrant,
 	setPasswordHash,
 } from "../identity/accounts";
+import { type DelegationTable, readDelegation, setDelegation } from "../identity/delegation";
 import {
 	actionLogOf,
 	actionsOf,
+	areasOf,
+	delegationReaderOf,
 	clockOf,
 	connectionOf,
 	openPlatform,
@@ -28,8 +38,10 @@ import {
 
 export type { Acknowledgement, WriteOutcome, WriteReceipt } from "../actions";
 export type { LogEntry } from "../audit";
+export type { DelegationTable } from "../identity/delegation";
 export type {
 	Channel,
+	Delegated,
 	Grant,
 	IdentityProof,
 	PermissionLevel,
@@ -71,7 +83,7 @@ export function prepareAccount(
 	platform: Platform,
 	account: NewAccount & { readonly role: Exclude<Role, "device"> },
 ): string {
-	return insertAccount(connectionOf(platform), account, clockOf(platform)());
+	return insertAccount(connectionOf(platform), account, areasOf(platform), clockOf(platform)());
 }
 
 /** True when an account with this id exists. */
@@ -102,7 +114,27 @@ export function prepareGrant(
 	setGrant(connectionOf(platform), account, area, grant);
 }
 
+/** Stores one level of one area of the account's delegation, without a session or a proof. */
+export function prepareDelegation(
+	platform: Platform,
+	account: string,
+	area: string,
+	level: PermissionLevel,
+	value: Delegated,
+): void {
+	setDelegation(connectionOf(platform), account, area, level, value);
+}
+
+/** Reads the delegation of `account` through the platform's real operation, decided by its authorization. */
+export function readDelegationOf(
+	platform: Platform,
+	context: VerifiedContext,
+	account: string,
+): DelegationTable {
+	return readDelegation(delegationReaderOf(platform), context, account);
+}
+
 /** The id of the one device account, which the platform created at start. */
 export function deviceAccountOf(platform: Platform): string {
-	return ensureDeviceAccount(connectionOf(platform), clockOf(platform)());
+	return ensureDeviceAccount(connectionOf(platform), areasOf(platform), clockOf(platform)());
 }

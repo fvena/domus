@@ -13,6 +13,8 @@ import type { WriteActionMeta } from "@domus/module-sdk/contracts";
 import { createHttpHandler, type HttpHandler, type Platform } from "@domus/platform";
 import {
 	createPlatformWithClock,
+	type Delegated,
+	type DelegationTable,
 	deviceAccountOf,
 	type Grant,
 	hasAccount,
@@ -20,9 +22,12 @@ import {
 	type LogEntry,
 	type ModuleDatabase,
 	moduleDatabase,
+	type PermissionLevel,
 	prepareAccount,
+	prepareDelegation,
 	prepareGrant,
 	preparePassword,
+	readDelegationOf,
 	readLog,
 	syntheticContext,
 	type Acknowledgement,
@@ -123,6 +128,8 @@ export interface TestPreparation {
 	password(account: string, password: string): Promise<void>;
 	/** Stores the row that replaces the default of the account's role in the area: `none` to `manage`. */
 	grant(account: string, area: string, grant: Grant): void;
+	/** Stores what the account delegates to Kira at one level of the area: `no`, `yes` or `confirm`. */
+	delegation(account: string, area: string, level: PermissionLevel, value: Delegated): void;
 }
 
 /** What a synthetic context may set besides its account. */
@@ -172,6 +179,12 @@ export interface TestPlatform<
 	 * acknowledgement when its key was already done.
 	 */
 	undo(context: VerifiedContext, entry: number, options: WriteOptions): WriteOutcome;
+	/**
+	 * Reads the delegation table of `account` through the platform's real operation: each registered area with
+	 * its three levels, `no` where there is no row. Each person reads their own and the admin the device
+	 * account's; anything else is thrown as `FORBIDDEN`.
+	 */
+	delegation(context: VerifiedContext, account: string): DelegationTable;
 	/**
 	 * A read-only snapshot of the action log: every entry, in order, with its content even when expired. That
 	 * exception is only for tests.
@@ -235,6 +248,8 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 			prepareAccount(platform, { id, role, name, email }),
 		password: (account, password) => preparePassword(platform, account, password),
 		grant: (account, area, grant) => prepareGrant(platform, account, area, grant),
+		delegation: (account, area, level, value) =>
+			prepareDelegation(platform, account, area, level, value),
 	};
 	const context = (account: string, options: ContextOptions = {}) =>
 		syntheticContext({
@@ -276,6 +291,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 			}) as never,
 		undo: (context, entry, { idempotencyKey }) =>
 			undoEntry(platform, { context, entry, idempotencyKey }),
+		delegation: (context, account) => readDelegationOf(platform, context, account),
 		log: () => readLog(platform),
 		close,
 		[Symbol.asyncDispose]: () => Promise.resolve(close()),
