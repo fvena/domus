@@ -6,7 +6,7 @@
 import { hashPassword, verifyPassword } from "better-auth/crypto";
 import type Database from "better-sqlite3";
 
-import type { Role } from "../authorization";
+import type { AreaPolicy, Role } from "../authorization";
 import { PASSWORD_LENGTH } from "../contracts";
 import { insertAccount, setPasswordHash } from "./accounts";
 
@@ -31,17 +31,21 @@ export function accountByEmail(
 		.get(email.toLowerCase());
 }
 
-/** Creates an account with its role and its password, in one transaction. A repeated email throws. */
+/**
+ * Creates an account with its role, its starting delegation over the registered `areas` and its password, in
+ * one transaction. A repeated email throws.
+ */
 export async function createAccountWithPassword(
 	connection: Database.Database,
 	account: { readonly name: string; readonly email: string; readonly role: "admin" | "member" },
+	areas: ReadonlyMap<string, AreaPolicy>,
 	password: string,
 	now: number,
 ): Promise<string> {
 	const hash = await hashPassword(password);
 	let id = "";
 	connection.transaction(() => {
-		id = insertAccount(connection, account, now);
+		id = insertAccount(connection, account, areas, now);
 		setPasswordHash(connection, id, hash, now);
 	})();
 	return id;

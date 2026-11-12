@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createHttpHandler } from "../http";
-import { createPlatform, type Platform } from "../platform";
+import { connectionOf, createPlatform, type Platform } from "../platform";
+import { prepareAccount, readDelegationOf, syntheticContext } from "../testing";
 import { parseAccountsArguments, runAccounts } from "./command";
+import { accountByEmail } from "./passwords";
 
 const SECRET = "a-very-secret-passphrase";
 const NEW_SECRET = "the-new-passphrase";
@@ -117,6 +119,31 @@ describe("runAccounts", () => {
 		expect(created.lines).toEqual([expect.stringMatching(message)]);
 		for (const answer of answers) expect(created.lines.join("\n")).not.toContain(answer);
 		expect((await run(platform, createAna, SECRET, SECRET)).code).toBe(0);
+	});
+
+	it("starts the delegation table of the account it creates, as any new account's", async () => {
+		await run(platform, createAna, SECRET, SECRET);
+		const ana = accountByEmail(connectionOf(platform), "ana@domus.test")!.id;
+		const luis = prepareAccount(platform, {
+			name: "Luis",
+			email: "luis@domus.test",
+			role: "member",
+		});
+		const tableOf = (account: string) =>
+			readDelegationOf(
+				platform,
+				syntheticContext({
+					account,
+					device: "d",
+					deviceAccount: account,
+					channel: "app",
+					identity: "password",
+				}),
+				account,
+			);
+
+		expect(Object.keys(tableOf(ana))).not.toHaveLength(0);
+		expect(tableOf(ana)).toEqual(tableOf(luis));
 	});
 
 	it("changes a password and revokes every session of that account, and only of it", async () => {

@@ -4,7 +4,7 @@
 // command writes or error it reports carries it. Changing a password with the command ends every session of the
 // account.
 
-import { clockOf, connectionOf, type Platform } from "../platform";
+import { areasOf, clockOf, connectionOf, type Platform } from "../platform";
 import {
 	accountByEmail,
 	createAccountWithPassword,
@@ -43,6 +43,7 @@ export async function runAccounts(
 			await createAccountWithPassword(
 				connection,
 				{ name: command.name, email, role: command.role },
+				areasOf(platform),
 				password,
 				now(),
 			);
