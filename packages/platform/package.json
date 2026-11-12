@@ -29,6 +29,7 @@
 		"@hono/node-server": "catalog:",
 		"@types/better-sqlite3": "catalog:",
 		"@types/node": "catalog:",
+		"tsx": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:"
 	}

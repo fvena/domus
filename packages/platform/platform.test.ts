@@ -153,8 +153,12 @@ describe("createPlatform", () => {
 		const close = vi.spyOn(Database.prototype, "close");
 		try {
 			expect(() => createPlatform({ databaseFile, modules: [] })).toThrow(/not a database/);
-			expect(close).toHaveBeenCalledOnce();
-			expect(close.mock.contexts[0]).toHaveProperty("open", false);
+			// The lock's connection closes too; this test is about the database's.
+			const closed = close.mock.contexts.filter(
+				(db) => (db as Database.Database).name === databaseFile,
+			);
+			expect(closed).toHaveLength(1);
+			expect(closed[0]).toHaveProperty("open", false);
 		} finally {
 			close.mockRestore();
 		}

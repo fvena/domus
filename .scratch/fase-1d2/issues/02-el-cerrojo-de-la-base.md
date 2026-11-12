@@ -1,6 +1,6 @@
 # 02. El cerrojo de la base
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: None (can start immediately)
 
 Spec: [`../spec.md`](../spec.md), sección «El cerrojo de la base» y, en «Decisiones de prueba», la costura 3 (el cerrojo). ADR 0026.
@@ -18,11 +18,18 @@ Nadie restaura mientras alguien usa la base, y nadie abre la base mientras se re
 
 ## Criterios de aceptación
 
-- [ ] Un hijo con la plataforma abierta impide al padre tomar el exclusivo, con el mensaje de la spec.
-- [ ] Un hijo con el exclusivo impide al padre abrir la plataforma, con `restore in progress`.
-- [ ] Muerto el hijo con SIGKILL, el padre toma el cerrojo que el hijo tenía.
-- [ ] El cerrojo se toma antes de abrir los datos: con el exclusivo tomado, abrir falla sin crear ni tocar `domus.db`.
-- [ ] Si abrir falla después de tomar el cerrojo, el cerrojo queda libre.
-- [ ] Dentro de un mismo proceso, una plataforma abierta también impide el exclusivo.
-- [ ] `api` y `accounts` pueden tener la base abierta a la vez.
-- [ ] `pnpm check` pasa.
+- [x] Un hijo con la plataforma abierta impide al padre tomar el exclusivo, con el mensaje de la spec.
+- [x] Un hijo con el exclusivo impide al padre abrir la plataforma, con `restore in progress`.
+- [x] Muerto el hijo con SIGKILL, el padre toma el cerrojo que el hijo tenía.
+- [x] El cerrojo se toma antes de abrir los datos: con el exclusivo tomado, abrir falla sin crear ni tocar `domus.db`.
+- [x] Si abrir falla después de tomar el cerrojo, el cerrojo queda libre.
+- [x] Dentro de un mismo proceso, una plataforma abierta también impide el exclusivo.
+- [x] `api` y `accounts` pueden tener la base abierta a la vez.
+- [x] `pnpm check` pasa.
+
+## Comments
+
+- Hecho en `06ce496`. Decisiones tomadas al implementar, también en la spec («El cerrojo de la base» y costura 3): la tabla es `domus_lock` y el compartido la crea si falta; si `api` y `accounts` abren a la vez por primera vez sin `domus.lock`, uno puede fallar con `restore in progress` y abre en el siguiente intento; el exclusivo sobre un `domus.lock` recién creado puede dejar `domus.lock-journal`, que SQLite trata solo.
+- Para la 05 y la 06, en `packages/platform/lock.ts`: `takeExclusiveLock(dataDirectory)` y `takeSharedLock(dataDirectory)` devuelven un `DatabaseLock` con `release()`. Restaurar debe guardar referenciada su asa hasta terminar: el recolector de basura cierra una conexión a la que nadie llega y se lleva el cerrojo (era la causa de una prueba intermitente). Dentro de un proceso, nunca abrir `domus.lock` con `node:fs`: cerrar ese descriptor suelta los bloqueos `fcntl` del proceso. `openPlatform` toma el compartido antes de abrir `domus.db` (en `dirname(databaseFile)`) y lo suelta en `close()` o si abrir falla.
+- Arnés: `startChild(task)` de `@domus/platform/testing` lanza `testing/child.ts` con tsx (dependencia de desarrollo de `platform`) y se usa con `await using`; `kill()` manda SIGKILL y espera a que salga. Si el hijo no consigue su tarea, `startChild` rechaza con el mensaje del hijo. Las tareas de restaurar y sus puntos de corte entran como variantes nuevas de `ChildTask` en `children.ts` y `child.ts`.
+- Las pruebas que espían `Database.prototype.close` (`platform.test.ts`, `migrator.test.ts`) filtran ahora por la conexión de `domus.db`, porque la del cerrojo también se cierra.
