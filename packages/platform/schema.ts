@@ -259,3 +259,35 @@ export const confirmations = sqliteTable(
 		),
 	],
 );
+
+/**
+ * A step-up proof (ADR 0023): what giving the password again earns for one exact sensitive operation. Only the
+ * SHA-256 of the proof is kept, never the proof. It is bound to the account, the session it was asked from
+ * (`origin_session`, and `session` while that one lives: revoking it sets it to null, which ends a proof that
+ * was `bound` to a real session), the device and the operation's fingerprint. It is good once, until
+ * `expires_at`; `entry` links it to the write that used it, so a repeat of that write is acknowledged.
+ */
+export const proofs = sqliteTable(
+	"platform_proofs",
+	{
+		hash: text().primaryKey(),
+		account: text()
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		session: text().references(() => session.id, { onDelete: "set null" }),
+		originSession: text("origin_session"),
+		bound: integer({ mode: "boolean" }).notNull(),
+		device: text().notNull(),
+		fingerprint: text().notNull(),
+		createdAt: integer("created_at").notNull(),
+		expiresAt: integer("expires_at").notNull(),
+		state: text({ enum: ["issued", "used", "ended"] }).notNull(),
+		entry: integer().references(() => actionLog.entry),
+	},
+	(table) => [
+		index("platform_proofs_account").on(table.account),
+		index("platform_proofs_session").on(table.session),
+		index("platform_proofs_device").on(table.device),
+		check("platform_proofs_state", sql`${table.state} IN ('issued', 'used', 'ended')`),
+	],
+);

@@ -8,7 +8,10 @@
 // its result: repeating one under the same key answers an acknowledgement without content (ADR 0023). When
 // authorization asks for confirmation, nothing runs: the operation waits as a pending confirmation, stored in a
 // transaction of its own, and the answer is `CONFIRMATION_REQUIRED` with its id. Confirming it evaluates it all
-// again and runs it on this same path, once (ADR 0023).
+// again and runs it on this same path, once (ADR 0023). A sensitive operation, an action of level `manage` or a
+// sensitive operation of the platform, needs a step-up proof of that exact operation: it is checked, and used in
+// the same transaction as the operation, so one that rolls back leaves it unused (ADR 0023). The platform's own
+// sensitive operations, such as changing permissions, take this same path as writes of the platform's area.
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
@@ -21,6 +24,7 @@ import {
 	type ModuleSchema,
 	type OwnedTable,
 	ownedTableOf,
+	PLATFORM_ID,
 	type TouchedRecord,
 } from "@domus/module-sdk";
 import type { ActionContract } from "@domus/module-sdk/contracts";
@@ -41,6 +45,7 @@ import {
 	newOwnership,
 	type RequiredPermission,
 	sealContext,
+	type SensitiveOperation,
 	type VerifiedContext,
 	visibleTo,
 } from "../authorization";
@@ -52,6 +57,7 @@ import {
 	type NewPending,
 	type PendingConfirmation,
 } from "./confirmations";
+import type { ProofCheck, Proofs } from "./proofs";
 
 /** The platform clock: instants in milliseconds since the epoch (ADR 0021). */
 export type Clock = () => number;
@@ -66,6 +72,8 @@ export interface ActionCall {
 	readonly input?: unknown;
 	/** The idempotency key the caller gives a write. A read takes none. */
 	readonly idempotencyKey?: string;
+	/** The step-up proof of this exact operation, when it is sensitive. Never stored, logged or echoed. */
+	readonly proof?: string;
 }
 
 /** What a write returns the first time: its result and the number of its entry in the action log. Never its inverse. */
@@ -108,6 +116,32 @@ export interface Actions {
 	confirm(call: ConfirmationCall): unknown;
 	/** Rejects a pending confirmation, with the same rules of who may as {@link Actions.confirm}. */
 	reject(call: ConfirmationCall): void;
+	/**
+	 * The fingerprint a step-up proof binds to: of an action or an operation of the platform with its input,
+	 * validated as invoking it would, or of the undo of an entry. Throws "not found" for an unknown action, and a
+	 * bad request for an invalid input or an operation that is not sensitive.
+	 */
+	fingerprintOf(operation: ProvenOperation): string;
+}
+
+/** The operation a step-up proof is asked for: an action, or an operation of the platform, and its input, or an undo. */
+export type ProvenOperation =
+	| { readonly action: string; readonly input?: unknown }
+	| { readonly undo: number };
+
+/**
+ * A sensitive operation of the platform (ADR 0023), run on the path of the actions as a write of the platform's
+ * area: with a key, logged without touched records, never undoable, and with a step-up proof.
+ */
+export interface PlatformOperation {
+	/** Its name after `platform.`. */
+	readonly name: string;
+	readonly sensitive: SensitiveOperation;
+	readonly inputSchema: AnySchema;
+	/** The account whose access, delegation or sessions it changes, read inside the write's transaction. */
+	readonly subject: (input: unknown, context: VerifiedContext) => string | undefined;
+	/** Changes it, inside the write's transaction, once authorized; returns its result. */
+	readonly run: (input: unknown, context: VerifiedContext) => unknown;
 }
 
 /**
@@ -118,6 +152,8 @@ export interface Actions {
 export interface ConfirmationCall {
 	readonly context: VerifiedContext;
 	readonly confirmation: string;
+	/** The step-up proof of the pending operation, when it is sensitive: it is asked for when confirming. */
+	readonly proof?: string;
 }
 
 /** An undo: the verified context of who asks, the number of the entry to undo and the caller's own idempotency key. */
@@ -125,6 +161,8 @@ export interface UndoCall {
 	readonly context: VerifiedContext;
 	readonly entry: number;
 	readonly idempotencyKey: string;
+	/** The step-up proof of this undo, when its inverse is sensitive. */
+	readonly proof?: string;
 }
 
 export interface ActionsOptions {
@@ -143,6 +181,10 @@ export interface ActionsOptions {
 	readonly retention: number;
 	/** Where pending confirmations wait. */
 	readonly confirmations: Confirmations;
+	/** Where step-up proofs are checked and used. */
+	readonly proofs: Proofs;
+	/** The platform's own sensitive operations. */
+	readonly operations?: readonly PlatformOperation[];
 }
 
 export type { ConfirmationTimes };
@@ -158,13 +200,15 @@ interface RegisteredAction {
 	/** What its contract asks for, with the module's own area when it names none. */
 	readonly permission: RequiredPermission;
 	readonly inputSchema: AnySchema | undefined;
+	/** Checks a read's result, or a write's result inside what `execute` returns. */
 	readonly outputSchema: AnySchema | undefined;
-	/** The errors its contract declares: the only ones its handler's throws leave with. */
-	readonly errorMap: ErrorMap;
-	readonly handler: ActionHandler<ActionContract, ModuleSchema>;
-	readonly db: ModuleDatabase<ModuleSchema>;
-	/** The owned tables of its module, with the policy of each one's area. */
-	readonly ownedTables: ReadonlyMap<OwnedTable, AreaPolicy>;
+	/** For a sensitive operation of the platform: which one, and the account it is about. */
+	readonly sensitive?: {
+		readonly operation: SensitiveOperation;
+		readonly subject: (input: unknown, context: VerifiedContext) => string | undefined;
+	};
+	/** Runs it with its validated input, and returns what a module's handler would. */
+	readonly execute: (context: VerifiedContext, input: unknown, now: number) => unknown;
 }
 
 /** The actions of `modules`, which `checkModules` has already accepted, on one connection. */
@@ -179,6 +223,8 @@ export function createActions({
 	actionLog,
 	retention,
 	confirmations,
+	proofs,
+	operations = [],
 }: ActionsOptions): Actions {
 	const registry = new Map<string, RegisteredAction>();
 	for (const module of modules) {
@@ -188,6 +234,7 @@ export function createActions({
 			const handler = module.actions?.[name];
 			if (!handler) continue;
 			const { meta, inputSchema, outputSchema, errorMap } = contract["~orpc"];
+			const parts: ModuleParts = { handler, db, errorMap, ownedTables };
 			registry.set(`${module.id}.${name}`, {
 				module: module.id,
 				name,
@@ -200,37 +247,76 @@ export function createActions({
 				},
 				inputSchema,
 				outputSchema,
-				errorMap,
-				handler,
-				db,
-				ownedTables,
+				execute: (context, input, now) => runHandler(parts, actorOf(context), input, now),
 			});
 		}
 	}
+	for (const operation of operations)
+		registry.set(`${PLATFORM_ID}.${operation.name}`, {
+			module: PLATFORM_ID,
+			name: operation.name,
+			kind: "write",
+			undoable: false,
+			permission: { area: PLATFORM_ID, level: "write" },
+			inputSchema: operation.inputSchema,
+			outputSchema: undefined,
+			sensitive: { operation: operation.sensitive, subject: operation.subject },
+			execute: (context, input) => ({ result: operation.run(input, context), touched: [] }),
+		});
 
 	return {
 		invoke: (call) => guarded(() => invoke(call)),
 		undo: (call) => guarded(() => undo(call)),
 		confirm: (call) => guarded(() => confirm(call)),
 		reject: (call) => guarded(() => reject(call)),
+		fingerprintOf: (operation) => guarded(() => fingerprintOf(operation)),
 	};
 
-	function invoke({ context, action, input, idempotencyKey }: ActionCall): unknown {
+	function invoke({ context, action, input, idempotencyKey, proof }: ActionCall): unknown {
 		// Only a context the door or the testing entry sealed: nothing on the way can stand in for it.
 		if (!isVerified(context)) throw internalError();
+		const { found, value } = validated(action, input);
+		return found.kind === "write"
+			? write(found, context, action, value, { idempotencyKey, proof })
+			: read(found, context, action, value, { proof });
+	}
+
+	/** The registered action called `action` and its input, validated by its contract. */
+	function validated(
+		action: string,
+		input: unknown,
+	): { readonly found: RegisteredAction; readonly value: unknown } {
 		const found = registry.get(action);
 		if (!found) throw new ORPCError("NOT_FOUND", { message: `no action "${action}"` });
-
-		const validated = validate(found.inputSchema, input);
-		if (!validated.ok || !isLosslessJson(validated.value))
+		const checked = validate(found.inputSchema, input);
+		if (!checked.ok || !isLosslessJson(checked.value))
 			throw new ORPCError("BAD_REQUEST", {
 				message: "invalid input",
-				data: { issues: validated.ok ? [] : validated.issues },
+				data: { issues: checked.ok ? [] : checked.issues },
 			});
+		return { found, value: checked.value };
+	}
 
-		return found.kind === "write"
-			? write(found, context, action, validated.value, idempotencyKey)
-			: read(found, context, action, validated.value);
+	function fingerprintOf(operation: ProvenOperation): string {
+		if ("undo" in operation) return undoFingerprint(operation.undo);
+		const { found, value } = validated(operation.action, operation.input);
+		if (found.permission.level !== "manage" && found.sensitive === undefined)
+			throw new ORPCError("BAD_REQUEST", { message: "not a sensitive operation" });
+		return operationFingerprint(operation.action, value);
+	}
+
+	/** What authorization needs to know of a sensitive operation of the platform. */
+	function sensitivityOf(
+		found: RegisteredAction,
+		input: unknown,
+		context: VerifiedContext,
+	): Pick<AuthorizationRequest, "sensitive" | "subject"> {
+		if (!found.sensitive) return {};
+		const subject = found.sensitive.subject(input, context);
+		return {
+			sensitive: found.sensitive.operation,
+			...(subject === undefined ? {} : { subject }),
+		};
 	}
 
 	/**
@@ -241,6 +327,7 @@ export function createActions({
 	function authorize(request: AuthorizationRequest): void {
 		const decision = decisionOf(authorizer, request);
 		if (decision === "confirm") throw new ConfirmationNeeded();
+		if (decision === "step-up") throw stepUpRequired();
 		if (decision !== "allow") throw new ORPCError("FORBIDDEN");
 	}
 
@@ -272,21 +359,21 @@ export function createActions({
 	}
 
 	/** Runs a handler; only an error its contract declares leaves as it is. */
-	function run(found: RegisteredAction, actor: Actor, input: unknown, now: number): unknown {
+	function runHandler(parts: ModuleParts, actor: Actor, input: unknown, now: number): unknown {
 		/** The policy of one of the module's owned tables; any other table is a mistake of the handler. */
 		const areaOf = (table: OwnedTable): AreaPolicy => {
-			const area = found.ownedTables.get(table);
+			const area = parts.ownedTables.get(table);
 			if (!area) throw new Error("not an owned table of this module");
 			return area;
 		};
 		let outcome: unknown;
 		try {
-			outcome = found.handler({
+			outcome = parts.handler({
 				input,
-				db: found.db,
+				db: parts.db,
 				actor,
 				now,
-				errors: createORPCErrorConstructorMap(found.errorMap),
+				errors: createORPCErrorConstructorMap(parts.errorMap),
 				visible: (table) => {
 					areaOf(table);
 					return visibleTo(table, actor.account);
@@ -294,7 +381,7 @@ export function createActions({
 				ownership: (table) => newOwnership(actor.account, areaOf(table).defaultVisibility),
 			});
 		} catch (error) {
-			throw declaredOrInternal(found, error);
+			throw declaredOrInternal(parts.errorMap, error);
 		}
 		// An async handler, which its type forbids: what it would do later falls outside the transaction.
 		if (isThenable(outcome)) {
@@ -309,36 +396,37 @@ export function createActions({
 		context: VerifiedContext,
 		action: string,
 		input: unknown,
-		confirmed = false,
+		{ proof, confirmed = false }: { readonly proof?: string; readonly confirmed?: boolean },
 	): unknown {
+		const fingerprint = operationFingerprint(action, input);
+		const checked = proofs.check(proof, context, fingerprint, clock());
 		const request: AuthorizationRequest = {
 			context,
 			action,
 			kind: "read",
 			permission: found.permission,
 			input,
+			...sensitivityOf(found, input, context),
 			...(confirmed ? { confirmed } : {}),
+			...(checked === undefined ? {} : { proof: checked }),
 		};
 		orPending(
-			{
-				kind: "read",
-				operation: { action, input },
-				fingerprint: operationFingerprint(action, input),
-				origin: context,
-			},
+			{ kind: "read", operation: { action, input }, fingerprint, origin: context },
 			() => authorize(request),
 		);
 
 		let result: unknown;
 		connection.pragma("query_only = ON");
 		try {
-			result = run(found, actorOf(context), input, clock());
+			result = found.execute(context, input, clock());
 		} finally {
 			connection.pragma("query_only = OFF");
 		}
 
 		const output = validate(found.outputSchema, result);
 		if (!output.ok) throw internalError();
+		// Used only once the read answered: one that failed leaves its proof unused.
+		if (proof !== undefined && checked === "valid") proofs.use(proof);
 		return output.value;
 	}
 
@@ -347,19 +435,28 @@ export function createActions({
 		context: VerifiedContext,
 		action: string,
 		input: unknown,
-		idempotencyKey: string | undefined,
-		confirmed = false,
+		{
+			idempotencyKey,
+			proof,
+			confirmed = false,
+		}: {
+			readonly idempotencyKey: string | undefined;
+			readonly proof?: string | undefined;
+			readonly confirmed?: boolean;
+		},
 	): WriteOutcome {
 		const actor = actorOf(context);
 		const fingerprint = operationFingerprint(action, input);
-		const request: AuthorizationRequest = {
+		const requestWith = (checked: ProofCheck | undefined): AuthorizationRequest => ({
 			context,
 			action,
 			kind: "write",
 			permission: found.permission,
 			input,
+			...sensitivityOf(found, input, context),
 			...(confirmed ? { confirmed } : {}),
-		};
+			...(checked === undefined ? {} : { proof: checked }),
+		});
 
 		return orPending(
 			{
@@ -374,13 +471,38 @@ export function createActions({
 					actor,
 					idempotencyKey,
 					fingerprint,
-					() => request,
-					(key) => {
-						authorize(request);
-						return perform(found, actor, input, { idempotencyKey: key, fingerprint });
-					},
+					// A repeat is authorized again, its proof included: the one its write used still counts.
+					(earlier) =>
+						requestWith(
+							proofs.check(proof, context, fingerprint, clock(), earlier.entry),
+						),
+					(key) =>
+						proven(proof, context, fingerprint, requestWith, () =>
+							perform(found, context, input, { idempotencyKey: key, fingerprint }),
+						),
 				),
 		);
+	}
+
+	/**
+	 * Checks the proof a write brings and authorizes the request with what it is worth; when it is valid, uses it
+	 * before the write runs and links it to its entry after. All inside the write's transaction, so a write that
+	 * rolls back leaves it unused.
+	 */
+	function proven(
+		proof: string | undefined,
+		context: VerifiedContext,
+		fingerprint: string,
+		requestWith: (checked: ProofCheck | undefined) => AuthorizationRequest,
+		operation: () => WriteReceipt,
+	): WriteReceipt {
+		const checked = proofs.check(proof, context, fingerprint, clock());
+		authorize(requestWith(checked));
+		if (proof === undefined || checked !== "valid") return operation();
+		proofs.use(proof);
+		const receipt = operation();
+		proofs.link(proof, receipt.entry);
+		return receipt;
 	}
 
 	function undo(call: UndoCall): WriteOutcome {
@@ -389,14 +511,18 @@ export function createActions({
 	}
 
 	function undoEntry(
-		{ context, entry: number, idempotencyKey }: UndoCall,
+		{ context, entry: number, idempotencyKey, proof }: UndoCall,
 		confirmed = false,
 	): WriteOutcome {
 		const actor = actorOf(context);
 		const fingerprint = undoFingerprint(number);
 
 		/** The request to authorization for an inverse, with the context of the entry it undoes. */
-		const requestFor = (original: NumberedEntry, inverse: Inverse): AuthorizationRequest => {
+		const requestFor = (
+			original: NumberedEntry,
+			inverse: Inverse,
+			checked: ProofCheck | undefined,
+		): AuthorizationRequest => {
 			const target = registry.get(inverse.action);
 			if (!target) throw internalError();
 			return {
@@ -407,6 +533,7 @@ export function createActions({
 				input: inverse.input,
 				undoes: { entry: original.entry, action: original.action, actor: original.actor },
 				...(confirmed ? { confirmed } : {}),
+				...(checked === undefined ? {} : { proof: checked }),
 			};
 		};
 
@@ -429,10 +556,14 @@ export function createActions({
 					(own) => {
 						const original = actionLog.find(number);
 						if (!original) throw internalError();
-						return requestFor(original, {
-							action: own.action,
-							input: isExpired(own.expiresAt) ? undefined : own.input,
-						});
+						return requestFor(
+							original,
+							{
+								action: own.action,
+								input: isExpired(own.expiresAt) ? undefined : own.input,
+							},
+							proofs.check(proof, context, fingerprint, clock(), own.entry),
+						);
 					},
 					(key) => {
 						const original = actionLog.find(number);
@@ -450,12 +581,19 @@ export function createActions({
 							original.module,
 							original.inverse,
 						);
-						authorize(requestFor(original, { action: stored.action, input }));
-						const receipt = perform(target, actor, input, {
-							idempotencyKey: key,
+						const receipt = proven(
+							proof,
+							context,
 							fingerprint,
-							undoes: number,
-						});
+							(checked) =>
+								requestFor(original, { action: stored.action, input }, checked),
+							() =>
+								perform(target, context, input, {
+									idempotencyKey: key,
+									fingerprint,
+									undoes: number,
+								}),
+						);
 						actionLog.markUndone(number, receipt.entry);
 						return receipt;
 					},
@@ -470,7 +608,7 @@ export function createActions({
 	 * evaluated again with the account, via and delegation of its origin and the rest of the context of now; the
 	 * requirement to confirm counts as met, and nothing else does.
 	 */
-	function confirm({ context, confirmation }: ConfirmationCall): unknown {
+	function confirm({ context, confirmation, proof }: ConfirmationCall): unknown {
 		if (!isVerified(context)) throw internalError();
 		return connection.transaction(() => {
 			const pending = reachable(context, confirmation);
@@ -484,7 +622,12 @@ export function createActions({
 			const { operation } = pending;
 			if ("undo" in operation) {
 				const outcome = undoEntry(
-					{ context: asked, entry: operation.undo, idempotencyKey: pending.key ?? "" },
+					{
+						context: asked,
+						entry: operation.undo,
+						idempotencyKey: pending.key ?? "",
+						...(proof === undefined ? {} : { proof }),
+					},
 					true,
 				);
 				confirmations.consume(pending.id, outcome.entry);
@@ -493,18 +636,18 @@ export function createActions({
 			const found = registry.get(operation.action);
 			if (!found || found.kind !== pending.kind) throw internalError();
 			if (found.kind === "read") {
-				const result = read(found, asked, operation.action, operation.input, true);
+				const result = read(found, asked, operation.action, operation.input, {
+					proof,
+					confirmed: true,
+				});
 				confirmations.consume(pending.id, undefined);
 				return result;
 			}
-			const outcome = write(
-				found,
-				asked,
-				operation.action,
-				operation.input,
-				pending.key,
-				true,
-			);
+			const outcome = write(found, asked, operation.action, operation.input, {
+				idempotencyKey: pending.key,
+				proof,
+				confirmed: true,
+			});
 			confirmations.consume(pending.id, outcome.entry);
 			return outcome;
 		})();
@@ -578,9 +721,11 @@ export function createActions({
 
 			const earlier = actionLog.find(keyed.entry);
 			if (!earlier) throw internalError();
-			// An acknowledgement runs nothing and shows nothing: being asked to confirm does not stop it.
-			if (decisionOf(authorizer, repeated(earlier)) === "deny")
-				throw new ORPCError("FORBIDDEN");
+			// An acknowledgement runs nothing and shows nothing: being asked to confirm does not stop it, but
+			// a sensitive one asks for its proof again.
+			const decision = decisionOf(authorizer, repeated(earlier));
+			if (decision === "deny") throw new ORPCError("FORBIDDEN");
+			if (decision === "step-up") throw stepUpRequired();
 			return { entry: earlier.entry, repeated: true };
 		})();
 	}
@@ -594,12 +739,9 @@ export function createActions({
 	 * What a handler's exception leaves as: an error its contract declares, with its data validated by that
 	 * error's schema, as oRPC does; anything else, data that fails the schema included, an internal error.
 	 */
-	function declaredOrInternal(
-		found: RegisteredAction,
-		error: unknown,
-	): ORPCError<string, unknown> {
+	function declaredOrInternal(errorMap: ErrorMap, error: unknown): ORPCError<string, unknown> {
 		if (!(error instanceof ORPCError) || !error.defined) return internalError();
-		const declared = found.errorMap[error.code];
+		const declared = errorMap[error.code];
 		if (declared === undefined) return internalError();
 		if (declared.data === undefined) return error;
 
@@ -616,7 +758,7 @@ export function createActions({
 	/** Runs an authorized write's handler, checks what it returned and logs its entry. */
 	function perform(
 		found: RegisteredAction,
-		actor: Actor,
+		context: VerifiedContext,
 		input: unknown,
 		logged: {
 			readonly idempotencyKey: string;
@@ -625,7 +767,8 @@ export function createActions({
 		},
 	): WriteReceipt {
 		const now = clock();
-		const { value, transitions } = capture.watch(() => run(found, actor, input, now));
+		const actor = actorOf(context);
+		const { value, transitions } = capture.watch(() => found.execute(context, input, now));
 		const outcome = checkOutcome(found, value);
 		checkTransitions(found, actor.account, transitions, outcome.touched);
 		const entry = actionLog.record({
@@ -717,6 +860,16 @@ export function createActions({
 	}
 }
 
+/** What running a module's handler needs: the handler, its module's database, errors and owned tables. */
+interface ModuleParts {
+	readonly handler: ActionHandler<ActionContract, ModuleSchema>;
+	readonly db: ModuleDatabase<ModuleSchema>;
+	/** The errors its contract declares: the only ones its handler's throws leave with. */
+	readonly errorMap: ErrorMap;
+	/** The owned tables of its module, with the policy of each one's area. */
+	readonly ownedTables: ReadonlyMap<OwnedTable, AreaPolicy>;
+}
+
 /** The owned tables of a module, which `checkModules` has accepted, each with the policy of its area. */
 function ownedTablesOf(
 	module: ModuleDefinition,
@@ -756,6 +909,17 @@ type ConflictReason =
 
 /** Authorization asked for confirmation: whatever was opened rolls back and the operation waits. */
 class ConfirmationNeeded extends Error {}
+
+/**
+ * The operation is sensitive and the request brings no step-up proof of it, or one that does not match: another
+ * operation, session or device, expired, already used, or one it does not need. Nothing of the proof leaves.
+ */
+function stepUpRequired() {
+	return new ORPCError("STEP_UP_REQUIRED", {
+		status: 403,
+		message: "this operation needs a step-up proof of it",
+	});
+}
 
 /** A conflict, with its reason in `data.reason`. */
 function conflict(reason: ConflictReason) {

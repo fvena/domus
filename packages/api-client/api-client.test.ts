@@ -38,4 +38,19 @@ describe("clientFor", () => {
 		]);
 		expect(requests.map((request) => request.headers.get("cookie"))).toEqual(["a=1", "a=1"]);
 	});
+
+	it("sends a call's step-up proof as a header of its own", async () => {
+		const { requests, fetch } = recording();
+		const client = clientFor({ settings: { change: oc } }, { baseUrl: "http://domus", fetch });
+
+		await client.settings.change(undefined, {
+			context: { idempotencyKey: "k1", proof: "p1" },
+		});
+		await client.settings.change(undefined, { context: { idempotencyKey: "k2" } });
+
+		expect(requests.map((request) => request.headers.get("step-up-proof"))).toEqual([
+			"p1",
+			null,
+		]);
+	});
 });

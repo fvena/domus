@@ -19,7 +19,9 @@ import {
 	deviceAccountOf,
 	type Grant,
 	hasAccount,
+	hasSession,
 	invokeAction,
+	type IssuedProof,
 	type LogEntry,
 	type ModuleDatabase,
 	moduleDatabase,
@@ -28,9 +30,12 @@ import {
 	prepareDelegation,
 	prepareGrant,
 	preparePassword,
+	prepareSession,
+	type ProvenOperation,
 	readDelegationOf,
 	readLog,
 	rejectPending,
+	requestProofOf,
 	syntheticContext,
 	type Acknowledgement,
 	undoEntry,
@@ -75,6 +80,23 @@ type InputArguments<TInput> = unknown extends TInput
 export interface WriteOptions {
 	/** The caller's name for this operation. */
 	readonly idempotencyKey: string;
+	/** A step-up proof of this exact operation, from {@link TestPlatform.requestProof}, when it is sensitive. */
+	readonly proof?: string;
+}
+
+/** Changing an account's permission in an area, an operation of the platform. */
+export interface PermissionChange {
+	readonly account: string;
+	readonly area: string;
+	readonly level: Grant;
+}
+
+/** Changing one level of one area of an account's delegation, an operation of the platform. */
+export interface DelegationChange {
+	readonly account: string;
+	readonly area: string;
+	readonly level: PermissionLevel;
+	readonly value: Delegated;
 }
 
 /** A read takes its input; a write takes its input, even when it has none, and its key. */
@@ -134,6 +156,14 @@ export interface TestPreparation {
 	grant(account: string, area: string, grant: Grant): void;
 	/** Stores what the account delegates to Kira at one level of the area: `no`, `yes` or `confirm`. */
 	delegation(account: string, area: string, level: PermissionLevel, value: Delegated): void;
+	/**
+	 * Opens a session of the account, as signing in would, on `device` or on a new device. Returns both ids, for
+	 * a {@link TestPlatform.context} that comes with a real session: revoking it then ends what was born in it.
+	 */
+	session(
+		account: string,
+		device?: string,
+	): { readonly session: string; readonly device: string };
 }
 
 /** What a synthetic context may set besides its account. */
@@ -189,7 +219,7 @@ export interface TestPlatform<
 	 * `NOT_FOUND` for one out of reach, and a `CONFLICT` with its reason when its window closed, it expired or
 	 * it was already consumed or rejected.
 	 */
-	confirm(context: VerifiedContext, id: string): unknown;
+	confirm(context: VerifiedContext, id: string, options?: { readonly proof?: string }): unknown;
 	/** Rejects the pending confirmation `id` through the platform's real operation, with the same rules. */
 	reject(context: VerifiedContext, id: string): void;
 	/**
@@ -198,6 +228,38 @@ export interface TestPlatform<
 	 * account's; anything else is thrown as `FORBIDDEN`.
 	 */
 	delegation(context: VerifiedContext, account: string): DelegationTable;
+	/**
+	 * Asks for a step-up proof of `operation` through the platform's real operation, giving the account's
+	 * `password` (see {@link TestPreparation.password}). Throws `FORBIDDEN` with `reason: "wrong-password"` for a
+	 * wrong one, `FORBIDDEN` for an identity not proven by password, and a bad request for an operation that is
+	 * not sensitive.
+	 */
+	requestProof(
+		context: VerifiedContext,
+		password: string,
+		operation: ProvenOperation,
+	): Promise<IssuedProof>;
+	/** Changes an account's permission in an area: only the admin, on a member or the device account, with a proof. */
+	setPermission(
+		context: VerifiedContext,
+		change: PermissionChange,
+		options: WriteOptions,
+	): WriteOutcome;
+	/** Changes one level of an account's delegation: one's own, or the device account's as admin, with a proof. */
+	setDelegation(
+		context: VerifiedContext,
+		change: DelegationChange,
+		options: WriteOptions,
+	): WriteOutcome;
+	/** Revokes another session of one's own, or of the device account as admin, with a proof. */
+	revokeSession(context: VerifiedContext, session: string, options: WriteOptions): WriteOutcome;
+	/**
+	 * Revokes, as admin and with a proof, the device a session of the device account is on: every session on it
+	 * ends, and so do the pending confirmations and proofs born there.
+	 */
+	revokeDevice(context: VerifiedContext, session: string, options: WriteOptions): WriteOutcome;
+	/** True while the session exists. */
+	hasSession(session: string): boolean;
 	/**
 	 * A read-only snapshot of the action log: every entry, in order, with its content even when expired. That
 	 * exception is only for tests.
@@ -267,7 +329,22 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		grant: (account, area, grant) => prepareGrant(platform, account, area, grant),
 		delegation: (account, area, level, value) =>
 			prepareDelegation(platform, account, area, level, value),
+		session: (account, device) => prepareSession(platform, account, device),
 	};
+	/** Runs one of the platform's sensitive operations through the real path of the actions. */
+	const operate = (
+		context: VerifiedContext,
+		name: string,
+		input: unknown,
+		{ idempotencyKey, proof }: WriteOptions,
+	) =>
+		invokeAction(platform, {
+			context,
+			action: `platform.${name}`,
+			input,
+			idempotencyKey,
+			...(proof === undefined ? {} : { proof }),
+		}) as WriteOutcome;
 	const context = (account: string, options: ContextOptions = {}) =>
 		syntheticContext({
 			account,
@@ -305,14 +382,36 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 				action,
 				input,
 				idempotencyKey: options?.idempotencyKey,
+				...(options?.proof === undefined ? {} : { proof: options.proof }),
 			}) as never,
-		undo: (context, entry, { idempotencyKey }) =>
-			undoEntry(platform, { context, entry, idempotencyKey }),
-		confirm: (context, id) => confirmPending(platform, { context, confirmation: id }),
+		undo: (context, entry, { idempotencyKey, proof }) =>
+			undoEntry(platform, {
+				context,
+				entry,
+				idempotencyKey,
+				...(proof === undefined ? {} : { proof }),
+			}),
+		confirm: (context, id, options) =>
+			confirmPending(platform, {
+				context,
+				confirmation: id,
+				...(options?.proof === undefined ? {} : { proof: options.proof }),
+			}),
 		reject: (context, id) => {
 			rejectPending(platform, { context, confirmation: id });
 		},
 		delegation: (context, account) => readDelegationOf(platform, context, account),
+		requestProof: (context, password, operation) =>
+			requestProofOf(platform, context, { password, operation }),
+		setPermission: (context, change, options) =>
+			operate(context, "setPermission", change, options),
+		setDelegation: (context, change, options) =>
+			operate(context, "setDelegation", change, options),
+		revokeSession: (context, session, options) =>
+			operate(context, "revokeSession", { session }, options),
+		revokeDevice: (context, session, options) =>
+			operate(context, "revokeDevice", { session }, options),
+		hasSession: (session) => hasSession(platform, session),
 		log: () => readLog(platform),
 		close,
 		[Symbol.asyncDispose]: () => Promise.resolve(close()),

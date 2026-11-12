@@ -67,9 +67,95 @@ export const confirmContract = oc.input(pendingConfirmation).output(z.unknown())
 /** Rejecting one of one's own pending confirmations from the app, with the same rules as confirming. */
 export const rejectContract = oc.input(pendingConfirmation);
 
+/**
+ * The inputs of the platform's sensitive operations (ADR 0023), which run on the path of the actions as
+ * `platform.<name>`: that name and this input are what a step-up proof is asked for.
+ */
+export const SENSITIVE_INPUTS = {
+	setPermission: z.object({
+		account: z.string().min(1),
+		area: z.string().min(1),
+		level: z.enum(["none", "read", "write", "manage"]),
+	}),
+	setDelegation: z.object({
+		account: z.string().min(1),
+		area: z.string().min(1),
+		level: z.enum(["read", "write", "manage"]),
+		value: z.enum(["no", "yes", "confirm"]),
+	}),
+	revokeSession: z.object({ session: z.string().min(1) }),
+	revokeDevice: z.object({ session: z.string().min(1) }),
+};
+
+/**
+ * What a write answers the first time, its result and the number of its entry in the action log, or, repeated
+ * under the same key, an acknowledgement without content.
+ */
+function writeOutcome<TResult extends z.ZodType>(result: TResult) {
+	return z.union([
+		z.object({ result, entry: z.number().int() }),
+		z.object({ entry: z.number().int(), repeated: z.literal(true) }),
+	]);
+}
+
+/**
+ * Asking for a step-up proof (GLOSSARY: comprobante): the current password and the exact operation it is for,
+ * an action (`<module>.<action>`, or `platform.<name>` for one of {@link SENSITIVE_INPUTS}) with the input it
+ * will run with, or the undo of an entry. The proof travels with that operation in the `step-up-proof` header
+ * and is good once, for five minutes, from this session and device. A wrong password answers `FORBIDDEN`; no
+ * error repeats it.
+ */
+export const requestProofContract = oc
+	.errors({ FORBIDDEN: { data: z.object({ reason: z.literal("wrong-password") }) } })
+	.input(
+		z.object({
+			password: z.string().min(1).max(PASSWORD_LENGTH.max),
+			operation: z.union([
+				z.object({ action: z.string().min(1), input: z.unknown().optional() }),
+				z.object({ undo: z.number().int().positive() }),
+			]),
+		}),
+	)
+	.output(z.object({ proof: z.string(), expiresAt: z.number().int() }));
+
+/** Changing an account's permission in an area: only the admin, on a member or the device account. */
+export const setPermissionContract = oc
+	.input(SENSITIVE_INPUTS.setPermission)
+	.output(writeOutcome(SENSITIVE_INPUTS.setPermission));
+
+/** Changing one level of an account's delegation: one's own, or the device account's as admin. */
+export const setDelegationContract = oc
+	.input(SENSITIVE_INPUTS.setDelegation)
+	.output(writeOutcome(SENSITIVE_INPUTS.setDelegation));
+
+/**
+ * Revoking another session of one's own, or one of the device account as admin. The current one ends by
+ * signing out. Its pending confirmations and proofs end with it.
+ */
+export const revokeSessionContract = oc
+	.input(SENSITIVE_INPUTS.revokeSession)
+	.output(writeOutcome(SENSITIVE_INPUTS.revokeSession));
+
+/**
+ * Revoking, as admin, the device a session of the device account is on: every session on it ends, whoever's,
+ * and so do the pending confirmations and proofs born there.
+ */
+export const revokeDeviceContract = oc
+	.input(SENSITIVE_INPUTS.revokeDevice)
+	.output(writeOutcome(z.object({ endedSessions: z.number().int() })));
+
+/**
+ * The platform's operations. Each sensitive one (permissions, delegation, revoking sessions and devices) is a
+ * write: it takes its idempotency key and its step-up proof in headers, and answers `STEP_UP_REQUIRED` (403)
+ * without a proof that matches it.
+ */
 export const platformContract = {
 	status: statusContract,
 	password: { change: changePasswordContract },
-	sessions: { list: listSessionsContract },
+	sessions: { list: listSessionsContract, revoke: revokeSessionContract },
 	confirmations: { confirm: confirmContract, reject: rejectContract },
+	proofs: { request: requestProofContract },
+	permissions: { set: setPermissionContract },
+	delegation: { set: setDelegationContract },
+	devices: { revoke: revokeDeviceContract },
 };

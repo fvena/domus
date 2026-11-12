@@ -10,11 +10,14 @@ import Database from "better-sqlite3";
 import { type Actions, type Clock, createActions } from "./actions";
 import { type Capture, installCapture } from "./actions/capture";
 import { type ConfirmationTimes, createConfirmations } from "./actions/confirmations";
+import { createProofs, type Proofs } from "./actions/proofs";
 import { type ActionLog, createActionLog } from "./audit";
 import { type AreaPolicy, type Authorizer, createAuthorizer } from "./authorization";
 import { accessView, registeredAreas } from "./identity/access";
 import { ensureDeviceAccount } from "./identity/accounts";
 import type { DelegationReader } from "./identity/delegation";
+import { platformOperations } from "./identity/operations";
+import type { ProofIssuer } from "./identity/proofs";
 import { migrations } from "./migrations";
 import { migrate } from "./migrator";
 
@@ -75,6 +78,7 @@ const internals = new WeakMap<
 		readonly clock: Clock;
 		readonly areas: ReadonlyMap<string, AreaPolicy>;
 		readonly authorizer: Authorizer;
+		readonly proofs: Proofs;
 	}
 >();
 
@@ -138,6 +142,7 @@ export function openPlatform(
 	const actionLog = createActionLog(db);
 	const view = accessView(db, areas);
 	const decider = authorizer ?? createAuthorizer(view);
+	const proofs = createProofs(db);
 	const actions = createActions({
 		connection: db,
 		modules,
@@ -149,6 +154,8 @@ export function openPlatform(
 		actionLog,
 		retention,
 		confirmations: createConfirmations(db, confirmationTimes),
+		proofs,
+		operations: platformOperations(db, areas),
 	});
 	internals.set(platform, {
 		db,
@@ -158,6 +165,7 @@ export function openPlatform(
 		clock,
 		areas,
 		authorizer: decider,
+		proofs,
 	});
 	return platform;
 }
@@ -192,6 +200,12 @@ export function actionLogOf(platform: Platform): ActionLog {
 export function delegationReaderOf(platform: Platform): DelegationReader {
 	const { db, areas, authorizer } = internalsOf(platform);
 	return { connection: db, areas, authorizer };
+}
+
+/** What asking for a step-up proof needs: the connection, the actions, where proofs live and the clock. Inside platform only. */
+export function proofIssuerOf(platform: Platform): ProofIssuer {
+	const { db, actions, proofs, clock } = internalsOf(platform);
+	return { connection: db, actions, proofs, clock };
 }
 
 /** The registered areas, the platform's own first. Inside platform only. */

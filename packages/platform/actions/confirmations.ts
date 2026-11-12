@@ -189,6 +189,18 @@ function pendingOf(row: Row | undefined): PendingConfirmation | undefined {
 }
 
 /**
+ * Ends every pending confirmation born on the device still waiting, as revoking the device does, inside the
+ * caller's transaction.
+ */
+export function endConfirmationsOnDevice(connection: Database.Database, device: string): void {
+	connection
+		.prepare(
+			"UPDATE platform_confirmations SET state = 'ended' WHERE state = 'pending' AND json_extract(origin, '$.device') = ?",
+		)
+		.run(device);
+}
+
+/**
  * Ends every pending confirmation of the account still waiting, as changing its password does, inside the
  * caller's transaction.
  */

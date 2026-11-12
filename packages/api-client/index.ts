@@ -1,7 +1,8 @@
 // The API client: a thin oRPC link. It knows no contract of its own; callers pass the contract and
 // get a typed client. Authentication and retries belong to the caller, not here: in the browser the session
 // travels in its cookie; elsewhere the caller's `fetch` or `headers` carry it. A write's idempotency key goes
-// in the call's context, `{ context: { idempotencyKey } }`, and travels as a header.
+// in the call's context, `{ context: { idempotencyKey } }`, and travels as a header; so does the step-up proof of
+// a sensitive operation, `{ context: { proof } }`.
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { AnyContractRouter, ContractRouterClient } from "@orpc/contract";
@@ -16,15 +17,19 @@ export interface Transport {
 	headers?: HeaderValues | (() => HeaderValues | Promise<HeaderValues>);
 }
 
-/** What a single call may add: the idempotency key of a write. */
+/** What a single call may add: the idempotency key of a write, and the step-up proof of a sensitive operation. */
 export interface CallContext {
 	idempotencyKey?: string;
+	proof?: string;
 }
 
 const RPC_PATH = "/api/rpc";
 
 /** The header the door reads a write's idempotency key from. */
 const IDEMPOTENCY_KEY_HEADER = "idempotency-key";
+
+/** The header the door reads a sensitive operation's step-up proof from. */
+const PROOF_HEADER = "step-up-proof";
 
 export function clientFor<T extends AnyContractRouter>(
 	_contract: T,
@@ -43,6 +48,7 @@ export function clientFor<T extends AnyContractRouter>(
 			...(context.idempotencyKey !== undefined && {
 				[IDEMPOTENCY_KEY_HEADER]: context.idempotencyKey,
 			}),
+			...(context.proof !== undefined && { [PROOF_HEADER]: context.proof }),
 		}),
 		...(fetch && { fetch: (request: Request) => fetch(request) }),
 	});

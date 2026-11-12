@@ -74,6 +74,15 @@ export const probeContract = {
 		.output(comment)
 		.errors({ COMMENT_NOT_FOUND: { message: "There is no comment with this id." } }),
 
+	/**
+	 * Makes every note of one's own private or public at once: a setting of level manage, so it asks for a
+	 * step-up proof of this exact input. It cannot be undone. Without notes of one's own there is nothing to do.
+	 */
+	configure: writeAction({ undoable: false, level: "manage" })
+		.input(z.object({ visibility }))
+		.output(z.object({ notes: z.number().int() }))
+		.errors({ NO_NOTES: { message: "There are no notes of one's own to configure." } }),
+
 	/** Every board note one sees, oldest first: public by default, so everyone's. */
 	listBoard: readAction({ area: "probe.board", level: "read" }).output(z.array(entry)),
 	/** Pins a note on the board, public by default. Undone by deleting it. */

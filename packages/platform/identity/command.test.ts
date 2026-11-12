@@ -2,7 +2,15 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createHttpHandler } from "../http";
 import { connectionOf, createPlatform, type Platform } from "../platform";
-import { prepareAccount, readDelegationOf, syntheticContext } from "../testing";
+import {
+	confirmPending,
+	invokeAction,
+	prepareAccount,
+	prepareDelegation,
+	readDelegationOf,
+	requestProofOf,
+	syntheticContext,
+} from "../testing";
 import { parseAccountsArguments, runAccounts } from "./command";
 import { accountByEmail } from "./passwords";
 
@@ -173,6 +181,52 @@ describe("runAccounts", () => {
 		expect(await stillSignedIn(luis)).toBe(true);
 		expect((await signIn("ana@domus.test", SECRET)).status).toBe(401);
 		expect((await signIn("ana@domus.test", NEW_SECRET)).status).toBe(200);
+	});
+
+	it("ends every step-up proof and pending confirmation of the account", async () => {
+		await run(platform, createAna, SECRET, SECRET);
+		const ana = accountByEmail(connectionOf(platform), "ana@domus.test")?.id ?? "";
+		const context = syntheticContext({
+			account: ana,
+			device: "d1",
+			session: "s1",
+			deviceAccount: ana,
+			channel: "app",
+			identity: "password",
+		});
+		const change = { account: ana, area: "platform", level: "read", value: "confirm" };
+		const { proof } = await requestProofOf(platform, context, {
+			password: SECRET,
+			operation: { action: "platform.setDelegation", input: change },
+		});
+		prepareDelegation(platform, ana, "platform", "write", "confirm");
+		let pending = "";
+		try {
+			invokeAction(platform, {
+				context: syntheticContext({ ...context, via: "kira" }),
+				action: "platform.revokeSession",
+				input: { session: "s2" },
+				idempotencyKey: "r1",
+			});
+		} catch (error) {
+			pending = (error as { data: { confirmation: string } }).data.confirmation;
+		}
+		expect(pending).not.toBe("");
+
+		await run(platform, ["password", "--email", "ana@domus.test"], NEW_SECRET, NEW_SECRET);
+
+		expect(() =>
+			invokeAction(platform, {
+				context,
+				action: "platform.setDelegation",
+				input: change,
+				idempotencyKey: "d1",
+				proof,
+			}),
+		).toThrow(expect.objectContaining({ code: "STEP_UP_REQUIRED" }));
+		expect(() => confirmPending(platform, { context, confirmation: pending })).toThrow(
+			expect.objectContaining({ data: { reason: "confirmation-expired" } }),
+		);
 	});
 
 	it.each([

@@ -181,6 +181,20 @@ export default defineModule({
 			return { result: deleted, touched: [{ type: "comment", id: deleted.id }] };
 		},
 
+		configure: ({ db, input, actor, errors }) => {
+			const mine = db
+				.update(schema.notes)
+				.set({ visibility: input.visibility })
+				.where(eq(schema.notes.owner, actor.account))
+				.returning({ id: schema.notes.id })
+				.all();
+			if (mine.length === 0) throw errors.NO_NOTES();
+			return {
+				result: { notes: mine.length },
+				touched: mine.map(({ id }) => ({ type: "note", id })),
+			};
+		},
+
 		listBoard: ({ db, visible }) => entriesOf(db, visible, schema.board),
 		addBoardNote: ({ db, input, ownership }) => {
 			const added = db

@@ -46,4 +46,15 @@ export const generatedMigrations: readonly ModuleMigration[] = [
 			"\nCREATE INDEX `platform_confirmations_session` ON `platform_confirmations` (`session`);",
 		],
 	},
+	{
+		tag: "0005_perfect_ultragirl",
+		position: 6,
+		hash: "1ac2aeb77d2324cb4ef0976c2d7592fc3b0120d658bd6291c7a338616878bc75",
+		statements: [
+			"CREATE TABLE `platform_proofs` (\n\t`hash` text PRIMARY KEY NOT NULL,\n\t`account` text NOT NULL,\n\t`session` text,\n\t`origin_session` text,\n\t`bound` integer NOT NULL,\n\t`device` text NOT NULL,\n\t`fingerprint` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`expires_at` integer NOT NULL,\n\t`state` text NOT NULL,\n\t`entry` integer,\n\tFOREIGN KEY (`account`) REFERENCES `platform_user`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`session`) REFERENCES `platform_session`(`id`) ON UPDATE no action ON DELETE set null,\n\tFOREIGN KEY (`entry`) REFERENCES `platform_action_log`(`entry`) ON UPDATE no action ON DELETE no action,\n\tCONSTRAINT \"platform_proofs_state\" CHECK(\"platform_proofs\".\"state\" IN ('issued', 'used', 'ended'))\n);\n",
+			"\nCREATE INDEX `platform_proofs_account` ON `platform_proofs` (`account`);",
+			"\nCREATE INDEX `platform_proofs_session` ON `platform_proofs` (`session`);",
+			"\nCREATE INDEX `platform_proofs_device` ON `platform_proofs` (`device`);",
+		],
+	},
 ];

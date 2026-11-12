@@ -1,7 +1,7 @@
 // The only place where permission is decided (ADR 0010, ADR 0023). `decide` is a pure, synchronous function,
 // because writes ask it inside their transaction: it takes the verified context, the action with the permission
-// its contract declares, the validated input and a read-only view of roles, permissions and areas. The steps
-// that later tickets add sit where the comments in `decide` say. Fails closed: a throw denies.
+// its contract declares, the validated input and a read-only view of roles, permissions, delegation and areas,
+// and answers in the order of ADR 0023. Fails closed: a throw denies.
 import type { Visibility } from "@domus/module-sdk";
 import type { PermissionLevel } from "@domus/module-sdk/contracts";
 
@@ -56,10 +56,25 @@ export interface AuthorizationRequest {
 	readonly confirmed?: boolean;
 	/**
 	 * For an operation of the platform on one account's own settings, such as its delegation table: that
-	 * account. Only the account itself reaches them, and the admin those of the device account.
+	 * account. Only the account itself reaches them, and the admin those of the device account. Changing
+	 * permissions has its own rule: only the admin, on a member or the device account.
 	 */
 	readonly subject?: string;
+	/**
+	 * A sensitive operation of the platform (GLOSSARY: comprobante): changing permissions or a delegation table,
+	 * or revoking sessions or a device. An action is sensitive by its `manage` level.
+	 */
+	readonly sensitive?: SensitiveOperation;
+	/**
+	 * The step-up proof the request brings, as the path of the actions found it: `valid` when it was issued for
+	 * this account, session, device and exact operation and is still usable; `invalid` otherwise. Absent when
+	 * it brings none. The proof itself never reaches here.
+	 */
+	readonly proof?: "valid" | "invalid";
 }
+
+/** The sensitive operations of the platform: changing access or delegation, and revoking sessions or devices. */
+export type SensitiveOperation = "permissions" | "delegation" | "sessions";
 
 /** The entry an undo undoes: its number, the action it logged by its full name, and who asked for it. */
 export interface UndoContext {
@@ -89,10 +104,10 @@ export interface AccessView {
 }
 
 /**
- * Allow, deny, or ask the person to confirm first (a pending confirmation). Ticket 09 adds asking for a
- * step-up proof.
+ * Allow, deny, ask the person to confirm first (a pending confirmation), or ask for a step-up proof of this
+ * exact operation (GLOSSARY: comprobante).
  */
-export type Decision = "allow" | "deny" | "confirm";
+export type Decision = "allow" | "deny" | "confirm" | "step-up";
 
 export type Authorizer = (request: AuthorizationRequest) => Decision;
 
@@ -135,6 +150,15 @@ function reachesSettingsOf(view: AccessView, account: string, subject: string): 
 	return view.roleOf(account) === "admin" && view.roleOf(subject) === "device";
 }
 
+/**
+ * True when `account` may change the permissions of `subject`: only the admin, on a member or the device
+ * account. So nobody changes their own.
+ */
+function changesPermissionsOf(view: AccessView, account: string, subject: string): boolean {
+	const role = view.roleOf(subject);
+	return view.roleOf(account) === "admin" && (role === "member" || role === "device");
+}
+
 /** What the account delegates for the permission: `no` when it has no row. */
 export function delegationOf(
 	view: AccessView,
@@ -146,9 +170,14 @@ export function delegationOf(
 
 /** The decision, in the order of ADR 0023. Pure: everything it reads comes in `request` and `view`. */
 export function decide(request: AuthorizationRequest, view: AccessView): Decision {
-	const { context, permission, subject } = request;
-	// An account's own settings: only that account, or the admin for the device account.
-	if (subject !== undefined && !reachesSettingsOf(view, context.account, subject)) return "deny";
+	const { context, permission, subject, sensitive } = request;
+	// Permissions: only the admin, on another account. An account's own settings: only that account, or the
+	// admin for the device account.
+	if (sensitive === "permissions") {
+		if (subject === undefined || !changesPermissionsOf(view, context.account, subject))
+			return "deny";
+	} else if (subject !== undefined && !reachesSettingsOf(view, context.account, subject))
+		return "deny";
 	// 1. The represented account's permission in the area reaches the level asked for.
 	if (!reaches(grantOf(view, context.account, permission.area), permission.level)) return "deny";
 	// Each later step may deny or ask for confirmation; a denial wins, and confirmation is asked only once.
@@ -160,7 +189,19 @@ export function decide(request: AuthorizationRequest, view: AccessView): Decisio
 		if (delegated === "no") return "deny";
 		if (delegated === "confirm") ask = true;
 	}
-	// 3. Sensitive operations ask for a step-up proof (ticket 09).
+	// 3. Sensitive operations ask for a step-up proof, which only an identity proven by password can bring; via
+	// Kira, changing access or delegation is denied whatever it brings. A proof brought to an operation that is
+	// not sensitive does not match it either.
+	let stepUp = false;
+	if (permission.level === "manage" || sensitive !== undefined) {
+		if (context.identity !== "password") return "deny";
+		if (
+			context.via !== undefined &&
+			(sensitive === "permissions" || sensitive === "delegation")
+		)
+			return "deny";
+		if (request.proof !== "valid") stepUp = true;
+	} else if (request.proof !== undefined) stepUp = true;
 	// 4. An action that always asks for confirmation.
 	if (permission.alwaysConfirm === true) ask = true;
 	// 5. The shared device rule: on a device signed in with the device account, reading an area that declares
@@ -173,7 +214,9 @@ export function decide(request: AuthorizationRequest, view: AccessView): Decisio
 		if (context.account === context.deviceAccount) return "deny";
 		ask = true;
 	}
-	return ask && request.confirmed !== true ? "confirm" : "allow";
+	// Confirming comes first: an operation that asks both takes its proof when it is confirmed.
+	if (ask && request.confirmed !== true) return "confirm";
+	return stepUp ? "step-up" : "allow";
 }
 
 /** The production authorizer: {@link decide} over the view it is given. */
@@ -190,7 +233,9 @@ export function isAllowed(authorizer: Authorizer, request: AuthorizationRequest)
 export function decisionOf(authorizer: Authorizer, request: AuthorizationRequest): Decision {
 	try {
 		const decision = authorizer(request);
-		return decision === "allow" || decision === "confirm" ? decision : "deny";
+		return decision === "allow" || decision === "confirm" || decision === "step-up"
+			? decision
+			: "deny";
 	} catch {
 		return "deny";
 	}

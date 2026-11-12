@@ -1,8 +1,9 @@
+import { ORPCError } from "@orpc/server";
 // What only test-utils takes from platform (ADR 0021, ADR 0022, ADR 0023): the Drizzle client of a module, behind
 // dbFor; a platform with the real authorization and a clock the test chooses; the way to invoke its actions and
 // undo their entries with a verified context; synthetic verified contexts; the privileged preparation of
-// accounts, roles, passwords, permission rows and delegation rows, without a session or a proof; the platform's
-// real read of a delegation table; and a read of its action log. A rule of .dependency-cruiser.cjs keeps every
+// accounts, roles, passwords, permission rows, delegation rows and sessions, without a session or a proof; the
+// platform's real read of a delegation table and real request of a step-up proof; and a read of its action log. A rule of .dependency-cruiser.cjs keeps every
 // other importer out, production code of platform included; the main entry offers none of it.
 import { hashPassword } from "better-auth/crypto";
 
@@ -20,10 +21,17 @@ import {
 	ensureDeviceAccount,
 	insertAccount,
 	type NewAccount,
+	randomId,
 	setGrant,
 	setPasswordHash,
 } from "../identity/accounts";
 import { type DelegationTable, readDelegation, setDelegation } from "../identity/delegation";
+import {
+	type IssuedProof,
+	type ProofRequest,
+	requestProof,
+	WrongPasswordError,
+} from "../identity/proofs";
 import {
 	actionLogOf,
 	actionsOf,
@@ -34,9 +42,11 @@ import {
 	openPlatform,
 	type Platform,
 	type PlatformOptions,
+	proofIssuerOf,
 } from "../platform";
 
-export type { Acknowledgement, WriteOutcome, WriteReceipt } from "../actions";
+export type { Acknowledgement, ProvenOperation, WriteOutcome, WriteReceipt } from "../actions";
+export type { IssuedProof, ProofRequest } from "../identity/proofs";
 export type { LogEntry } from "../audit";
 export type { DelegationTable } from "../identity/delegation";
 export type {
@@ -142,6 +152,57 @@ export function readDelegationOf(
 	account: string,
 ): DelegationTable {
 	return readDelegation(delegationReaderOf(platform), context, account);
+}
+
+/**
+ * Asks for a step-up proof through the platform's real operation: the password is checked as Better Auth does.
+ * A wrong one is thrown as `FORBIDDEN` with `reason: "wrong-password"`, as the door answers it.
+ */
+export async function requestProofOf(
+	platform: Platform,
+	context: VerifiedContext,
+	request: ProofRequest,
+): Promise<IssuedProof> {
+	try {
+		return await requestProof(proofIssuerOf(platform), context, request);
+	} catch (error) {
+		if (error instanceof WrongPasswordError)
+			throw new ORPCError("FORBIDDEN", { data: { reason: "wrong-password" } });
+		throw error;
+	}
+}
+
+/**
+ * Opens a session of the account on a device, as signing in would, without a password: on the device given, or
+ * on a new one. Returns the ids of both, for synthetic contexts that come with a real session.
+ */
+export function prepareSession(
+	platform: Platform,
+	account: string,
+	device?: string,
+): { readonly session: string; readonly device: string } {
+	const connection = connectionOf(platform);
+	const now = clockOf(platform)();
+	const onDevice = device ?? randomId();
+	connection
+		.prepare("INSERT OR IGNORE INTO platform_devices (id, created_at) VALUES (?, ?)")
+		.run(onDevice, now);
+	const session = randomId();
+	connection
+		.prepare(
+			"INSERT INTO platform_session (id, user_id, device_id, token, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		)
+		.run(session, account, onDevice, randomId(), now + 7 * 24 * 60 * 60 * 1000, now, now);
+	return { session, device: onDevice };
+}
+
+/** True while a session with this id exists. */
+export function hasSession(platform: Platform, session: string): boolean {
+	return (
+		connectionOf(platform)
+			.prepare("SELECT 1 FROM platform_session WHERE id = ?")
+			.get(session) !== undefined
+	);
 }
 
 /** The id of the one device account, which the platform created at start. */

@@ -3,8 +3,10 @@
 // platform's procedures and the actions of the modules it receives, at `<module>/<action>`. Each action needs a
 // valid session: the door builds the verified context from it, ignores anything the client declares about who
 // it is, and hands it to the one path of the actions. So do the platform's own operations on one's password
-// (it asks for the current one and keeps only this session), sessions (only one's own, with their device) and
-// pending confirmations (confirming or rejecting one's own, by the app).
+// (it asks for the current one and keeps only this session), sessions (only one's own, with their device),
+// pending confirmations (confirming or rejecting one's own, by the app) and step-up proofs (asking for one with
+// the password). The sensitive ones (changing permissions and delegation, revoking sessions and devices) are
+// writes on that same path. A write's idempotency key and a sensitive operation's step-up proof come in headers.
 import type { ModuleDefinition } from "@domus/module-sdk";
 import { implement, ORPCError, os } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
@@ -19,7 +21,8 @@ import {
 	SessionGoneError,
 	sessionsOf,
 } from "../identity/passwords";
-import { actionsOf, clockOf, connectionOf, type Platform } from "../platform";
+import { requestProof, WrongPasswordError } from "../identity/proofs";
+import { actionsOf, clockOf, connectionOf, type Platform, proofIssuerOf } from "../platform";
 
 export interface HttpHandler {
 	/** A plain function, safe to pass around as `fetch`. */
@@ -32,6 +35,9 @@ const RPC_PREFIX = "/api/rpc";
 /** The header that carries a write's idempotency key; @domus/api-client sends it from the call's context. */
 const IDEMPOTENCY_KEY_HEADER = "idempotency-key";
 
+/** The header that carries a sensitive operation's step-up proof; @domus/api-client sends it from the call's context. */
+const PROOF_HEADER = "step-up-proof";
+
 /** The only routes of Better Auth the door lets through: everything else of it answers 404. */
 const AUTH_ROUTES: readonly string[] = ["/sign-in/email", "/sign-out"];
 
@@ -43,10 +49,11 @@ export interface HttpHandlerOptions {
 	readonly auth: AuthOptions;
 }
 
-/** What each RPC call carries: who it comes from, once a procedure asks, and its idempotency key. */
+/** What each RPC call carries: who it comes from, once a procedure asks, its idempotency key and its proof. */
 interface DoorContext {
 	readonly verify: () => Promise<VerifiedContext | null>;
 	readonly idempotencyKey: string | undefined;
+	readonly proof: string | undefined;
 }
 
 const platformProcedures = implement(platformContract).$context<DoorContext>();
@@ -56,6 +63,17 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	const connection = connectionOf(platform);
 	const identity = createAuth(connection, auth);
 	const actions = actionsOf(platform);
+
+	/** Runs one of the platform's sensitive operations on the path of the actions, as a write with a session. */
+	async function sensitive(name: string, input: unknown, context: DoorContext): Promise<never> {
+		return actions.invoke({
+			context: await verifiedSession(context),
+			action: `platform.${name}`,
+			input,
+			idempotencyKey: context.idempotencyKey,
+			proof: context.proof,
+		}) as never;
+	}
 
 	/** The verified context of a platform operation, which always needs a session. */
 	async function verifiedSession(context: DoorContext): Promise<VerifiedContext> {
@@ -87,6 +105,7 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 						action: `${module.id}.${name}`,
 						input,
 						idempotencyKey: context.idempotencyKey,
+						proof: context.proof,
 					});
 				}),
 			]),
@@ -126,6 +145,41 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 				const { account, session } = await signedIn(context);
 				return sessionsOf(connection, account, session);
 			}),
+			revoke: platformProcedures.sessions.revoke.handler(({ input, context }) =>
+				sensitive("revokeSession", input, context),
+			),
+		},
+		devices: {
+			revoke: platformProcedures.devices.revoke.handler(({ input, context }) =>
+				sensitive("revokeDevice", input, context),
+			),
+		},
+		permissions: {
+			set: platformProcedures.permissions.set.handler(({ input, context }) =>
+				sensitive("setPermission", input, context),
+			),
+		},
+		delegation: {
+			set: platformProcedures.delegation.set.handler(({ input, context }) =>
+				sensitive("setDelegation", input, context),
+			),
+		},
+		proofs: {
+			request: platformProcedures.proofs.request.handler(
+				async ({ input, context, errors }) => {
+					try {
+						return await requestProof(
+							proofIssuerOf(platform),
+							await verifiedSession(context),
+							input,
+						);
+					} catch (error) {
+						if (error instanceof WrongPasswordError)
+							throw errors.FORBIDDEN({ data: { reason: "wrong-password" } });
+						throw error;
+					}
+				},
+			),
 		},
 		confirmations: {
 			confirm: platformProcedures.confirmations.confirm.handler(async ({ input, context }) =>
@@ -159,6 +213,7 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 				// Read once per request, only when a procedure needs it: status works without a session.
 				verify: () => (verified ??= contextOf(request, responseHeaders)),
 				idempotencyKey: request.headers.get(IDEMPOTENCY_KEY_HEADER) ?? undefined,
+				proof: request.headers.get(PROOF_HEADER) ?? undefined,
 			},
 		});
 		if (!matched) return c.notFound();

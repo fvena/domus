@@ -6,6 +6,7 @@ import {
 	type AuthorizationRequest,
 	createAuthorizer,
 	decide,
+	decisionOf,
 	type Delegated,
 	type Grant,
 	isAllowed,
@@ -68,6 +69,8 @@ function request(
 		kind: level === "read" ? "read" : "write",
 		permission: { area, level },
 		input: undefined,
+		// A manage level is sensitive: these tests of levels bring the step-up proof it asks for.
+		...(level === "manage" ? { proof: "valid" as const } : {}),
 	};
 }
 
@@ -323,6 +326,113 @@ describe("decide on an account's own settings", () => {
 	});
 });
 
+describe("decide on a sensitive operation", () => {
+	const view = viewOf(
+		{ paco: "admin", ana: "member", luis: "member", kitchen: "device" },
+		{},
+		{
+			"ana/platform/write": "yes",
+			"paco/notes/manage": "yes",
+		},
+	);
+	const platformView: AccessView = {
+		...view,
+		area: (id) => (id === "platform" ? policy({}) : AREAS[id]),
+	};
+	/** A sensitive operation of the platform: changing access or delegation, or revoking sessions. */
+	const operation = (
+		account: string,
+		sensitive: NonNullable<AuthorizationRequest["sensitive"]>,
+		subject: string,
+		options: { via?: string; proof?: "valid" | "invalid" } = {},
+	): AuthorizationRequest => ({
+		...request(account, "platform", "write", options.via),
+		sensitive,
+		subject,
+		...(options.proof === undefined ? {} : { proof: options.proof }),
+	});
+	const manage = (account: string, proof?: "valid" | "invalid"): AuthorizationRequest => {
+		const { proof: _proof, ...base } = request(account, "notes", "manage");
+		return proof === undefined ? base : { ...base, proof };
+	};
+	const proven = (identity: "password" | "voice" | "device") => {
+		const base = manage("paco", "valid");
+		return { ...base, context: sealContext({ ...base.context, identity }) };
+	};
+
+	it("asks for a step-up proof on a manage level, and allows it with a valid one", () => {
+		expect(decide(manage("paco"), view)).toBe("step-up");
+		expect(decide(manage("paco", "invalid"), view)).toBe("step-up");
+		expect(decide(manage("paco", "valid"), view)).toBe("allow");
+	});
+
+	it("asks for a proof on changing access, delegation or sessions", () => {
+		expect(decide(operation("paco", "permissions", "ana"), platformView)).toBe("step-up");
+		expect(decide(operation("ana", "delegation", "ana"), platformView)).toBe("step-up");
+		expect(decide(operation("ana", "sessions", "ana"), platformView)).toBe("step-up");
+		expect(
+			decide(operation("paco", "permissions", "ana", { proof: "valid" }), platformView),
+		).toBe("allow");
+	});
+
+	it("denies it when the identity was proven by voice or by the device, even with a proof", () => {
+		expect(decide(proven("password"), view)).toBe("allow");
+		expect(decide(proven("voice"), view)).toBe("deny");
+		expect(decide(proven("device"), view)).toBe("deny");
+	});
+
+	it("denies changing access or delegation via Kira, even with a proof and the delegation", () => {
+		const viaKira = { via: "kira", proof: "valid" } as const;
+
+		expect(decide(operation("ana", "delegation", "ana", viaKira), platformView)).toBe("deny");
+		expect(decide(operation("paco", "permissions", "ana", viaKira), platformView)).toBe("deny");
+		expect(decide(operation("ana", "sessions", "ana", viaKira), platformView)).toBe("allow");
+	});
+
+	it("lets only the admin change permissions, of a member or the device account, never its own", () => {
+		const proof = { proof: "valid" } as const;
+		const permissions = (account: string, subject: string) =>
+			decide(operation(account, "permissions", subject, proof), platformView);
+
+		expect(permissions("paco", "ana")).toBe("allow");
+		expect(permissions("paco", "kitchen")).toBe("allow");
+		expect(permissions("paco", "paco")).toBe("deny");
+		expect(permissions("ana", "ana")).toBe("deny");
+		expect(permissions("ana", "luis")).toBe("deny");
+		expect(permissions("paco", "nobody")).toBe("deny");
+	});
+
+	it("lets each person change their own delegation, and the admin the device account's", () => {
+		const proof = { proof: "valid" } as const;
+		const delegation = (account: string, subject: string) =>
+			decide(operation(account, "delegation", subject, proof), platformView);
+
+		expect(delegation("ana", "ana")).toBe("allow");
+		expect(delegation("paco", "kitchen")).toBe("allow");
+		expect(delegation("ana", "luis")).toBe("deny");
+		expect(delegation("paco", "ana")).toBe("deny");
+	});
+
+	it("takes a proof brought to an operation that is not sensitive as not matching", () => {
+		expect(decide({ ...request("ana", "notes", "write"), proof: "valid" }, view)).toBe(
+			"step-up",
+		);
+	});
+
+	it("asks for confirmation first, and for the proof once it is confirmed", () => {
+		const { proof: _proof, ...asked } = request("paco", "notes", "manage", "kira");
+		const always: AuthorizationRequest = {
+			...asked,
+			permission: { ...asked.permission, alwaysConfirm: true },
+		};
+
+		expect(decide(always, view)).toBe("confirm");
+		expect(decide({ ...always, proof: "valid" }, view)).toBe("confirm");
+		expect(decide({ ...always, confirmed: true }, view)).toBe("step-up");
+		expect(decide({ ...always, confirmed: true, proof: "valid" }, view)).toBe("allow");
+	});
+});
+
 describe("the production authorizer", () => {
 	it("denies when reading the view throws", () => {
 		const authorizer = createAuthorizer({
@@ -342,6 +452,14 @@ describe("the production authorizer", () => {
 
 		expect(isAllowed(authorizer, request("ana", "notes", "write"))).toBe(true);
 		expect(isAllowed(authorizer, request("ana", "notes", "manage"))).toBe(false);
+	});
+
+	it("passes asking for a step-up proof through, and does not take it as allowing", () => {
+		const authorizer = createAuthorizer(viewOf({ paco: "admin" }));
+		const { proof: _proof, ...unproven } = request("paco", "notes", "manage");
+
+		expect(decisionOf(authorizer, unproven)).toBe("step-up");
+		expect(isAllowed(authorizer, unproven)).toBe(false);
 	});
 
 	it("does not take asking for confirmation as allowing", () => {
