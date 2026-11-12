@@ -226,7 +226,9 @@ export const delegation = sqliteTable(
  * operation (`operation`, with its fingerprint), whether it reads or writes, a write's idempotency key, the
  * verified context it was born in and its two absolute deadlines: the voice window and its expiry. `session` is
  * the session it was born in while that session lives: revoking it sets it to null, which ends a pending
- * confirmation that was `bound` to one. `entry` links a confirmed write to its entry in the action log.
+ * confirmation that was `bound` to one. `context_only` marks one born of the shared device rule: only the
+ * channel `contexto` confirms it, and it expires when its window closes. `entry` links a confirmed write to its
+ * entry in the action log.
  */
 export const confirmations = sqliteTable(
 	"platform_confirmations",
@@ -246,6 +248,7 @@ export const confirmations = sqliteTable(
 		createdAt: integer("created_at").notNull(),
 		windowClosesAt: integer("window_closes_at").notNull(),
 		expiresAt: integer("expires_at").notNull(),
+		contextOnly: integer("context_only", { mode: "boolean" }).notNull().default(false),
 		state: text({ enum: ["pending", "consumed", "rejected", "ended"] }).notNull(),
 		entry: integer().references(() => actionLog.entry),
 	},

@@ -274,9 +274,25 @@ describe("decide on a shared device", () => {
 		};
 	};
 
-	it("asks a recognized member for confirmation to read a confirmOnSharedDevice area", () => {
-		expect(decide(onKitchen("ana", "vitals"), view)).toBe("confirm");
+	it("asks a recognized member to confirm in context only, to read a confirmOnSharedDevice area", () => {
+		expect(decide(onKitchen("ana", "vitals"), view)).toBe("confirm-in-context");
 		expect(decide({ ...onKitchen("ana", "vitals"), confirmed: true }, view)).toBe("allow");
+	});
+
+	it("asks in context only even when the delegation asks to confirm too", () => {
+		const delegating = viewOf(
+			{ ana: "member", kitchen: "device" },
+			{},
+			{ "ana/vitals/read": "confirm" },
+		);
+		const viaKira = { ...onKitchen("ana", "vitals") };
+		const request = {
+			...viaKira,
+			context: sealContext({ ...viaKira.context, via: "kira" }),
+		};
+
+		expect(decide(request, delegating)).toBe("confirm-in-context");
+		expect(decisionOf(createAuthorizer(delegating), request)).toBe("confirm-in-context");
 	});
 
 	it("denies it without a recognized member, even with a row that grants reading", () => {

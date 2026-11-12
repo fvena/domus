@@ -32,6 +32,11 @@ export interface PendingConfirmation {
 	readonly origin: Origin;
 	readonly windowClosesAt: number;
 	readonly expiresAt: number;
+	/**
+	 * Only the channel `contexto` may confirm it, inside its window, which is also when it expires: born of the
+	 * shared device rule (ADR 0023). By the app it is not found.
+	 */
+	readonly contextOnly: boolean;
 	/** `ended` too when the session it was born in was revoked. */
 	readonly state: PendingState;
 }
@@ -43,6 +48,8 @@ export interface NewPending {
 	readonly fingerprint: string;
 	readonly key?: string;
 	readonly origin: VerifiedContext;
+	/** Confirmed only in context, and expiring when its window closes. */
+	readonly contextOnly?: boolean;
 }
 
 /** The two deadlines of a new pending confirmation, in milliseconds from its birth. */
@@ -85,13 +92,14 @@ interface Row {
 	readonly origin: string;
 	readonly window_closes_at: number;
 	readonly expires_at: number;
+	readonly context_only: number;
 	readonly state: PendingState;
 	/** 0 when it was bound to a session that is gone. */
 	readonly live: number;
 }
 
-const COLUMNS = `id, account, via, kind, operation, fingerprint, key, origin, window_closes_at, expires_at, state,
-	(bound = 0 OR session IS NOT NULL) AS live`;
+const COLUMNS = `id, account, via, kind, operation, fingerprint, key, origin, window_closes_at, expires_at,
+	context_only, state, (bound = 0 OR session IS NOT NULL) AS live`;
 
 export function createConfirmations(
 	connection: Database.Database,
@@ -115,9 +123,9 @@ export function createConfirmations(
 	);
 	const insert = connection.prepare(
 		`INSERT INTO platform_confirmations (id, account, via, kind, operation, fingerprint, key, origin, session,
-			bound, created_at, window_closes_at, expires_at, state)
+			bound, created_at, window_closes_at, expires_at, context_only, state)
 		VALUES (@id, @account, @via, @kind, @operation, @fingerprint, @key, @origin, @session, @bound, @createdAt,
-			@windowClosesAt, @expiresAt, 'pending')`,
+			@windowClosesAt, @expiresAt, @contextOnly, 'pending')`,
 	);
 	const settle = connection.prepare<[PendingState, number | null, string]>(
 		"UPDATE platform_confirmations SET state = ?, entry = ? WHERE id = ? AND state = 'pending'",
@@ -138,7 +146,7 @@ export function createConfirmations(
 								pending.origin.conversation === origin.conversation
 							: pending.origin.session === origin.session),
 				),
-		create: ({ kind, operation, fingerprint, key, origin }, now) => {
+		create: ({ kind, operation, fingerprint, key, origin, contextOnly = false }, now) => {
 			const id = randomId();
 			// Bound to its session only when that session is a real one: revoking it then ends this one.
 			const session =
@@ -158,7 +166,9 @@ export function createConfirmations(
 				bound: session === null ? 0 : 1,
 				createdAt: now,
 				windowClosesAt: now + times.window,
-				expiresAt: now + times.expiry,
+				// One confirmed only in context has no later life: it expires with its window.
+				expiresAt: now + (contextOnly ? times.window : times.expiry),
+				contextOnly: contextOnly ? 1 : 0,
 			});
 			return id;
 		},
@@ -184,6 +194,7 @@ function pendingOf(row: Row | undefined): PendingConfirmation | undefined {
 		origin: JSON.parse(row.origin) as Origin,
 		windowClosesAt: row.window_closes_at,
 		expiresAt: row.expires_at,
+		contextOnly: row.context_only === 1,
 		state: row.state === "pending" && row.live === 0 ? "ended" : row.state,
 	};
 }

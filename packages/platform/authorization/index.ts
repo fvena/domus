@@ -105,9 +105,10 @@ export interface AccessView {
 
 /**
  * Allow, deny, ask the person to confirm first (a pending confirmation), or ask for a step-up proof of this
- * exact operation (GLOSSARY: comprobante).
+ * exact operation (GLOSSARY: comprobante). `confirm-in-context` asks for a confirmation that only the channel
+ * `contexto` answers, inside its window, and that expires when the window closes: the shared device rule's.
  */
-export type Decision = "allow" | "deny" | "confirm" | "step-up";
+export type Decision = "allow" | "deny" | "confirm" | "confirm-in-context" | "step-up";
 
 export type Authorizer = (request: AuthorizationRequest) => Decision;
 
@@ -205,7 +206,10 @@ export function decide(request: AuthorizationRequest, view: AccessView): Decisio
 	// 4. An action that always asks for confirmation.
 	if (permission.alwaysConfirm === true) ask = true;
 	// 5. The shared device rule: on a device signed in with the device account, reading an area that declares
-	// `confirmOnSharedDevice` asks a recognized member and is denied to the device account itself.
+	// `confirmOnSharedDevice` asks a recognized member and is denied to the device account itself. Only the same
+	// person may confirm it there, in the same conversation and inside its window: a confirmation from the app,
+	// even from the member's phone, never lets the shared device say it later.
+	let inContext = false;
 	if (
 		request.kind === "read" &&
 		view.roleOf(context.deviceAccount) === "device" &&
@@ -213,9 +217,10 @@ export function decide(request: AuthorizationRequest, view: AccessView): Decisio
 	) {
 		if (context.account === context.deviceAccount) return "deny";
 		ask = true;
+		inContext = true;
 	}
 	// Confirming comes first: an operation that asks both takes its proof when it is confirmed.
-	if (ask && request.confirmed !== true) return "confirm";
+	if (ask && request.confirmed !== true) return inContext ? "confirm-in-context" : "confirm";
 	return stepUp ? "step-up" : "allow";
 }
 
@@ -233,7 +238,10 @@ export function isAllowed(authorizer: Authorizer, request: AuthorizationRequest)
 export function decisionOf(authorizer: Authorizer, request: AuthorizationRequest): Decision {
 	try {
 		const decision = authorizer(request);
-		return decision === "allow" || decision === "confirm" || decision === "step-up"
+		return decision === "allow" ||
+			decision === "confirm" ||
+			decision === "confirm-in-context" ||
+			decision === "step-up"
 			? decision
 			: "deny";
 	} catch {

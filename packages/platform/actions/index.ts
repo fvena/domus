@@ -276,7 +276,8 @@ export function createActions({
 	 */
 	function authorize(request: AuthorizationRequest): void {
 		const decision = decisionOf(authorizer, request);
-		if (decision === "confirm") throw new ConfirmationNeeded();
+		if (decision === "confirm") throw new ConfirmationNeeded(false);
+		if (decision === "confirm-in-context") throw new ConfirmationNeeded(true);
 		if (decision === "step-up") throw stepUpRequired();
 		if (decision !== "allow") throw new ORPCError("FORBIDDEN");
 	}
@@ -286,10 +287,12 @@ export function createActions({
 	 * own, or finds the one the same request left before, and answers `CONFIRMATION_REQUIRED` with its id.
 	 */
 	function orPending<T>(pending: NewPending, operation: () => T): T {
+		let contextOnly: boolean;
 		try {
 			return operation();
 		} catch (error) {
 			if (!(error instanceof ConfirmationNeeded)) throw error;
+			contextOnly = error.contextOnly;
 		}
 		const id = connection.transaction(() => {
 			const { kind, origin, fingerprint, key } = pending;
@@ -297,7 +300,7 @@ export function createActions({
 				kind === "read" || key === undefined
 					? confirmations.findRead(origin, fingerprint, clock())
 					: confirmations.findWrite(actorOf(origin), key);
-			if (!earlier) return confirmations.create(pending, clock());
+			if (!earlier) return confirmations.create({ ...pending, contextOnly }, clock());
 			if (earlier.fingerprint !== fingerprint) throw conflict("key-reused");
 			return earlier.id;
 		})();
@@ -740,8 +743,15 @@ function guarded<T>(operation: () => T): T {
 	}
 }
 
-/** Authorization asked for confirmation: whatever was opened rolls back and the operation waits. */
-class ConfirmationNeeded extends Error {}
+/**
+ * Authorization asked for confirmation: whatever was opened rolls back and the operation waits. `contextOnly`
+ * when only the channel `contexto` may confirm it, inside its window (the shared device rule).
+ */
+class ConfirmationNeeded extends Error {
+	constructor(readonly contextOnly: boolean) {
+		super("confirmation needed");
+	}
+}
 
 function isThenable(value: unknown): value is PromiseLike<unknown> {
 	return (

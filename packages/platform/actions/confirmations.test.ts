@@ -5,7 +5,15 @@ import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { openPlatform, type Platform } from "../platform";
-import { confirmPending, invokeAction, prepareAccount, syntheticContext } from "../testing";
+import {
+	confirmPending,
+	deviceAccountOf,
+	invokeAction,
+	prepareAccount,
+	prepareDelegation,
+	rejectPending,
+	syntheticContext,
+} from "../testing";
 
 const { table } = moduleTables("stamps");
 const stamps = table("items", { id: id(), body: text().notNull() });
@@ -103,5 +111,114 @@ describe("a pending confirmation with a schema that transforms the input", () =>
 			entry: 1,
 		});
 		expect(invokeAction(platform, { context: ana, action: "stamps.list" })).toEqual(["a!"]);
+	});
+});
+
+/** A module whose own area asks for confirmation to be read on a shared device. */
+const vitalsModule = defineModule({
+	id: "vitals",
+	areas: { vitals: { confirmOnSharedDevice: true } },
+	schema: {},
+	migrations: [],
+	contract: {
+		read: readAction({ level: "read" }).output(z.string()),
+		note: writeAction({ undoable: false, level: "write", alwaysConfirm: true }).output(
+			z.string(),
+		),
+	},
+	actions: {
+		read: () => "tensión 12/8",
+		note: () => ({ result: "anotado", touched: [] }),
+	},
+});
+
+describe("a pending confirmation born of the shared device rule", () => {
+	const WINDOW = 60 * 1000;
+	const notFound = expect.objectContaining({ code: "NOT_FOUND" });
+	const conflict = (reason: string) =>
+		expect.objectContaining({ code: "CONFLICT", data: { reason } });
+
+	/** Ana recognized by voice on the kitchen screen, signed in with the device account; `ana` is her phone. */
+	function kitchen() {
+		let now = Date.UTC(2026, 10, 12);
+		const opened = openPlatform(
+			{ databaseFile: ":memory:", modules: [vitalsModule] },
+			{ clock: () => now },
+		);
+		platform = opened;
+		prepareAccount(opened, { id: "ana", name: "Ana", email: "ana@domus.test", role: "member" });
+		prepareDelegation(opened, "ana", "vitals", "read", "yes");
+		prepareDelegation(opened, "ana", "vitals", "write", "yes");
+		const voice = syntheticContext({
+			account: "ana",
+			via: "kira",
+			device: "kitchen",
+			deviceAccount: deviceAccountOf(opened),
+			channel: "contexto",
+			identity: "voice",
+			conversation: "c1",
+		});
+		const readOnScreen = () =>
+			pendingOf(() => invokeAction(opened, { context: voice, action: "vitals.read" }));
+		return {
+			platform: opened,
+			voice,
+			readOnScreen,
+			advance: (milliseconds: number) => {
+				now += milliseconds;
+			},
+		};
+	}
+
+	it("is not found from the app, not even from the member's own phone, which reads anew instead", () => {
+		const { platform: opened, readOnScreen } = kitchen();
+		const pending = readOnScreen();
+
+		expect(() => confirmPending(opened, { context: ana, confirmation: pending })).toThrow(
+			notFound,
+		);
+		expect(() => rejectPending(opened, { context: ana, confirmation: pending })).toThrow(
+			notFound,
+		);
+		expect(invokeAction(opened, { context: ana, action: "vitals.read" })).toBe("tensión 12/8");
+	});
+
+	it("is confirmed once in context while its window is open", () => {
+		const { platform: opened, voice, readOnScreen, advance } = kitchen();
+		const pending = readOnScreen();
+		advance(WINDOW - 1);
+
+		expect(confirmPending(opened, { context: voice, confirmation: pending })).toBe(
+			"tensión 12/8",
+		);
+		expect(() => confirmPending(opened, { context: voice, confirmation: pending })).toThrow(
+			conflict("confirmation-consumed"),
+		);
+	});
+
+	it("expires the millisecond its window closes, for every channel", () => {
+		const { platform: opened, voice, readOnScreen, advance } = kitchen();
+		const pending = readOnScreen();
+		advance(WINDOW);
+
+		expect(() => confirmPending(opened, { context: voice, confirmation: pending })).toThrow(
+			conflict("confirmation-expired"),
+		);
+		expect(() => confirmPending(opened, { context: ana, confirmation: pending })).toThrow(
+			notFound,
+		);
+	});
+
+	it("leaves any other pending of the same screen confirmable from the app within its 24 h", () => {
+		const { platform: opened, voice, advance } = kitchen();
+		const pending = pendingOf(() =>
+			invokeAction(opened, { context: voice, action: "vitals.note", idempotencyKey: "k1" }),
+		);
+		advance(WINDOW);
+
+		expect(confirmPending(opened, { context: ana, confirmation: pending })).toEqual({
+			result: "anotado",
+			entry: 1,
+		});
 	});
 });

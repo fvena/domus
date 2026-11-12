@@ -341,12 +341,15 @@ describe("probe.health on the shared device", () => {
 		expect(() => test.confirm(voice, pending)).toThrow(conflict("confirmation-consumed"));
 	});
 
-	it("confirmed from the app, does not open a later read by voice", async () => {
+	it("is not confirmed from the app, where Ana reads it anew; by voice it ends with its window", async () => {
 		const { test, ana, voice } = kitchen();
 		await using _ = test;
 		const pending = pendingFrom(() => test.invoke(voice, "probe.readHealth"));
 
-		expect(test.confirm(ana, pending)).toEqual([{ id: 1, body: "tensión 12/8" }]);
+		expect(() => test.confirm(ana, pending)).toThrow(notFound);
+		expect(test.invoke(ana, "probe.readHealth")).toEqual([{ id: 1, body: "tensión 12/8" }]);
+		test.clock.advance(WINDOW);
+		expect(() => test.confirm(voice, pending)).toThrow(conflict("confirmation-expired"));
 		expect(pendingFrom(() => test.invoke(voice, "probe.readHealth"))).not.toBe(pending);
 	});
 

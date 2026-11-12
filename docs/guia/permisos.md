@@ -16,7 +16,7 @@ Además, cada registro con dueño es privado o público. Uno privado solo lo ve 
 
 Para ver, la autorización le da al módulo un filtro y el módulo lo aplica en cada consulta. Para cambiar, Domus no se fía solo del módulo: mientras dura la escritura anota cada fila que se crea, se edita o se borra, y antes de guardar comprueba que se respetan el dueño y la visibilidad. Si algo no cuadra, no se guarda nada.
 
-A veces la respuesta es «pregúntame antes». Entonces la operación no se hace y queda como confirmación pendiente: la operación exacta, quién la pidió y desde dónde. La persona la confirma o la rechaza desde la app durante 24 horas. Por voz, un «sí» solo vale en el mismo aparato, en la misma conversación y durante el minuto siguiente. Al confirmar se vuelve a comprobar todo, y confirmar dos veces la ejecuta una sola vez.
+A veces la respuesta es «pregúntame antes». Entonces la operación no se hace y queda como confirmación pendiente: la operación exacta, quién la pidió y desde dónde. La persona la confirma o la rechaza desde la app durante 24 horas. Por voz, un «sí» solo vale en el mismo aparato, en la misma conversación y durante el minuto siguiente. La salud en una pantalla compartida, como la de la cocina, es la excepción: allí solo vale ese «sí» por voz, y pasado el minuto la pendiente caduca. No se confirma desde el móvil; si Paco quiere ver su tensión, la mira en el móvil directamente. Al confirmar se vuelve a comprobar todo, y confirmar dos veces la ejecuta una sola vez.
 
 Hoy las acciones con registros con dueño son las de probe, el módulo de prueba.
 

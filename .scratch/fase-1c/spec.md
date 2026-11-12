@@ -46,7 +46,7 @@ Al escribir, los triggers temporales comprueban que nadie se salta las reglas de
 13. Como miembro, quiero que solo yo pueda cambiar la visibilidad de lo mío y que nadie pueda quedarse con un registro mío cambiando su dueño, para que lo privado siga siendo privado.
 14. Como miembro, quiero que mi salud sea siempre privada, sin forma de hacerla pública, para no exponerla por un descuido.
 15. Como miembro, quiero que la pantalla de la cocina no lea ni muestre mi salud salvo que yo lo pida y lo confirme allí mismo, para que no la oiga quien esté al lado.
-16. Como miembro, quiero que confirmar desde mi móvil que se lea mi salud no deje abierta su lectura por voz en la cocina, para que cada divulgación sea una decisión.
+16. Como miembro, quiero que la lectura de mi salud pedida en la cocina solo se confirme allí, por voz y dentro del minuto, y que desde mi móvil no se pueda confirmar (allí la leo directamente), para que confirmar en el móvil nunca autorice a Kira a decirla después en la cocina.
 17. Como miembro, quiero decidir área por área qué puede hacer Kira por mí: no, sí o pedir confirmación, para fiarme de ella a mi ritmo.
 18. Como miembro, quiero que Kira pueda leer sin preguntarme y pedirme confirmación para escribir en la misma área, para que me moleste solo cuando importa.
 19. Como miembro, quiero que mi tabla de delegación sea solo mía, sin que el admin la vea ni la cambie, para que nadie decida por mí qué hace Kira en mi nombre.
@@ -54,7 +54,7 @@ Al escribir, los triggers temporales comprueban que nadie se salta las reglas de
 21. Como miembro, quiero que mi delegación empiece con lo que puedo ver y editar, y con administrar denegado, para empezar con un punto de partida prudente.
 22. Como miembro, quiero que, si gano acceso a un área, Kira no lo gane solo, para que la delegación cambie solo cuando yo la cambie.
 23. Como miembro, quiero que un «sí» por voz confirme solo lo que Kira acaba de preguntarme, en el mismo aparato y en la misma conversación, para que un «sí» suelto no confirme otra cosa.
-24. Como miembro, quiero que una confirmación que no respondí a tiempo por voz siga esperándome en la app, para decidirla con calma.
+24. Como miembro, quiero que una confirmación que no respondí a tiempo por voz siga esperándome en la app, para decidirla con calma. La lectura de salud en un aparato compartido es la excepción: caduca con su ventana.
 25. Como miembro, quiero que una confirmación pendiente caduque si no la decido, para que no se ejecute algo viejo por sorpresa.
 26. Como miembro, quiero poder rechazar una confirmación pendiente, para decir que no explícitamente.
 27. Como miembro, quiero que confirmar dos veces no ejecute dos veces, para que tocar el botón de más no duplique nada.
@@ -192,7 +192,7 @@ Al escribir, los triggers temporales comprueban que nadie se salta las reglas de
     2. Vía Kira, la delegación de esa cuenta para ese área y nivel: `no` deniega y `confirmar` pide confirmación.
     3. Las operaciones sensibles piden comprobante (ver «Comprobantes»). Si la identidad se acreditó por `voice` o por `device`, se deniegan. Vía Kira, cambiar el acceso o la delegación se deniega siempre, aunque traiga comprobante.
     4. Si la acción declara que pide confirmación siempre, se pide confirmación una sola vez, nunca dos.
-    5. Regla del aparato compartido: si la cuenta del aparato es la de aparato, leer un área con `confirmOnSharedDevice` pide confirmación cuando hay un miembro reconocido y se deniega cuando no lo hay. Es un mecanismo general que la salud activa por configuración.
+    5. Regla del aparato compartido: si la cuenta del aparato es la de aparato, leer un área con `confirmOnSharedDevice` pide confirmación cuando hay un miembro reconocido y se deniega cuando no lo hay. Esa confirmación es solo por `contexto` (la decisión es `confirm-in-context`). Es un mecanismo general que la salud activa por configuración.
 - La visibilidad de cada registro no la decide esta función fila a fila. La aplica el predicado que reciben los manejadores y la comprueba la captura de escrituras, las dos construidas sobre las mismas reglas de la autorización.
 - La autorización de producción sustituye a la que lo denegaba todo. El autorizador programable de la 1b sigue existiendo solo en la entrada de pruebas de `platform`, para las pruebas internas que necesitan forzar un fallo.
 
@@ -251,6 +251,7 @@ Al escribir, los triggers temporales comprueban que nadie se salta las reglas de
 - **Confirmar** es una operación de la plataforma que recibe el id. El canal lo acredita la puerta:
     - Por `contexto` hace falta el mismo aparato, la misma conversación (no vacía) y la ventana abierta. En la 1c no se llega por HTTP: solo se prueba con un contexto sintético.
     - Por `app` hace falta la misma cuenta representada, desde cualquiera de sus sesiones vigentes.
+    - Excepción: una pendiente nacida de la regla del aparato compartido se confirma solo por `contexto` (misma persona, aparato y conversación, dentro de la ventana). Su caducidad es el cierre de la ventana, sin las 24 h de la app, y por `app` responde «no encontrado», también desde el móvil de esa persona. Desde el móvil se hace una lectura nueva.
 - **Al confirmar se vuelve a evaluar todo:**
     - con la cuenta, el `via` y la delegación del origen;
     - con los permisos, la visibilidad y el contexto de ahora;
@@ -414,7 +415,9 @@ Al escribir, los triggers temporales comprueban que nadie se salta las reglas de
     - **Salud en el aparato compartido:**
         - la cuenta de aparato sin miembro reconocido no lee `probe.health`;
         - un miembro reconocido por voz pide confirmación, y al confirmar se lee una vez;
-        - una pendiente de salud confirmada desde la app no abre una lectura posterior por voz.
+        - una pendiente de salud no se confirma desde la app («no encontrado», también desde el móvil del miembro), que lee de nuevo;
+        - por `contexto` se confirma una vez dentro de la ventana, y al cerrarse caduca para todos los canales;
+        - otra pendiente nacida en la misma pantalla sigue confirmándose desde la app durante 24 h.
     - **Revocación y contraseña:** revocar una sesión o cambiar la contraseña invalida sus pendientes y comprobantes.
 - **Pruebas HTTP** (`createHttpHandler` con `probe` compuesto en la prueba, Better Auth por sus rutas y `api-client` sobre el mismo `fetch`, con las cookies gestionadas explícitamente por el cliente de prueba):
     - Sesión e identidad:

@@ -57,4 +57,12 @@ export const generatedMigrations: readonly ModuleMigration[] = [
 			"\nCREATE INDEX `platform_proofs_device` ON `platform_proofs` (`device`);",
 		],
 	},
+	{
+		tag: "0006_outstanding_star_brand",
+		position: 7,
+		hash: "f65af8e5dc5320eec0c0dbfdb10ed5edc37d611816bc1a707f2a1310e2493dd8",
+		statements: [
+			"ALTER TABLE `platform_confirmations` ADD `context_only` integer DEFAULT false NOT NULL;",
+		],
+	},
 ];

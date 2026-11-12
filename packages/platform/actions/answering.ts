@@ -133,8 +133,8 @@ export function answeringWith({
 
 	/**
 	 * The pending confirmation `context` may answer, still waiting. Another account's, or one out of reach of
-	 * this channel, is not found: by the app, only the account itself without via; in context, only the same
-	 * device and the same, not empty, conversation.
+	 * this channel, is not found: by the app, only the account itself without via, and never one confirmed only
+	 * in context; in context, only the same device and the same, not empty, conversation.
 	 */
 	function reachable(context: VerifiedContext, id: string): PendingConfirmation {
 		const pending = confirmations.find(id);
@@ -144,7 +144,7 @@ export function answeringWith({
 			origin !== undefined &&
 			pending.account === context.account &&
 			(context.channel === "app"
-				? context.via === undefined
+				? context.via === undefined && !pending.contextOnly
 				: context.device === origin.device &&
 					context.conversation !== undefined &&
 					context.conversation !== "" &&
