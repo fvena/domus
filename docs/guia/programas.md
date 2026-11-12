@@ -25,7 +25,7 @@ Lo de la versión viene de pensar en las actualizaciones. Si un programa se actu
 ## En el código
 
 - api: `apps/api/src/main.ts` arranca la plataforma, la puerta y el servidor; `app.ts` monta la puerta y la web; `config.ts` lee `PORT`, `DOMUS_WEB_DIR`, `DOMUS_DATA_DIR`, `DOMUS_AUTH_SECRET` y `DOMUS_ORIGINS`; `accounts.ts` es el comando de las cuentas.
-- La puerta: `createHttpHandler` en `packages/platform/http`, con oRPC sobre Hono. Responde `GET /health` y `POST /api/rpc/status` sin sesión; con sesión, cada acción en `/api/rpc/<módulo>/<acción>` y las operaciones de `platformContract`. Better Auth atiende `/api/auth/sign-in/email` y `/sign-out`. El contrato de `status` y `PROTOCOL` están en `packages/platform/contracts`.
+- La puerta: `createHttpHandler` en `packages/platform/http`, con oRPC sobre Hono. Responde `GET /health`, con el estado del [segundo plano](segundo-plano.md) en `background`, y `POST /api/rpc/status` sin sesión; con sesión, cada acción en `/api/rpc/<módulo>/<acción>` y las operaciones de `platformContract`. Better Auth atiende `/api/auth/sign-in/email` y `/sign-out`. El contrato de `status` y `PROTOCOL` están en `packages/platform/contracts`.
 - assistant y voice-gateway: `apps/<programa>/src/main.ts` y `api.ts` (`checkApi`). Leen `DOMUS_API_URL`. Los estados los lleva `watchConnection` de `packages/utils/connection`, con reintentos de 1 a 30 s, una comprobación cada 30 s y 10 s de límite por pregunta.
 - Salud y parada: `serveHealth` y `onShutdown` en `packages/utils/program`.
 - Cliente: `clientFor(contrato, transporte)` en `packages/api-client`.
