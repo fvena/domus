@@ -31,6 +31,7 @@ ssh kira 'cd ~/domus && docker compose ps && docker compose logs --no-color assi
 - Los tres contenedores salen `healthy`.
 - `assistant` y `voice-gateway` dicen «api at http://api:3000: ready». Si dicen «does not speak protocol», las imágenes son de versiones distintas: vuelve a construir.
 - `curl -s -X POST localhost:3000/api/rpc/status` en la Pi devuelve `{"json":{"service":"domus","protocol":1}}`.
+- `curl -s localhost:3000/health` en la Pi devuelve `{"status":"ok","background":{"status":"ok"}}` (ver «El segundo plano»).
 - `status` es la única RPC que responde sin sesión (ADR 0023). En la Pi, esta orden escribe `401` para una operación de la plataforma y `404` para una acción de `probe`, que no está en la lista de producción:
 
     ```bash
@@ -118,11 +119,11 @@ sesiones() { for n in paco paco2 rocio; do curl -s -o /dev/null -w "$n %{http_co
 
 5. `sesiones` escribe `paco 200`, `paco2 401` y `rocio 200`.
 
-Al terminar, `rm -rf "$D"`: las cookies son sesiones abiertas. Para cerrarlas antes, `rpc -b "$D/<nombre>" -X POST localhost:3000/api/auth/sign-out`.
+Al terminar, `rm -rf "$D"`: las cookies son sesiones abiertas. Para cerrarlas antes, `rpc -b "$D/<nombre>" -d '{}' localhost:3000/api/auth/sign-out`: sin el `-d '{}'`, `rpc` manda `content-type: application/json` sin cuerpo y Better Auth responde `400`.
 
 ## La base de datos
 
-Un solo fichero SQLite, `/data/domus.db`, dentro del volumen `domus_domus-data` (ADR 0021). Junto a él pueden aparecer `domus.db-wal` y `domus.db-shm` mientras `api` está en marcha: forman parte de la base de datos. Las migraciones se aplican solas al arrancar `api`. Las copias de seguridad llegan en la fase 1d; hasta entonces, no borres el volumen.
+Un solo fichero SQLite, `/data/domus.db`, dentro del volumen `domus_domus-data` (ADR 0021). Junto a él pueden aparecer `domus.db-wal` y `domus.db-shm` mientras `api` está en marcha: forman parte de la base de datos. Las migraciones se aplican solas al arrancar `api`. Las copias de seguridad llegan en la 1d2; hasta entonces, no borres el volumen.
 
 ### Comprobar que los datos persisten
 
@@ -138,6 +139,56 @@ docker compose exec api node -e "const db = new (require('better-sqlite3'))('/da
 4. Tras el paso 2 y tras el 3, `sesiones` (de «Comprobar las cuentas y la autorización», en la misma terminal) sigue escribiendo `paco 200`, `paco2 401` y `rocio 200`, y la orden `curl` de «Comprobar» sigue dando `401` y `404`.
 
 Las tres lecturas dan las mismas filas completas, `applied_at` incluido, y ninguna fila nueva. Si `applied_at` cambia, el contenedor no está usando el volumen. Tras una actualización que trae migraciones, el primer arranque de `api` dice `<N> migrations applied`, con `<N>` las que faltaban, y las filas que ya había no cambian; en los arranques siguientes, `0`. Si `docker compose up` recrea `api` justo después, esa línea queda en el registro del contenedor anterior: las filas nuevas, con el mismo `applied_at` o casi, dicen lo mismo.
+
+## El segundo plano
+
+`api` lleva dentro un motor de trabajos y un planificador (ADR 0025): no hay contenedor aparte. Arrancan después de abrir la base y antes de servir, y paran antes de cerrarla, esperando como mucho 5 s a lo que esté corriendo. El log de `api` lo dice:
+
+```text
+database at /data/domus.db: <N> migrations applied
+scheduler started: <N> jobs recovered
+api listening on port 3000
+…
+scheduler stopped
+```
+
+`jobs recovered` cuenta los trabajos que un proceso anterior dejó a medias, por un corte o una parada que no esperó; vuelven a la cola. Las horas son de `Europe/Madrid`, sea cual sea la zona del contenedor.
+
+Hoy hay una tarea, `cleanup`, cada día a las 04:30. Borra el contenido caducado del registro de acciones y de las confirmaciones, los comprobantes que ya no deciden nada, y los trabajos de más de 30 días y las ejecuciones de más de 90. No cambia ninguna respuesta de la API.
+
+### La lista de tareas y `/health`
+
+La lista es `tasks/list`, una lectura con sesión y sin comprobante. Con las funciones de «Comprobar las cuentas y la autorización»:
+
+```bash
+rpc -b "$D/paco" -X POST localhost:3000/api/rpc/tasks/list
+```
+
+De cada tarea devuelve `frequency` (la hora elegida o, si no hay, la de por defecto), `paused`, `nextAt` (la próxima ejecución, en milisegundos), `lastRun` (`manual`, `plannedAt`, `startedAt`, `finishedAt`, `result` y `error`) y `stuck`. `result` es `ok`, `failed`, `cancelled` o `skipped`, y `null` mientras corre. `error` está en inglés y sin datos personales.
+
+`tasks/setTime`, `tasks/pause`, `tasks/resume` y `tasks/launch` son escrituras de nivel `manage`: solo el admin, con clave y comprobante de esa operación exacta. Las tres primeras se deshacen con `log/undo` si son el último cambio de la tarea; si no, `changed-since`. `tasks/launch` con una ejecución pendiente o en curso responde `CONFLICT` con `task-busy`.
+
+`/health` responde `200` mientras `api` atiende, con `background`: `ok`, o `degraded` con `reason` `scheduler-silent` (el planificador lleva más de 5 minutos sin despertar; despierta al menos cada minuto) o `lane-stuck` (un trabajo no paró tras cancelarlo y ocupa su carril hasta que termine o se reinicie `api`). No dice nada personal. Si `api` se congela del todo, lo detecta el healthcheck de Docker.
+
+### Comprobar el segundo plano
+
+En la Pi, dentro de `~/domus`. Esta orden lee el estado de las tareas en solo lectura:
+
+```bash
+docker compose exec api node -e "const db = new (require('better-sqlite3'))('/data/domus.db', { readonly: true, fileMustExist: true }); console.log(db.prepare('SELECT * FROM platform_tasks').all()); db.close()"
+```
+
+1. Tras actualizar, el log de `api` dice `scheduler started` y `/health` dice `ok`. `docker compose restart api` deja en el log `scheduler stopped` y después otro `scheduler started`.
+2. La orden de arriba muestra `cleanup` con `next_at` en las 04:30 de la próxima noche (`TZ=Europe/Madrid date -r <next_at sin los tres últimos dígitos>` en el Mac lo traduce).
+3. Para no esperar a la noche, el admin lanza la limpieza a mano. Pide un comprobante de `{"action":"platform.launchTask","input":{"task":"cleanup"}}` como en el paso 4 de «Comprobar las cuentas y la autorización», y con él:
+
+    ```bash
+    rpc -b "$D/paco" -H 'idempotency-key: lanzar-limpieza-1' -H "step-up-proof: $P" -d '{"json":{"task":"cleanup"}}' localhost:3000/api/rpc/tasks/launch
+    ```
+
+    Responde `{"json":{"result":{"task":"cleanup","run":<id>},"entry":<n>}}` y `200`. Después, la lista muestra en `lastRun` `"manual":true` y `"result":"ok"`.
+
+4. Con otro comprobante, de `platform.setTaskTime` con `{"task":"cleanup","time":"05:00"}`, cambia la hora con `tasks/setTime`. Tras `docker compose restart api` y tras `docker compose up -d --force-recreate api`, la orden de arriba sigue dando `time` `05:00` y el mismo `next_at`. Para volver, deshaz esa entrada con `log/undo` y un comprobante de `{"undo":<n>}`: la lista vuelve a `04:30`.
 
 ## Secretos
 

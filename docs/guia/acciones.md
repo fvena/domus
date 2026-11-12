@@ -20,7 +20,7 @@ Una escritura que se puede deshacer deja guardada su inversa, la acción que la 
 
 No todo se puede deshacer. Si después de añadir la nota alguien la editó, deshacer el alta ya no vale, porque se llevaría por delante esa edición. La inversa también tiene que cumplir las reglas del módulo: si la nota tiene comentarios, borrarla se rechaza. Y las escrituras que no se pueden deshacer, como borrar un comentario, lo declaran antes de ejecutarse.
 
-Lo que entró y la inversa de cada escritura se guardan 30 días; lo que salió no se guarda nunca. Pasado ese plazo ya no se puede deshacer, y repetir la petición con la misma clave sigue respondiendo con el acuse, sin ejecutar nada. La anotación de qué se hizo y quién lo hizo se queda.
+Lo que entró y la inversa de cada escritura se guardan 30 días; lo que salió no se guarda nunca. Pasado ese plazo ya no se puede deshacer, la limpieza de cada noche lo borra ([El trabajo en segundo plano](segundo-plano.md)), y repetir la petición con la misma clave sigue respondiendo con el acuse, sin ejecutar nada. La anotación de qué se hizo y quién lo hizo se queda.
 
 Cada persona lee las anotaciones de sus propias escrituras, nunca las de la otra, y deshace solo lo suyo. Da igual si lo hizo desde la app o lo hizo Kira por ella: Rocío puede deshacer desde el móvil lo que Kira apuntó en su nombre.
 
@@ -43,6 +43,6 @@ Y guardar para siempre lo que entra en cada acción sería acumular datos privad
 - La autorización: `packages/platform/authorization` ([Los permisos](permisos.md)).
 - El registro: `packages/platform/audit`, sobre las tablas `platform_action_log` y `platform_action_log_touched` de la migración `platform/0001`.
 - Por HTTP: cada acción en `POST /api/rpc/<módulo>/<acción>`, con la clave en la cabecera `idempotency-key`. Leer el registro y deshacer son `log/read` y `log/undo`.
-- El plazo: la opción `retention` de `createPlatform`, en milisegundos, con 30 días por defecto.
+- El plazo: la opción `retention` de `createPlatform`, en milisegundos, con 30 días por defecto. Lo borra la tarea `cleanup` de `packages/platform/background/cleanup.ts`.
 - Probar: `createTestPlatform` de `@domus/test-utils`, con `prepare`, `context`, `clock`, `invoke`, `undo`, `readLog` y `browser()` para probar por HTTP. Las pruebas de probe están en `modules/probe/tests/`.
 - Decisiones: [ADR 0010](../architecture/adr/0010-una-sola-decision-de-autorizacion.md), [ADR 0022](../architecture/adr/0022-acciones.md) y [ADR 0023](../architecture/adr/0023-identidad-y-autorizacion.md).
