@@ -117,6 +117,43 @@ describe("probe's configure, an action of level manage", () => {
 		});
 	});
 
+	it("asks a repeat of a confirmed write for its proof again, and spends a fresh one without running twice", async () => {
+		const { test } = await household();
+		await using _ = test;
+		test.prepare.delegation("paco", "probe", "manage", "confirm");
+		const kira = test.context("paco", { via: "kira" });
+		const paco = test.context("paco");
+		const pending = pendingFrom(() =>
+			test.invoke(kira, "probe.configure", PUBLIC, { idempotencyKey: "c1" }),
+		);
+		const first = await test.requestProof(paco, PASSWORD, CONFIGURE);
+		expect(test.confirm(paco, pending, { proof: first.proof })).toEqual({
+			result: { notes: 1 },
+			entry: 2,
+		});
+
+		// Being asked to confirm counts as given on a repeat, but the proof does not.
+		expect(() =>
+			test.invoke(kira, "probe.configure", PUBLIC, { idempotencyKey: "c1" }),
+		).toThrow(stepUp);
+
+		const fresh = await test.requestProof(paco, PASSWORD, CONFIGURE);
+		expect(
+			test.invoke(kira, "probe.configure", PUBLIC, {
+				idempotencyKey: "c1",
+				proof: fresh.proof,
+			}),
+		).toEqual({ entry: 2, repeated: true });
+		expect(test.log()).toHaveLength(2);
+		// The repeat spent it, as a write does: it proves no other operation.
+		expect(() =>
+			test.invoke(paco, "probe.configure", PUBLIC, {
+				idempotencyKey: "c2",
+				proof: fresh.proof,
+			}),
+		).toThrow(stepUp);
+	});
+
 	it("is denied to an identity proven by voice or by the device, which cannot ask for a proof either", async () => {
 		const { test, paco } = await household();
 		await using _ = test;

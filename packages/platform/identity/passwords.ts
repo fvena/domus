@@ -91,12 +91,22 @@ export async function isCurrentPassword(
 	account: string,
 	password: string,
 ): Promise<boolean> {
-	const hash = connection
-		.prepare<[string], string | null>(
-			"SELECT password FROM platform_account WHERE user_id = ? AND provider_id = 'credential'",
-		)
-		.pluck()
-		.get(account);
+	const hash = passwordHashOf(connection, account);
 	if (!hash) return false;
 	return verifyPassword({ hash, password });
+}
+
+/**
+ * The stored hash of the account's current password, `undefined` when it has none. Setting a password stores a
+ * new hash, salted anew, so the same one read again tells whether the password changed in between.
+ */
+export function passwordHashOf(connection: Database.Database, account: string): string | undefined {
+	return (
+		connection
+			.prepare<[string], string | null>(
+				"SELECT password FROM platform_account WHERE user_id = ? AND provider_id = 'credential'",
+			)
+			.pluck()
+			.get(account) ?? undefined
+	);
 }

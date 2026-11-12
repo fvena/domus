@@ -431,6 +431,7 @@ export function createActions({
 					actor,
 					idempotencyKey,
 					fingerprint,
+					proof,
 					// A repeat is authorized again, its proof included: the one its write used still counts.
 					(earlier) =>
 						requestWith(
@@ -491,6 +492,7 @@ export function createActions({
 					actor,
 					idempotencyKey,
 					fingerprint,
+					proof,
 					// A repeated undo is authorized with the inverse its own entry ran, never with the content of the entry
 					// it undid, whose annotation gives only the context. The inverse's input is its own entry's content,
 					// so once that expired the request goes without it.
@@ -547,14 +549,17 @@ export function createActions({
 	 * One idempotent operation under `idempotencyKey`, a write or an undo. Looking the key up, running and
 	 * logging stay in one synchronous section of one transaction, so no other operation with the same key can
 	 * slip in between. The same key under another fingerprint is a conflict. Under the same one, the request
-	 * `repeated` builds from the earlier entry is authorized anew and an acknowledgement with its number comes
-	 * back, without content and without running anything, whether its content expired or it was undone since
-	 * (ADR 0023). A new key goes to `fresh`, which authorizes, runs and logs.
+	 * `repeated` builds from the earlier entry is authorized anew, its `proof` included, and an acknowledgement
+	 * with its number comes back, without content and without running anything, whether its content expired or
+	 * it was undone since (ADR 0023). Only the confirmation counts as given, as when confirming a pending one:
+	 * a denial and a missing proof stop it. A fresh proof it brings is spent as a write spends one, and linked to
+	 * the earlier entry. A new key goes to `fresh`, which authorizes, runs and logs.
 	 */
 	function once(
 		actor: Actor,
 		idempotencyKey: string | undefined,
 		fingerprint: string,
+		proof: string | undefined,
 		repeated: (earlier: NumberedEntry) => AuthorizationRequest,
 		fresh: (idempotencyKey: string) => WriteReceipt,
 	): WriteOutcome {
@@ -575,9 +580,12 @@ export function createActions({
 			if (!earlier) throw internalError();
 			// An acknowledgement runs nothing and shows nothing: being asked to confirm does not stop it, but
 			// a sensitive one asks for its proof again.
-			const decision = decisionOf(authorizer, repeated(earlier));
-			if (decision === "deny") throw new ORPCError("FORBIDDEN");
-			if (decision === "step-up") throw stepUpRequired();
+			const request = repeated(earlier);
+			authorize({ ...request, confirmed: true });
+			if (proof !== undefined && request.proof === "valid") {
+				proofs.use(proof);
+				proofs.link(proof, earlier.entry);
+			}
 			return { entry: earlier.entry, repeated: true };
 		})();
 	}
