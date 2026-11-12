@@ -44,3 +44,6 @@ docker-compose.override.yml
 
 # a stand-in library the dependency-rule fixtures resolve
 !tooling/scripts/fixtures/architecture/node_modules
+
+# Claude Code settings for this machine only
+.claude/settings.local.json
