@@ -289,6 +289,9 @@ importers:
       '@hono/node-server':
         specifier: 'catalog:'
         version: 2.1.6(hono@4.13.17)
+      better-sqlite3:
+        specifier: 'catalog:'
+        version: 13.0.3
       hono:
         specifier: 'catalog:'
         version: 4.13.17

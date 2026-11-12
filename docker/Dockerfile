@@ -7,7 +7,8 @@ ARG NODE_VERSION=22
 # on the builder's own platform instead of under emulation for each target.
 FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-trixie-slim AS build
 ENV TURBO_TELEMETRY_DISABLED=1 DO_NOT_TRACK=1
-# better-sqlite3 compiles from source when it installs (node-gyp, no prebuilt binary).
+# pnpm runs node-gyp for better-sqlite3 when it installs: it finds a prebuilt binary and compiles nothing, but
+# node-gyp still needs its toolchain to get that far.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ \
   && rm -rf /var/lib/apt/lists/*
@@ -19,6 +20,19 @@ RUN corepack enable
 RUN pnpm fetch
 COPY . .
 RUN pnpm install --offline --frozen-lockfile && pnpm build
+
+# better-sqlite3 for the api image, outside its bundle. The package ships prebuilt Node-API binaries for every
+# platform, so it is taken from the build stage (the version in the lockfile, the one the bundle was built against)
+# with only the binary of the target architecture: no compiler, no emulation, no pnpm in the image.
+FROM build AS api-sqlite
+ARG TARGETARCH
+RUN case "$TARGETARCH" in amd64) arch=x64 ;; arm64) arch=arm64 ;; \
+    *) echo "better-sqlite3 has no prebuilt binary for linux/$TARGETARCH" >&2; exit 1 ;; esac \
+  && src="$(readlink -f apps/api/node_modules/better-sqlite3)" \
+  && out=/out/node_modules/better-sqlite3 \
+  && mkdir -p "$out/prebuilds" \
+  && cp -r "$src/package.json" "$src/LICENSE" "$src/lib" "$out/" \
+  && cp "$src/prebuilds/linux-$arch.node" "$out/prebuilds/"
 
 # What the three programs share: Node, no package manager, an unprivileged user and a health check on /health.
 FROM node:${NODE_VERSION}-trixie-slim AS runtime
@@ -34,6 +48,9 @@ FROM runtime AS api
 ENV PORT=3000 DOMUS_WEB_DIR=/app/web DOMUS_DATA_DIR=/data
 COPY --from=build /repo/apps/api/dist/ ./
 COPY --from=build /repo/apps/web/dist/ ./web/
+COPY --from=api-sqlite /out/node_modules/ ./node_modules/
+# Fails the build, not the first start on the Pi, if the binary does not load on this architecture.
+RUN node -e "new (require('better-sqlite3'))(':memory:').close()"
 RUN mkdir -p /data && chown node:node /data
 USER node
 VOLUME /data
