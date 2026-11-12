@@ -119,12 +119,12 @@ En la Pi, dentro de `~/domus` (`ssh kira`, `cd ~/domus`). Esta orden lee el hist
 docker compose exec api node -e "const db = new (require('better-sqlite3'))('/data/domus.db', { readonly: true, fileMustExist: true }); console.log(db.prepare('SELECT * FROM platform_migrations ORDER BY module, position').all()); db.close()"
 ```
 
-1. Ejecútala y apunta las filas de `platform`, `hash` y `applied_at` incluidos. Las dos primeras están escritas a mano: `position` `0` (`0000_migration_history`) y `position` `1` (`0001_action_log`, el registro de acciones). Desde `position` `2` son las generadas por `drizzle-kit` (ADR 0023), cuyo nombre empieza por su propio número: `0001_lively_sharon_carter`, `0002_milky_shen` (cuentas, sesiones, aparatos y permisos), `0003_open_tarot` (delegación), `0004_vengeful_the_leader` (confirmaciones pendientes) y `0005_perfect_ultragirl` (comprobantes).
+1. Ejecútala y apunta las filas de `platform`, `hash` y `applied_at` incluidos. Las dos primeras están escritas a mano: `position` `0` (`0000_migration_history`) y `position` `1` (`0001_action_log`, el registro de acciones). Desde `position` `2` son las generadas por `drizzle-kit` (ADR 0023), cuyo nombre empieza por su propio número: `0001_lively_sharon_carter`, `0002_milky_shen` (cuentas, sesiones, aparatos y permisos), `0003_open_tarot` (delegación), `0004_vengeful_the_leader` (confirmaciones pendientes), `0005_perfect_ultragirl` (comprobantes) y `0006_outstanding_star_brand` (pendientes que solo se confirman en contexto).
 2. `docker compose restart api` y vuelve a ejecutarla.
 3. `docker compose up -d --force-recreate api`, que cambia el contenedor y conserva el volumen, y vuelve a ejecutarla.
 4. Tras el paso 2 y tras el 3, `sesiones` (de «Comprobar las cuentas y la autorización», en la misma terminal) sigue escribiendo `paco 200`, `paco2 401` y `rocio 200`, y la orden `curl` de «Comprobar» sigue dando `401` y `404`.
 
-Las tres lecturas dan las mismas filas completas, `applied_at` incluido, y ninguna fila nueva. Si `applied_at` cambia, el contenedor no está usando el volumen. La primera vez que `api` arranca con la 1c sobre la base de la 1b, su registro dice `5 migrations applied` y las filas `0` y `1` no cambian; en los arranques siguientes, `0`.
+Las tres lecturas dan las mismas filas completas, `applied_at` incluido, y ninguna fila nueva. Si `applied_at` cambia, el contenedor no está usando el volumen. La primera vez que `api` arranca con la 1c sobre la base de la 1b, su registro dice `6 migrations applied` y las filas `0` y `1` no cambian; en los arranques siguientes, `0`.
 
 ## Secretos
 
