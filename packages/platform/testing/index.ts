@@ -3,8 +3,9 @@ import { ORPCError } from "@orpc/server";
 // dbFor; a platform with the real authorization and a clock the test chooses; the way to invoke its actions and
 // undo their entries with a verified context; synthetic verified contexts; the privileged preparation of
 // accounts, roles, passwords, permission rows, delegation rows and sessions, without a session or a proof; the
-// platform's real read of a delegation table and real request of a step-up proof; and a read of its action log
-// and of its stored pending confirmations. A rule of .dependency-cruiser.cjs keeps every other importer out, production code of platform included; the main entry offers none of it.
+// platform's real read of a delegation table and real request of a step-up proof; a read of its action log
+// and of its stored pending confirmations; and child processes that hold the platform open or the exclusive lock
+// until the test kills them (ADR 0026). A rule of .dependency-cruiser.cjs keeps every other importer out, production code of platform included; the main entry offers none of it.
 import { hashPassword } from "better-auth/crypto";
 
 import {
@@ -77,6 +78,7 @@ export type {
 	VerifiedContext,
 } from "../authorization";
 export { type ModuleDatabase, moduleDatabase } from "./module-database";
+export { type ChildTask, startChild, type TestChild } from "./children";
 export { controlledTimer, type ControlledTimer } from "../background";
 export type {
 	JobContext,
