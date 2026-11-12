@@ -26,3 +26,4 @@ Precisa los ADR 0020 y 0021: cómo se declara, se ejecuta, se registra y se desh
 
 Fecha: 2026-11-12. Preguntas del grilling: Q1–Q19 de la fase 1b.
 Precisado por el ADR 0023: una escritura ya no guarda su resultado y repetirla devuelve un acuse sin contenido; leer el registro devuelve solo la anotación; y las acciones se montan en HTTP con una sesión válida.
+Precisado por el ADR 0025: el mantenimiento, también la limpieza del contenido caducado, no tiene actor; los efectos fuera de SQLite salen por una bandeja de salida en la misma transacción, y en la 1d solo con entrega «repetible».

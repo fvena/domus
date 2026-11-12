@@ -161,7 +161,7 @@ export interface ActionsOptions {
 }
 
 export type { ConfirmationCall, ConfirmationTimes, PlatformOperation };
-export { READ_DELEGATION, READ_LOG } from "./platform-operations";
+export { platformOperation, READ_DELEGATION, READ_LOG } from "./platform-operations";
 
 /** The actions of `modules`, which `checkModules` has already accepted, on one connection. */
 export function createActions({
@@ -502,8 +502,15 @@ export function createActions({
 						if (original?.actor.account !== context.account)
 							throw new ORPCError("NOT_FOUND", { message: `no entry ${number}` });
 						if (original.undoneBy !== null) throw conflict("already-undone");
-						if (!original.inverse) throw notUndoable("irreversible");
-						if (isExpired(original.expiresAt)) throw notUndoable("expired");
+						const expired = isExpired(original.expiresAt);
+						// The cleanup empties the inverse of an expired entry (ADR 0025), so an expired entry without one is
+						// irreversible only when its action has none: the answer is the same before and after cleaning.
+						if (
+							!original.inverse &&
+							!(expired && registry.get(original.action)?.undoable)
+						)
+							throw notUndoable("irreversible");
+						if (expired) throw notUndoable("expired");
 						if (actionLog.touchedLater(number)) throw conflict("changed-since");
 
 						// The stored inverse is validated once, against the current contract; the same validated input is

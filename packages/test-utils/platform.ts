@@ -40,7 +40,20 @@ import {
 	syntheticContext,
 	type Acknowledgement,
 	type Annotation,
+	backgroundSettled,
+	changeTask,
+	controlledTimer,
+	enqueueJob,
+	type JobKind,
+	type JobSnapshot,
+	readJobs,
+	readRuns,
+	readTasks,
+	type ScheduledTask,
+	type TaskRun,
+	type TaskState,
 	undoEntry,
+	wakeBackground,
 	type VerifiedContext,
 	type WriteOutcome,
 } from "@domus/platform/testing";
@@ -128,13 +141,69 @@ export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	readonly retention?: number;
 	/** The voice window and the expiry of a new pending confirmation, in milliseconds. Unset: 60 s and 24 h. */
 	readonly confirmation?: { readonly window?: number; readonly expiry?: number };
+	/**
+	 * Scheduled tasks of the test, declared next to the platform's own and run by the same scheduler and engine.
+	 * Their work is the test's, such as one that holds its job running until the test lets it end.
+	 */
+	readonly tasks?: readonly ScheduledTask[];
+	/**
+	 * Synthetic jobs of the test, by kind, of either lane: the test enqueues them with
+	 * {@link TestBackground.enqueue} and ends them with its own promises. Not a contract for modules.
+	 */
+	readonly jobs?: Readonly<Record<string, SyntheticJob>>;
+}
+
+/** A synthetic job of a test: its lane, its maximum time if not its lane's, and its work. */
+export type SyntheticJob = JobKind;
+
+/**
+ * The background of a test platform: the same scheduler and engine as production, on the test's clock. Nothing
+ * runs until {@link start}; then moving the clock wakes what falls due, without real timers.
+ */
+export interface TestBackground {
+	/** Starts the background, as `apps/api` does after opening the platform. */
+	start(): void;
+	/** Stops it: no new job, the running ones cancelled, and it settles once they ended. */
+	stop(): Promise<void>;
+	/** Wakes it now and settles once no job runs. */
+	runDue(): Promise<void>;
+	/** Stores a job of a synthetic kind of {@link TestPlatformOptions.jobs}, due now, and wakes. Returns its id. */
+	enqueue(kind: string): number;
+	/**
+	 * Lets every job the test already ended record its end and starts what that frees, without waiting for the
+	 * jobs still held. No real time passes on the platform clock.
+	 */
+	flush(): Promise<void>;
+	/** Settles once no job runs, also those a job's end started. */
+	settled(): Promise<void>;
+	/** A read-only snapshot of the log of runs of the scheduled tasks, oldest first. */
+	runs(): readonly TaskRun[];
+	/** A read-only snapshot of every job: kind, lane, state, attempts, when it may run and its error. */
+	jobs(): readonly JobSnapshot[];
+	/** A read-only snapshot of the state of every task with a row, declared or not, by id. */
+	tasks(): readonly TaskState[];
+	/** Pauses a declared task, as the admin's operation will. An undeclared one throws. */
+	pause(task: string): void;
+	/** Resumes a declared task: its next run from now, without catching up what it skipped. */
+	resume(task: string): void;
+	/** Sets the local `HH:MM` the admin chose for a declared task, or null for its default. */
+	setTime(task: string, time: string | null): void;
 }
 
 /** The platform clock of a test: it moves only when the test moves it. */
 export interface TestClock {
 	now(): number;
-	set(instant: number): void;
-	advance(milliseconds: number): void;
+	set(instant: number, options?: ClockMove): void;
+	advance(milliseconds: number, options?: ClockMove): void;
+}
+
+/** How the test clock moves. */
+export interface ClockMove {
+	/**
+	 * False moves the clock without waking the background, as a scheduler that falls silent: the watcher's case.
+	 * The next move that wakes catches up. Default true.
+	 */
+	readonly wake?: boolean;
 }
 
 /** A new account of the privileged preparation. `id` doubles as its name and the start of its email. */
@@ -181,8 +250,12 @@ export interface TestPlatform<
 	readonly databaseFile: string;
 	/** A new browser, without cookies, on {@link door}. */
 	browser(): TestBrowser;
-	/** Starts at {@link TEST_START}, in milliseconds since the epoch. */
+	/**
+	 * Starts at {@link TEST_START}, in milliseconds since the epoch. Setting or advancing it wakes the background,
+	 * once started, for whatever fell due.
+	 */
 	readonly clock: TestClock;
+	readonly background: TestBackground;
 	readonly prepare: TestPreparation;
 	/** The id of the one device account, which the platform creates at start. */
 	readonly deviceAccount: string;
@@ -279,7 +352,10 @@ export interface TestPlatform<
 	 * state. That exception is only for tests: it shows what is stored, such as that no secret is.
 	 */
 	pendingConfirmations(): readonly Readonly<Record<string, unknown>>[];
-	/** Closes the platform and removes the temporary folder it created. Safe to call more than once. */
+	/**
+	 * Closes the platform and removes the temporary folder it created. Safe to call more than once. Throws while
+	 * the background is active; disposing stops it first.
+	 */
 	close(): void;
 }
 
@@ -301,6 +377,8 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 	file,
 	retention,
 	confirmation,
+	tasks,
+	jobs,
 }: TestPlatformOptions<TModules>): TestPlatform<TModules> {
 	let tempDir: string | undefined;
 	let databaseFile = file ?? ":memory:";
@@ -310,13 +388,16 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 	}
 
 	let now = TEST_START;
+	const timer = controlledTimer(() => now);
 	const clock: TestClock = {
 		now: () => now,
-		set: (instant) => {
+		set: (instant, { wake = true } = {}) => {
 			now = instant;
+			if (wake) timer.fire();
 		},
-		advance: (milliseconds) => {
+		advance: (milliseconds, { wake = true } = {}) => {
 			now += milliseconds;
+			if (wake) timer.fire();
 		},
 	};
 
@@ -325,6 +406,11 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		platform = createPlatformWithClock(
 			{ databaseFile, modules, retention, confirmation },
 			() => now,
+			{
+				timer,
+				...(tasks === undefined ? {} : { tasks }),
+				...(jobs === undefined ? {} : { jobs }),
+			},
 		);
 	} catch (error) {
 		if (tempDir) rmSync(tempDir, { recursive: true, force: true });
@@ -370,6 +456,27 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 			...options,
 		});
 
+	const background: TestBackground = {
+		start: () => {
+			platform.startBackground();
+		},
+		stop: () => platform.stopBackground(),
+		runDue: () => {
+			wakeBackground(platform);
+			return backgroundSettled(platform);
+		},
+		enqueue: (kind) => enqueueJob(platform, kind),
+		// A job's end is a chain of promises: once the macrotask queue turns, every one already ended has run it.
+		flush: () => new Promise((resolve) => setImmediate(resolve)),
+		settled: () => backgroundSettled(platform),
+		runs: () => readRuns(platform),
+		jobs: () => readJobs(platform),
+		tasks: () => readTasks(platform),
+		pause: (task) => changeTask(platform, task, { paused: true }),
+		resume: (task) => changeTask(platform, task, { paused: false }),
+		setTime: (task, time) => changeTask(platform, task, { time }),
+	};
+
 	const door = createHttpHandler({
 		platform,
 		modules,
@@ -382,6 +489,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		databaseFile,
 		browser: () => createTestBrowser(door, TEST_ORIGIN),
 		clock,
+		background,
 		prepare,
 		deviceAccount: deviceAccountOf(platform),
 		dbFor: (module) => moduleDatabase(platform, module),
@@ -434,7 +542,10 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		log: () => readLog(platform),
 		pendingConfirmations: () => readPendingConfirmations(platform),
 		close,
-		[Symbol.asyncDispose]: () => Promise.resolve(close()),
+		[Symbol.asyncDispose]: async () => {
+			await platform.stopBackground();
+			close();
+		},
 	};
 }
 

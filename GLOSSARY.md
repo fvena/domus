@@ -117,3 +117,53 @@ _Evitar_: módulo falso, mock.
 **Puerta** (`platform/http`):
 El único punto de entrada a Domus: autentica cada canal y sirve las acciones.
 _Evitar_: gateway, backend.
+
+## Segundo plano
+
+**Trabajo** (`job`):
+Una operación guardada en la cola que corre después, fuera de la petición y de la transacción que la creó. Si la pidió una persona, se vuelve a autorizar con su sesión vigente al ejecutarse.
+_Evitar_: tarea (para esto), proceso.
+
+**Carril** (`lane`):
+Una fila de la cola que ejecuta un trabajo a la vez. Hay dos, el corto y el de mantenimiento, y corren a la vez: un trabajo largo de mantenimiento no retrasa uno corto.
+_Evitar_: worker, hilo.
+
+**Atascado** (`stuck`):
+El estado de un trabajo que sigue corriendo un margen después de que su tiempo máximo lo cancelara. Su carril sigue ocupado hasta que termina o se reinicia `api`.
+_Evitar_: colgado, bloqueado.
+
+**Tarea programada** (`scheduled task`):
+Un trabajo que se repite a una hora local de la casa, cada día o cada semana. Cada ejecución prevista ocurre una sola vez, aunque la Pi estuviera apagada o cambie la hora.
+_Evitar_: cron.
+
+**Mantenimiento** (`maintenance`):
+El trabajo de la plataforma que cuida los datos: copias, limpieza del registro de acciones, de archivos y de trabajos antiguos. Lee y escribe sin acciones y sin actor, y ningún módulo puede usarlo.
+_Evitar_: tarea de sistema, `system`.
+
+**Bandeja de salida** (`outbox`):
+Los trabajos que deja una escritura dentro de su propia transacción para lo que sale de la base de datos, como un aviso. Existen solo si la escritura se confirma, y deshacerla cancela los que aún no han empezado.
+_Evitar_: cola de eventos.
+
+**Invalidación** (`invalidation`):
+El aviso en directo a una sesión de que unos registros que puede ver, o que veía, han cambiado. No lleva su contenido: la app lo vuelve a pedir.
+_Evitar_: evento de datos, sincronización.
+
+**Aviso** (`notification`):
+Un mensaje al móvil de una persona, a la aplicación instalada, con un texto genérico en la pantalla bloqueada. Nunca va a un aparato con la cuenta `device`.
+_Evitar_: notificación, alerta.
+
+**Archivo** (`file`):
+Un contenido binario, como una foto o un PDF, que cuelga siempre de un registro de un módulo y se ve solo si ese registro se ve. No tiene permisos propios.
+_Evitar_: adjunto (para el contenido), blob.
+
+**Archivo preparado** (`prepared file`):
+Un archivo ya subido y comprobado que todavía no cuelga de ningún registro. Es de un solo uso, de la sesión que lo subió, y caduca.
+_Evitar_: subida temporal.
+
+**Copia de seguridad** (`backup`):
+Una instantánea coherente de la base de datos y de los archivos que necesita, guardada cifrada fuera del volumen de datos.
+_Evitar_: volcado, exportación.
+
+**Restaurar** (`restore`):
+Volver a poner en marcha Domus desde una copia de seguridad. No es reiniciar: descarta los trabajos pendientes de la copia para no repetir lo que ya salió.
+_Evitar_: recuperar (para esto).

@@ -11,6 +11,10 @@ const config = readConfig();
 const platform = createPlatform({ databaseFile: config.databaseFile, modules });
 console.log(`database at ${config.databaseFile}: ${platform.appliedMigrations} migrations applied`);
 
+// The background starts after the database is ready and before serving (ADR 0025).
+const { recovered } = platform.startBackground();
+console.log(`scheduler started: ${recovered} jobs recovered`);
+
 const app = createApp({ webDir: config.webDir, platform, modules, auth: config.auth });
 const server = serve({ fetch: app.fetch, port: config.port }, ({ port }) => {
 	console.log(`api listening on port ${port}`);
@@ -18,5 +22,8 @@ const server = serve({ fetch: app.fetch, port: config.port }, ({ port }) => {
 
 onShutdown(async () => {
 	await new Promise<void>((resolve) => server.close(() => resolve()));
+	// Running jobs are cancelled and awaited before the database closes.
+	await platform.stopBackground();
+	console.log("scheduler stopped");
 	platform.close();
 });

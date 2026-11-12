@@ -2,7 +2,8 @@
 // `platform_confirmations`. Each one keeps the exact operation, its fingerprint, a write's key, the verified
 // context it was born in and two absolute deadlines fixed when it is created. Prepared statements on the one
 // connection, synchronous, so the path of the actions reads and changes them inside its own transactions.
-// Expiry is checked when one is reached; removing old rows arrives with phase 1d.
+// Expiry is checked when one is reached; no row is ever removed, and the cleanup (ADR 0025) empties the operation
+// of one that expired.
 import type { Actor } from "@domus/module-sdk";
 import type Database from "better-sqlite3";
 
@@ -25,7 +26,8 @@ export interface PendingConfirmation {
 	readonly account: string;
 	readonly via?: string;
 	readonly kind: "read" | "write";
-	readonly operation: PendingOperation;
+	/** Absent once it expired and the cleanup emptied it: nothing runs it any more. */
+	readonly operation?: PendingOperation;
 	readonly fingerprint: string;
 	/** A write's idempotency key. */
 	readonly key?: string;
@@ -86,7 +88,7 @@ interface Row {
 	readonly account: string;
 	readonly via: string | null;
 	readonly kind: "read" | "write";
-	readonly operation: string;
+	readonly operation: string | null;
 	readonly fingerprint: string;
 	readonly key: string | null;
 	readonly origin: string;
@@ -193,7 +195,9 @@ function pendingOf(row: Row | undefined): PendingConfirmation | undefined {
 		account: row.account,
 		...(row.via === null ? {} : { via: row.via }),
 		kind: row.kind,
-		operation: JSON.parse(row.operation) as PendingOperation,
+		...(row.operation === null
+			? {}
+			: { operation: JSON.parse(row.operation) as PendingOperation }),
 		fingerprint: row.fingerprint,
 		...(row.key === null ? {} : { key: row.key }),
 		origin: JSON.parse(row.origin) as Origin,

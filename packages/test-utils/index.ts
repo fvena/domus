@@ -1,12 +1,14 @@
 // What tests use to stand in for real infrastructure. Only tests import it.
 export { createTestBrowser, type TestBrowser } from "./browser";
 export {
+	type ClockMove,
 	type ContextOptions,
 	createTestPlatform,
 	type DelegationChange,
 	pendingFrom,
 	type PermissionChange,
 	type PreparedAccount,
+	type SyntheticJob,
 	TEST_ORIGIN,
 	TEST_START,
 	type TestPlatform,
@@ -14,6 +16,6 @@ export {
 	type TestPreparation,
 	type WriteOptions,
 } from "./platform";
-export type { VerifiedContext } from "@domus/platform/testing";
+export { PermanentJobError, type VerifiedContext } from "@domus/platform/testing";
 /** The platform's own operations, for HTTP tests of modules, whose rules keep them from platform's contracts. */
 export { platformContract } from "@domus/platform/contracts";

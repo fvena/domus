@@ -25,6 +25,17 @@ import {
 	type VerifiedContext,
 } from "../authorization";
 import {
+	type JobKind,
+	type JobSnapshot,
+	readJobs as readJobsOf,
+	readTaskRuns,
+	readTaskStates,
+	type ScheduledTask,
+	type TaskRun,
+	type TaskState,
+	type Timer,
+} from "../background";
+import {
 	ensureDeviceAccount,
 	insertAccount,
 	type NewAccount,
@@ -43,6 +54,7 @@ import {
 	actionLogOf,
 	actionsOf,
 	areasOf,
+	backgroundOf,
 	clockOf,
 	connectionOf,
 	openPlatform,
@@ -65,10 +77,87 @@ export type {
 	VerifiedContext,
 } from "../authorization";
 export { type ModuleDatabase, moduleDatabase } from "./module-database";
+export { controlledTimer, type ControlledTimer } from "../background";
+export type {
+	JobContext,
+	JobKind,
+	JobSnapshot,
+	ScheduledTask,
+	TaskRun,
+	TaskState,
+} from "../background";
+export { PermanentJobError } from "../background";
 
-/** A platform like createPlatform's, with the real authorization, and the clock the test gives it. */
-export function createPlatformWithClock(options: PlatformOptions, clock: Clock): Platform {
-	return openPlatform(options, { clock });
+/** What a test may give the background of its platform besides the clock. */
+export interface TestBackgroundRuntime {
+	/** How the background waits: a {@link controlledTimer} over the same clock, so no real timer runs. */
+	readonly timer?: Timer;
+	/** Scheduled tasks of the test, declared next to the platform's own. Not a contract for modules. */
+	readonly tasks?: readonly ScheduledTask[];
+	/** Synthetic job kinds of the test, by name, of either lane, that the test enqueues. Not a contract for modules. */
+	readonly jobs?: Readonly<Record<string, JobKind>>;
+}
+
+/**
+ * A platform like createPlatform's, with the real authorization, the clock the test gives it and, for its
+ * background, the timer and extra tasks the test gives it.
+ */
+export function createPlatformWithClock(
+	options: PlatformOptions,
+	clock: Clock,
+	{ timer, tasks, jobs }: TestBackgroundRuntime = {},
+): Platform {
+	return openPlatform(options, {
+		clock,
+		...(timer === undefined ? {} : { timer }),
+		...(tasks === undefined ? {} : { tasks }),
+		...(jobs === undefined ? {} : { jobs }),
+	});
+}
+
+/** Wakes the platform's background now, as a due instant would: it enqueues the runs due and starts the jobs due. */
+export function wakeBackground(platform: Platform): void {
+	backgroundOf(platform).wake();
+}
+
+/** Settles once the platform's background runs no job, also those a job's end started. */
+export function backgroundSettled(platform: Platform): Promise<void> {
+	return backgroundOf(platform).settled();
+}
+
+/** Stores a job of a synthetic kind, due now, and wakes the background. Returns its id. */
+export function enqueueJob(platform: Platform, kind: string): number {
+	return backgroundOf(platform).enqueue(kind);
+}
+
+/** Every job of the background, oldest first. Plain data: changing it changes nothing. */
+export function readJobs(platform: Platform): readonly JobSnapshot[] {
+	return readJobsOf(connectionOf(platform));
+}
+
+/** Every run of a scheduled task, oldest first. Plain data: changing it changes nothing. */
+export function readRuns(platform: Platform): readonly TaskRun[] {
+	return readTaskRuns(connectionOf(platform));
+}
+
+/** The state of every scheduled task with a row, declared or not, by id. Plain data: changing it changes nothing. */
+export function readTasks(platform: Platform): readonly TaskState[] {
+	return readTaskStates(connectionOf(platform));
+}
+
+/**
+ * Changes the state of a declared task as the operations of the platform's area will: pause, resume, or the time
+ * the admin chose (null for its default). An undeclared task throws.
+ */
+export function changeTask(
+	platform: Platform,
+	task: string,
+	change: { readonly paused: boolean } | { readonly time: string | null },
+): void {
+	const background = backgroundOf(platform);
+	if ("time" in change) background.setTime(task, change.time);
+	else if (change.paused) background.pause(task);
+	else background.resume(task);
 }
 
 /** Runs an action through the platform's one path: validation, authorization, handler, result and, for a write, its log entry. */

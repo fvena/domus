@@ -9,7 +9,8 @@ type ConflictReason =
 	| "changed-since"
 	| "window-closed"
 	| "confirmation-expired"
-	| "confirmation-consumed";
+	| "confirmation-consumed"
+	| "task-busy";
 
 /** A conflict, with its reason in `data.reason`. */
 export function conflict(reason: ConflictReason) {

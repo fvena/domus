@@ -13,6 +13,16 @@ import { type ConfirmationTimes, createConfirmations } from "./actions/confirmat
 import { createProofs, type Proofs } from "./actions/proofs";
 import { type ActionLog, createActionLog } from "./audit";
 import { type AreaPolicy, type Authorizer, createAuthorizer } from "./authorization";
+import {
+	type Background,
+	type BackgroundStart,
+	createBackground,
+	type JobKind,
+	realTimer,
+	type ScheduledTask,
+	type Timer,
+} from "./background";
+import { taskOperations } from "./background/operations";
 import { accessView, registeredAreas } from "./identity/access";
 import { ensureDeviceAccount } from "./identity/accounts";
 import { platformOperations } from "./identity/operations";
@@ -51,7 +61,20 @@ const DEFAULT_CONFIRMATION_TIMES: ConfirmationTimes = {
 export interface Platform {
 	/** How many migrations this start applied, for the log of `apps/api`. */
 	readonly appliedMigrations: number;
-	/** Closes the SQLite connection. Safe to call more than once. */
+	/**
+	 * Starts the background work (ADR 0025): the scheduler of the platform's maintenance and the engine that runs
+	 * its jobs. After opening the platform and before serving. Once only.
+	 */
+	startBackground(): BackgroundStart;
+	/**
+	 * Stops the background work: no new job is claimed, the running ones are cancelled, and it settles once they
+	 * ended. Before closing. Safe to call when it never started.
+	 */
+	stopBackground(): Promise<void>;
+	/**
+	 * Closes the SQLite connection. Safe to call more than once. Throws while the background is active: a job
+	 * could still be using the connection.
+	 */
 	close(): void;
 }
 
@@ -62,6 +85,12 @@ export interface Platform {
 export interface PlatformRuntime {
 	readonly clock: Clock;
 	readonly authorizer?: Authorizer;
+	/** How the background waits for an instant of `clock`: a real timer unless a test controls it. */
+	readonly timer?: Timer;
+	/** Scheduled tasks a test declares besides the platform's own. */
+	readonly tasks?: readonly ScheduledTask[];
+	/** Synthetic job kinds a test declares, by name, to enqueue them itself. */
+	readonly jobs?: Readonly<Record<string, JobKind>>;
 }
 
 const IN_MEMORY = ":memory:";
@@ -78,6 +107,7 @@ const internals = new WeakMap<
 		readonly areas: ReadonlyMap<string, AreaPolicy>;
 		readonly authorizer: Authorizer;
 		readonly proofs: Proofs;
+		readonly background: Background;
 	}
 >();
 
@@ -89,7 +119,7 @@ export function createPlatform(options: PlatformOptions): Platform {
 /** createPlatform with a given runtime. Inside platform only; the testing entry hands test-utils its clock part. */
 export function openPlatform(
 	{ databaseFile, modules, retention = DEFAULT_RETENTION, confirmation = {} }: PlatformOptions,
-	{ clock, authorizer }: PlatformRuntime,
+	{ clock, authorizer, timer = realTimer(clock), tasks, jobs }: PlatformRuntime,
 ): Platform {
 	if (databaseFile !== IN_MEMORY && !isAbsolute(databaseFile)) {
 		throw new Error(
@@ -132,9 +162,22 @@ export function openPlatform(
 		throw error;
 	}
 
+	const background = createBackground({
+		connection: db,
+		clock,
+		timer,
+		...(tasks === undefined ? {} : { extraTasks: tasks }),
+		...(jobs === undefined ? {} : { extraKinds: jobs }),
+	});
 	const platform: Platform = {
 		appliedMigrations,
+		startBackground: () => background.start(),
+		stopBackground: () => background.stop(),
 		close: () => {
+			if (background.active)
+				throw new Error(
+					"stop the background before closing the platform: a job may still use it",
+				);
 			if (db.open) db.close();
 		},
 	};
@@ -154,7 +197,7 @@ export function openPlatform(
 		retention,
 		confirmations: createConfirmations(db, confirmationTimes),
 		proofs,
-		operations: platformOperations(db, areas),
+		operations: [...platformOperations(db, areas), ...taskOperations(background)],
 	});
 	internals.set(platform, {
 		db,
@@ -165,6 +208,7 @@ export function openPlatform(
 		areas,
 		authorizer: decider,
 		proofs,
+		background,
 	});
 	return platform;
 }
@@ -204,6 +248,11 @@ export function proofIssuerOf(platform: Platform): ProofIssuer {
 /** The registered areas, the platform's own first. Inside platform only. */
 export function areasOf(platform: Platform): ReadonlyMap<string, AreaPolicy> {
 	return internalsOf(platform).areas;
+}
+
+/** The background work of a platform. Inside platform only: the testing entry drives it in tests. */
+export function backgroundOf(platform: Platform): Background {
+	return internalsOf(platform).background;
 }
 
 /** The platform clock. Inside platform only. */

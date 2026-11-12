@@ -7,7 +7,8 @@
 // pending confirmations (confirming or rejecting one's own, by the app), step-up proofs (asking for one with
 // the password), delegation (reading one's own, or the device account's as admin) and the action log (reading
 // one's own annotations, undoing one's own entry). The sensitive ones (changing permissions and delegation,
-// revoking sessions and devices) are writes on that same path. A write's idempotency key and a sensitive operation's step-up proof come in headers.
+// revoking sessions and devices) are writes on that same path, and so are the settings of the scheduled tasks
+// (ADR 0025: listing them, a read; changing a time, pausing, resuming and launching, `manage` writes). A write's idempotency key and a sensitive operation's step-up proof come in headers.
 import type { ModuleDefinition } from "@domus/module-sdk";
 import { implement, ORPCError, os } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
@@ -15,12 +16,20 @@ import { Hono } from "hono";
 
 import { READ_DELEGATION, READ_LOG } from "../actions";
 import { sealContext, type VerifiedContext } from "../authorization";
+import { LIST_TASKS } from "../background/operations";
 import { PROTOCOL, platformContract } from "../contracts";
 import { AUTH_PREFIX, type AuthOptions, createAuth } from "../identity/auth";
 import { replacePassword, SessionGoneError, verifiedPasswordHash } from "../identity/passwords";
 import { requestProof, WrongPasswordError } from "../identity/proofs";
 import { sessionsOf } from "../identity/sessions";
-import { actionsOf, clockOf, connectionOf, type Platform, proofIssuerOf } from "../platform";
+import {
+	actionsOf,
+	backgroundOf,
+	clockOf,
+	connectionOf,
+	type Platform,
+	proofIssuerOf,
+} from "../platform";
 
 export interface HttpHandler {
 	/** A plain function, safe to pass around as `fetch`. */
@@ -62,8 +71,15 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	const identity = createAuth(connection, auth);
 	const actions = actionsOf(platform);
 
-	/** Runs one of the platform's sensitive operations on the path of the actions, as a write with a session. */
-	async function sensitive(name: string, input: unknown, context: DoorContext): Promise<never> {
+	/**
+	 * Runs the platform's write `platform.<name>` on the path of the actions with a session, its key and its proof:
+	 * the sensitive ones and the `manage` settings of the scheduled tasks.
+	 */
+	async function platformWrite(
+		name: string,
+		input: unknown,
+		context: DoorContext,
+	): Promise<never> {
 		return actions.invoke({
 			context: await verifiedSession(context),
 			action: `platform.${name}`,
@@ -147,17 +163,17 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 				return sessionsOf(connection, account, session);
 			}),
 			revoke: platformProcedures.sessions.revoke.handler(({ input, context }) =>
-				sensitive("revokeSession", input, context),
+				platformWrite("revokeSession", input, context),
 			),
 		},
 		devices: {
 			revoke: platformProcedures.devices.revoke.handler(({ input, context }) =>
-				sensitive("revokeDevice", input, context),
+				platformWrite("revokeDevice", input, context),
 			),
 		},
 		permissions: {
 			set: platformProcedures.permissions.set.handler(({ input, context }) =>
-				sensitive("setPermission", input, context),
+				platformWrite("setPermission", input, context),
 			),
 		},
 		delegation: {
@@ -170,7 +186,7 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 					}) as never,
 			),
 			set: platformProcedures.delegation.set.handler(({ input, context }) =>
-				sensitive("setDelegation", input, context),
+				platformWrite("setDelegation", input, context),
 			),
 		},
 		proofs: {
@@ -207,6 +223,27 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 				}),
 			),
 		},
+		tasks: {
+			list: platformProcedures.tasks.list.handler(
+				async ({ context }) =>
+					actions.invoke({
+						context: await verifiedSession(context),
+						action: LIST_TASKS,
+					}) as never,
+			),
+			setTime: platformProcedures.tasks.setTime.handler(({ input, context }) =>
+				platformWrite("setTaskTime", input, context),
+			),
+			pause: platformProcedures.tasks.pause.handler(({ input, context }) =>
+				platformWrite("pauseTask", input, context),
+			),
+			resume: platformProcedures.tasks.resume.handler(({ input, context }) =>
+				platformWrite("resumeTask", input, context),
+			),
+			launch: platformProcedures.tasks.launch.handler(({ input, context }) =>
+				platformWrite("launchTask", input, context),
+			),
+		},
 		confirmations: {
 			confirm: platformProcedures.confirmations.confirm.handler(async ({ input, context }) =>
 				actions.confirm({
@@ -222,7 +259,11 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	});
 	const app = new Hono();
 
-	app.get("/health", (c) => c.json({ status: "ok" }));
+	// 200 while the process answers, which is what Docker's health check watches; the background's field is the
+	// watcher's, public and without personal data (ADR 0025).
+	app.get("/health", (c) =>
+		c.json({ status: "ok", background: backgroundOf(platform).health() }),
+	);
 
 	app.post(`${AUTH_PREFIX}/*`, (c) =>
 		AUTH_ROUTES.includes(c.req.path.slice(AUTH_PREFIX.length))
