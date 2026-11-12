@@ -80,7 +80,7 @@ describe("probe writes", () => {
 			test.invoke(
 				ana,
 				"probe.restoreNote",
-				{ id: 1, body: "comprar pan" },
+				{ id: 1, body: "comprar pan", visibility: "private" },
 				{ idempotencyKey: "k3" },
 			),
 		).toEqual({ result: { id: 1, body: "comprar pan" }, entry: 3 });
@@ -93,7 +93,10 @@ describe("probe writes", () => {
 			{
 				action: "probe.deleteNote",
 				touched: [{ module: "probe", type: "note", id: "1" }],
-				inverse: { action: "probe.restoreNote", input: { id: 1, body: "comprar pan" } },
+				inverse: {
+					action: "probe.restoreNote",
+					input: { id: 1, body: "comprar pan", visibility: "private" },
+				},
 			},
 			{
 				action: "probe.restoreNote",
@@ -177,8 +180,14 @@ describe("probe writes", () => {
 	it("refuses to delete a note with comments with its contract's error, without change or entry", async () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
-		test.dbFor(probe).insert(notes).values({ body: "comprar pan" }).run();
-		test.dbFor(probe).insert(comments).values({ noteId: 1, body: "integral" }).run();
+		test.dbFor(probe)
+			.insert(notes)
+			.values({ owner: "ana", visibility: "private", body: "comprar pan" })
+			.run();
+		test.dbFor(probe)
+			.insert(comments)
+			.values({ owner: "ana", visibility: "private", noteId: 1, body: "integral" })
+			.run();
 
 		expect(() =>
 			test.invoke(ana, "probe.deleteNote", { id: 1 }, { idempotencyKey: "k1" }),

@@ -130,7 +130,10 @@ describe("probe over HTTP", () => {
 	describe("with a session", () => {
 		it("runs an allowed read through api-client", async () => {
 			await using test = await probeWithAna();
-			test.dbFor(probe).insert(notes).values({ body: "comprar pan" }).run();
+			test.dbFor(probe)
+				.insert(notes)
+				.values({ owner: "ana", visibility: "private", body: "comprar pan" })
+				.run();
 			const browser = test.browser();
 			await browser.signIn("ana@domus.test", PASSWORD);
 

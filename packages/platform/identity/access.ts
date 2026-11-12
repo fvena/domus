@@ -21,8 +21,14 @@ export function registeredAreas(
 	return areas;
 }
 
+/** What an area declares, with the strictest default for each field it leaves out. */
 function policyOf(definition: AreaDefinition | undefined): AreaPolicy {
-	return { alwaysPrivate: definition?.alwaysPrivate === true };
+	return {
+		defaultVisibility: definition?.defaultVisibility ?? "private",
+		publicEditable: definition?.publicEditable === true,
+		alwaysPrivate: definition?.alwaysPrivate === true,
+		confirmOnSharedDevice: definition?.confirmOnSharedDevice === true,
+	};
 }
 
 /** The view authorization decides on, over `connection` and the registered `areas`. */

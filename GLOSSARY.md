@@ -48,6 +48,10 @@ _Evitar_: login, conexión.
 Lo que la puerta sabe de quién pide una operación y desde dónde, sacado de sus credenciales: la cuenta representada, `via`, el aparato, la sesión, la cuenta del aparato, el canal, cómo se acreditó la identidad y la conversación. Nada de lo que declare el cliente lo cambia.
 _Evitar_: contexto de usuario, identidad declarada.
 
+**Tabla con dueño** (`owned table`):
+Una tabla de un módulo cuyos registros son de una cuenta: cada uno guarda su dueño y su visibilidad, y su clave es solo el `id` entero. Pertenece a un área, de la que toma la visibilidad por defecto.
+_Evitar_: tabla privada, tabla protegida.
+
 **Visibilidad** (`visibility`):
 Si un registro con dueño lo ve solo su dueño (privado) o toda la casa (público). Ser público deja verlo, no editarlo.
 _Evitar_: compartido, nivel de acceso.

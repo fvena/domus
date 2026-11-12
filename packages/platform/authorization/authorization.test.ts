@@ -14,9 +14,20 @@ import {
 } from ".";
 
 const AREAS: Readonly<Record<string, AreaPolicy>> = {
-	notes: { alwaysPrivate: false },
-	health: { alwaysPrivate: true },
+	notes: policy({}),
+	health: policy({ alwaysPrivate: true }),
 };
+
+/** An area's policy: the defaults of an area that declares nothing, with `fields` over them. */
+function policy(fields: Partial<AreaPolicy>): AreaPolicy {
+	return {
+		defaultVisibility: "private",
+		publicEditable: false,
+		alwaysPrivate: false,
+		confirmOnSharedDevice: false,
+		...fields,
+	};
+}
 
 /** A view built in the test: roles by account and stored rows by `<account>/<area>`. */
 function viewOf(

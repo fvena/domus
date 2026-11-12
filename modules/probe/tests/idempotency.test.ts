@@ -116,14 +116,22 @@ describe("probe idempotency", () => {
 		);
 
 		expect(entries).toEqual([1, 2, 3, 4]);
-		expect(test.invoke(ana, "probe.listNotes")).toHaveLength(4);
+		// Four notes: three of Ana, through any via, and one of Luis, which only he sees.
+		expect(test.invoke(ana, "probe.countNotes")).toBe(3);
+		expect(test.invoke(actors[1]!, "probe.countNotes")).toBe(1);
 	});
 
 	it("runs a key again after an attempt with it rolled back", async () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
-		test.dbFor(probe).insert(notes).values({ body: "comprar pan" }).run();
-		test.dbFor(probe).insert(comments).values({ noteId: 1, body: "integral" }).run();
+		test.dbFor(probe)
+			.insert(notes)
+			.values({ owner: "ana", visibility: "private", body: "comprar pan" })
+			.run();
+		test.dbFor(probe)
+			.insert(comments)
+			.values({ owner: "ana", visibility: "private", noteId: 1, body: "integral" })
+			.run();
 		expect(() =>
 			test.invoke(ana, "probe.deleteNote", { id: 1 }, { idempotencyKey: "k1" }),
 		).toThrow(expect.objectContaining({ code: "NOTE_HAS_COMMENTS" }));

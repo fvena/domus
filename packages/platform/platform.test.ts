@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { defineModule } from "@domus/module-sdk";
 import { readAction } from "@domus/module-sdk/contracts";
+import { moduleTables } from "@domus/module-sdk/db";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -90,6 +91,27 @@ describe("createPlatform", () => {
 
 		expect(() => createPlatform({ databaseFile, modules: [notes] })).toThrow(
 			/area "notes.health", which is not registered/,
+		);
+		expect(existsSync(databaseFile)).toBe(false);
+	});
+
+	// Until the write capture checks every write to them (ticket 06), production cannot write owned tables.
+	it("refuses a module with owned tables, before opening the file", () => {
+		const databaseFile = join(dir, "domus.db");
+		const notes = defineModule({
+			id: "notes",
+			schema: {
+				items: moduleTables("notes").ownedTable(
+					"items",
+					{ type: "item", area: "notes" },
+					{},
+				),
+			},
+			migrations: [],
+		});
+
+		expect(() => createPlatform({ databaseFile, modules: [notes] })).toThrow(
+			'module "notes": owned tables are not open to production until their writes are checked',
 		);
 		expect(existsSync(databaseFile)).toBe(false);
 	});

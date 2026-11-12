@@ -134,12 +134,16 @@ describe("module-sdk", () => {
 			"areaIds",
 			"checkModules",
 			"defineModule",
+			"ownedTableOf",
 		]);
 		expect(await names("contracts/index.ts")).toEqual(["readAction", "writeAction"]);
 		// Table declarations and query helpers; no drizzle() and no connection.
 		expect(await names("db/index.ts")).toEqual([
+			"and",
+			"asc",
 			"blob",
 			"check",
+			"count",
 			"eq",
 			"foreignKey",
 			"id",
@@ -147,6 +151,7 @@ describe("module-sdk", () => {
 			"integer",
 			"moduleTables",
 			"numeric",
+			"ownedTableOf",
 			"primaryKey",
 			"real",
 			"sql",

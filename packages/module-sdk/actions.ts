@@ -9,9 +9,11 @@ import type {
 	InferSchemaOutput,
 	ORPCError,
 } from "@orpc/contract";
+import type { SQL } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 
 import type { ActionContract, ModuleContract, ReadActionMeta, WriteActionMeta } from "./contracts";
+import type { OwnedTable, Visibility } from "./db";
 
 /** What a module's exports may hold: its tables, made with `moduleTables`, and anything else Drizzle reads. */
 export type ModuleSchema = Readonly<Record<string, unknown>>;
@@ -80,6 +82,24 @@ export interface ActionContext<
 	readonly now: number;
 	/** The errors its contract declares. */
 	readonly errors: ActionErrors<TErrorMap>;
+	/**
+	 * The visibility predicate of one of its module's owned tables (ADR 0023): the records the represented
+	 * account sees, its own and the public ones. Every query on an owned table puts it in `where`, counts and
+	 * searches included, and a join carries one per owned table. A record it hides does not exist: the action
+	 * answers "not found".
+	 */
+	readonly visible: (table: OwnedTable) => SQL;
+	/**
+	 * The owner and visibility of a new record of one of its module's owned tables: the represented account,
+	 * and the default visibility of the table's area. Spread into the values of an insert.
+	 */
+	readonly ownership: (table: OwnedTable) => NewOwnership;
+}
+
+/** What a new owned record takes: its owner and its visibility. */
+export interface NewOwnership {
+	readonly owner: string;
+	readonly visibility: Visibility;
 }
 
 /** A record of its own module that a write changed, by type and id, so undo can see later changes. */

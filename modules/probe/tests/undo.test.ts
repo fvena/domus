@@ -82,7 +82,10 @@ describe("probe undo", () => {
 				undoes: 1,
 				undoneBy: null,
 				input: { id: 1 },
-				inverse: { action: "probe.restoreNote", input: { id: 1, body: "comprar pan" } },
+				inverse: {
+					action: "probe.restoreNote",
+					input: { id: 1, body: "comprar pan", visibility: "private" },
+				},
 				touched: [{ module: "probe", type: "note", id: "1" }],
 			}),
 		]);

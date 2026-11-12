@@ -3,7 +3,7 @@
 // it, makes sure the one device account exists, and runs the modules' actions with the production authorizer.
 import { isAbsolute } from "node:path";
 
-import { checkModules, type ModuleDefinition, PLATFORM_ID } from "@domus/module-sdk";
+import { checkModules, type ModuleDefinition, ownedTableOf, PLATFORM_ID } from "@domus/module-sdk";
 import Database from "better-sqlite3";
 
 import { type Actions, type Clock, createActions } from "./actions";
@@ -62,6 +62,13 @@ const internals = new WeakMap<
 
 /** Opens SQLite and applies the pending migrations. On any failure it closes the connection and throws. */
 export function createPlatform(options: PlatformOptions): Platform {
+	// Until the write capture checks every write to an owned table (ticket 06), production opens none: a
+	// handler could otherwise write another account's records. Tests open them through the testing entry.
+	for (const module of options.modules)
+		if (Object.values(module.schema).some((value) => ownedTableOf(value) !== undefined))
+			throw new Error(
+				`module "${module.id}": owned tables are not open to production until their writes are checked`,
+			);
 	return openPlatform(options, { clock: Date.now });
 }
 
@@ -108,10 +115,12 @@ export function openPlatform(
 		},
 	};
 	const actionLog = createActionLog(db);
+	const areas = registeredAreas(modules);
 	const actions = createActions({
 		connection: db,
 		modules,
-		authorizer: authorizer ?? createAuthorizer(accessView(db, registeredAreas(modules))),
+		areas,
+		authorizer: authorizer ?? createAuthorizer(accessView(db, areas)),
 		clock,
 		actionLog,
 		retention,

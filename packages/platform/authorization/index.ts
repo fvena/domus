@@ -2,9 +2,12 @@
 // because writes ask it inside their transaction: it takes the verified context, the action with the permission
 // its contract declares, the validated input and a read-only view of roles, permissions and areas. The steps
 // that later tickets add sit where the comments in `decide` say. Fails closed: a throw denies.
+import type { Visibility } from "@domus/module-sdk";
 import type { PermissionLevel } from "@domus/module-sdk/contracts";
 
 import type { VerifiedContext } from "./context";
+
+export { newOwnership, visibleTo } from "./visibility";
 
 export {
 	actorOf,
@@ -49,9 +52,12 @@ export interface UndoContext {
 	readonly actor: { readonly account: string; readonly via?: string };
 }
 
-/** What an area declares that the decision reads. */
+/** What an area declares, each field with its default filled in (`AreaDefinition` of module-sdk). */
 export interface AreaPolicy {
+	readonly defaultVisibility: Visibility;
+	readonly publicEditable: boolean;
 	readonly alwaysPrivate: boolean;
+	readonly confirmOnSharedDevice: boolean;
 }
 
 /** A read-only view of what the decision reads. Production reads it from the platform's tables. */

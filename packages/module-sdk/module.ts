@@ -2,10 +2,14 @@
 // its actions: the contract and its implementation. Each later subphase adds its piece when it arrives; nothing
 // is reserved ahead.
 import { getTableName, is } from "drizzle-orm";
-import { SQLiteTable } from "drizzle-orm/sqlite-core";
+import { getTableConfig, SQLiteTable } from "drizzle-orm/sqlite-core";
 
 import type { ModuleActions, ModuleSchema } from "./actions";
+import type { AreaDefinition } from "./areas";
 import type { ActionMeta, ModuleContract } from "./contracts";
+import { ownedTableOf } from "./db";
+
+export type { AreaDefinition } from "./areas";
 
 /** One migration as data, the shape `pnpm db:generate` writes into `server/migrations.ts`. */
 export interface ModuleMigration {
@@ -16,14 +20,6 @@ export interface ModuleMigration {
 	/** The hash of its SQL file, as `readMigrationFiles` of `drizzle-orm/migrator` gives it. */
 	readonly hash: string;
 	readonly statements: readonly string[];
-}
-
-/**
- * What an area declares about itself. `alwaysPrivate`: nothing of it is ever public, and the device account
- * gets no permission in it by default. Visibility adds the rest of an area's policy.
- */
-export interface AreaDefinition {
-	readonly alwaysPrivate?: boolean;
 }
 
 export interface ModuleDefinition<
@@ -87,6 +83,7 @@ export function checkModules(modules: readonly ModuleDefinition[]): void {
 		checkActions(module, actionNames);
 		checkAreas(module);
 		checkPermissions(module, areas);
+		checkOwnedTables(module);
 		if (seen.has(module.id)) throw new Error(`module "${module.id}": two modules have this id`);
 		seen.add(module.id);
 
@@ -133,6 +130,49 @@ function checkAreas(module: ModuleDefinition): void {
 			throw new Error(
 				`module "${module.id}": area "${area}" must be "${module.id}" or "${module.id}.<name>"`,
 			);
+	}
+	for (const [area, definition] of Object.entries(module.areas ?? {}))
+		if (definition.alwaysPrivate === true && definition.defaultVisibility === "public")
+			throw new Error(
+				`module "${module.id}": area "${area}" is always private and cannot be public by default`,
+			);
+}
+
+/**
+ * Each owned table keys on its integer `id` alone, sits in an area of its module built with the policy the
+ * module declares for it, and names its records with a type no other owned table of the module uses.
+ */
+function checkOwnedTables(module: ModuleDefinition): void {
+	const areas = new Set(areaIds(module));
+	const types = new Set<string>();
+	for (const value of Object.values(module.schema)) {
+		const owned = ownedTableOf(value);
+		if (!owned || !is(value, SQLiteTable)) continue;
+		const config = getTableConfig(value);
+		const key = config.columns.find((column) => column.name === "id");
+		if (
+			config.primaryKeys.length > 0 ||
+			!key?.primary ||
+			key.getSQLType() !== "integer" ||
+			config.columns.some((column) => column !== key && column.primary)
+		)
+			throw new Error(
+				`module "${module.id}": owned table "${config.name}" must have the integer "id" as its only key`,
+			);
+		if (!areas.has(owned.area))
+			throw new Error(
+				`module "${module.id}": owned table "${config.name}" is in area "${owned.area}", which the module does not declare`,
+			);
+		const alwaysPrivate = module.areas?.[owned.area]?.alwaysPrivate === true;
+		if (alwaysPrivate !== owned.alwaysPrivate)
+			throw new Error(
+				`module "${module.id}": owned table "${config.name}" was built for area "${owned.area}" ${owned.alwaysPrivate ? "always private" : "not always private"}, but the module declares it otherwise`,
+			);
+		if (types.has(owned.type))
+			throw new Error(
+				`module "${module.id}": two owned tables have the record type "${owned.type}"`,
+			);
+		types.add(owned.type);
 	}
 }
 

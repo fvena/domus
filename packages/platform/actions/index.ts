@@ -8,14 +8,16 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
-import type {
-	ActionHandler,
-	Actor,
-	Inverse,
-	ModuleDatabase,
-	ModuleDefinition,
-	ModuleSchema,
-	TouchedRecord,
+import {
+	type ActionHandler,
+	type Actor,
+	type Inverse,
+	type ModuleDatabase,
+	type ModuleDefinition,
+	type ModuleSchema,
+	type OwnedTable,
+	ownedTableOf,
+	type TouchedRecord,
 } from "@domus/module-sdk";
 import type { ActionContract } from "@domus/module-sdk/contracts";
 import type { AnySchema, ErrorMap } from "@orpc/contract";
@@ -26,12 +28,15 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import type { ActionLog, NumberedEntry } from "../audit";
 import {
 	actorOf,
+	type AreaPolicy,
 	type AuthorizationRequest,
 	type Authorizer,
 	isAllowed,
 	isVerified,
+	newOwnership,
 	type RequiredPermission,
 	type VerifiedContext,
+	visibleTo,
 } from "../authorization";
 
 /** The platform clock: instants in milliseconds since the epoch (ADR 0021). */
@@ -91,6 +96,8 @@ export interface UndoCall {
 export interface ActionsOptions {
 	readonly connection: Database.Database;
 	readonly modules: readonly ModuleDefinition[];
+	/** Every registered area, with what it declares: owned records take their visibility from it. */
+	readonly areas: ReadonlyMap<string, AreaPolicy>;
 	readonly authorizer: Authorizer;
 	readonly clock: Clock;
 	readonly actionLog: ActionLog;
@@ -114,12 +121,15 @@ interface RegisteredAction {
 	readonly errorMap: ErrorMap;
 	readonly handler: ActionHandler<ActionContract, ModuleSchema>;
 	readonly db: ModuleDatabase<ModuleSchema>;
+	/** The owned tables of its module, with the policy of each one's area. */
+	readonly ownedTables: ReadonlyMap<OwnedTable, AreaPolicy>;
 }
 
 /** The actions of `modules`, which `checkModules` has already accepted, on one connection. */
 export function createActions({
 	connection,
 	modules,
+	areas,
 	authorizer,
 	clock,
 	actionLog,
@@ -128,6 +138,7 @@ export function createActions({
 	const registry = new Map<string, RegisteredAction>();
 	for (const module of modules) {
 		const db = drizzle({ client: connection, schema: module.schema });
+		const ownedTables = ownedTablesOf(module, areas);
 		for (const [name, contract] of Object.entries(module.contract ?? {})) {
 			const handler = module.actions?.[name];
 			if (!handler) continue;
@@ -146,6 +157,7 @@ export function createActions({
 				errorMap,
 				handler,
 				db,
+				ownedTables,
 			});
 		}
 	}
@@ -180,6 +192,12 @@ export function createActions({
 
 	/** Runs a handler; only an error its contract declares leaves as it is. */
 	function run(found: RegisteredAction, actor: Actor, input: unknown, now: number): unknown {
+		/** The policy of one of the module's owned tables; any other table is a mistake of the handler. */
+		const areaOf = (table: OwnedTable): AreaPolicy => {
+			const area = found.ownedTables.get(table);
+			if (!area) throw new Error("not an owned table of this module");
+			return area;
+		};
 		let outcome: unknown;
 		try {
 			outcome = found.handler({
@@ -188,6 +206,11 @@ export function createActions({
 				actor,
 				now,
 				errors: createORPCErrorConstructorMap(found.errorMap),
+				visible: (table) => {
+					areaOf(table);
+					return visibleTo(table, actor.account);
+				},
+				ownership: (table) => newOwnership(actor.account, areaOf(table).defaultVisibility),
 			});
 		} catch (error) {
 			throw declaredOrInternal(found, error);
@@ -438,6 +461,20 @@ export function createActions({
 		if (!validated.ok || !isLosslessJson(validated.value)) throw internalError();
 		return { stored: { action, input }, target, input: validated.value };
 	}
+}
+
+/** The owned tables of a module, which `checkModules` has accepted, each with the policy of its area. */
+function ownedTablesOf(
+	module: ModuleDefinition,
+	areas: ReadonlyMap<string, AreaPolicy>,
+): ReadonlyMap<OwnedTable, AreaPolicy> {
+	const owned = new Map<OwnedTable, AreaPolicy>();
+	for (const value of Object.values(module.schema)) {
+		const info = ownedTableOf(value);
+		const area = info && areas.get(info.area);
+		if (area) owned.set(value as OwnedTable, area);
+	}
+	return owned;
 }
 
 /**

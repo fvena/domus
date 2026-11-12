@@ -2,7 +2,7 @@ import { oc } from "@orpc/contract";
 import { describe, expect, it } from "vitest";
 
 import { type ActionContract, type ActionMeta, readAction, writeAction } from "./contracts";
-import { moduleTables, text } from "./db";
+import { moduleTables, primaryKey, text } from "./db";
 import { type AreaDefinition, checkModules, defineModule } from "./index";
 
 function moduleWithId(id: string) {
@@ -138,4 +138,91 @@ describe("checkModules on areas and permissions", () => {
 			).toThrow(`module "notes": area "${area}" must be "notes" or "notes.<name>"`);
 		},
 	);
+
+	it("rejects an always private area that is public by default", () => {
+		const module = defineModule({
+			id: "notes",
+			areas: { "notes.health": { alwaysPrivate: true, defaultVisibility: "public" } },
+			schema: {},
+			migrations: [],
+		});
+
+		expect(() => checkModules([module])).toThrow(
+			'module "notes": area "notes.health" is always private and cannot be public by default',
+		);
+	});
+});
+
+describe("checkModules on owned tables", () => {
+	const areas = {
+		notes: {},
+		"notes.health": { alwaysPrivate: true },
+	} satisfies Record<string, AreaDefinition>;
+	const { ownedTable } = moduleTables("notes", areas);
+
+	function notesWithTables(
+		schema: Record<string, unknown>,
+		declared: Record<string, AreaDefinition> = areas,
+	) {
+		return defineModule({ id: "notes", areas: declared, schema, migrations: [] });
+	}
+
+	it("accepts owned tables in the module's own area and in one it declares", () => {
+		const schema = {
+			items: ownedTable("items", { type: "item", area: "notes" }, { body: text() }),
+			health: ownedTable(
+				"health",
+				{ type: "health", area: "notes.health" },
+				{ body: text() },
+			),
+		};
+
+		expect(() => checkModules([notesWithTables(schema)])).not.toThrow();
+	});
+
+	it("rejects an owned table with a composite key", () => {
+		const items = ownedTable(
+			"items",
+			{ type: "item", area: "notes" },
+			{ body: text().notNull() },
+			(self) => [primaryKey({ columns: [self.id, self.body] })],
+		);
+
+		expect(() => checkModules([notesWithTables({ items })])).toThrow(
+			'module "notes": owned table "notes_items" must have the integer "id" as its only key',
+		);
+	});
+
+	it("rejects an owned table whose area the module does not declare", () => {
+		const items = moduleTables("notes", { "notes.garden": {} }).ownedTable(
+			"items",
+			{ type: "item", area: "notes.garden" },
+			{ body: text() },
+		);
+
+		expect(() => checkModules([notesWithTables({ items })])).toThrow(
+			'module "notes": owned table "notes_items" is in area "notes.garden", which the module does not declare',
+		);
+	});
+
+	it("rejects an owned table built for another policy than its module declares", () => {
+		const health = ownedTable("health", { type: "health", area: "notes.health" }, {});
+
+		expect(() =>
+			checkModules([notesWithTables({ health }, { notes: {}, "notes.health": {} })]),
+		).toThrow(
+			'module "notes": owned table "notes_health" was built for area "notes.health" always private, but the module declares it otherwise',
+		);
+	});
+
+	it("rejects two owned tables with the same record type", () => {
+		const schema = {
+			items: ownedTable("items", { type: "item", area: "notes" }, {}),
+			others: ownedTable("others", { type: "item", area: "notes" }, {}),
+		};
+
+		expect(() => checkModules([notesWithTables(schema)])).toThrow(
+			'module "notes": two owned tables have the record type "item"',
+		);
+	});
 });

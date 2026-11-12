@@ -14,17 +14,30 @@ describe("probe storage", () => {
 		await using test = createTestPlatform({ modules: [probe] });
 		const db = test.dbFor(probe);
 
-		db.insert(notes).values({ body: "comprar pan" }).run();
+		db.insert(notes).values({ owner: "ana", visibility: "private", body: "comprar pan" }).run();
 
-		expect(db.select().from(notes).all()).toEqual([{ id: 1, body: "comprar pan" }]);
+		expect(db.select().from(notes).all()).toEqual([
+			{ id: 1, body: "comprar pan", owner: "ana", visibility: "private" },
+		]);
 	});
 
 	it("reads each comment with the note it belongs to", async () => {
 		await using test = createTestPlatform({ modules: [probe] });
 		const db = test.dbFor(probe);
-		const note = db.insert(notes).values({ body: "cena del sábado" }).returning().get();
+		const note = db
+			.insert(notes)
+			.values({ owner: "ana", visibility: "private", body: "cena del sábado" })
+			.returning()
+			.get();
 
-		db.insert(comments).values({ noteId: note.id, body: "llevo el postre" }).run();
+		db.insert(comments)
+			.values({
+				owner: "ana",
+				visibility: "private",
+				noteId: note.id,
+				body: "llevo el postre",
+			})
+			.run();
 
 		expect(
 			db
@@ -39,9 +52,12 @@ describe("probe storage", () => {
 		await using test = createTestPlatform({ modules: [probe] });
 		const db = test.dbFor(probe);
 
-		expect(() => db.insert(comments).values({ noteId: 99, body: "huérfano" }).run()).toThrow(
-			/FOREIGN KEY constraint failed/,
-		);
+		expect(() =>
+			db
+				.insert(comments)
+				.values({ owner: "ana", visibility: "private", noteId: 99, body: "huérfano" })
+				.run(),
+		).toThrow(/FOREIGN KEY constraint failed/);
 		expect(db.select().from(comments).all()).toEqual([]);
 	});
 
@@ -59,17 +75,23 @@ describe("probe storage", () => {
 				const db = test.dbFor(probe);
 				const note = db
 					.insert(notes)
-					.values({ body: "regar las plantas" })
+					.values({ owner: "ana", visibility: "private", body: "regar las plantas" })
 					.returning()
 					.get();
-				db.insert(comments).values({ noteId: note.id, body: "hecho" }).run();
+				db.insert(comments)
+					.values({ owner: "ana", visibility: "private", noteId: note.id, body: "hecho" })
+					.run();
 			}
 
 			await using test = createTestPlatform({ modules: [probe], file });
 			const db = test.dbFor(probe);
 			expect(test.platform.appliedMigrations).toBe(0);
-			expect(db.select().from(notes).all()).toEqual([{ id: 1, body: "regar las plantas" }]);
-			expect(db.select().from(comments).all()).toEqual([{ id: 1, noteId: 1, body: "hecho" }]);
+			expect(db.select().from(notes).all()).toEqual([
+				{ id: 1, body: "regar las plantas", owner: "ana", visibility: "private" },
+			]);
+			expect(db.select().from(comments).all()).toEqual([
+				{ id: 1, noteId: 1, body: "hecho", owner: "ana", visibility: "private" },
+			]);
 		});
 	});
 });

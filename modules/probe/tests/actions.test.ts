@@ -9,7 +9,10 @@ describe("probe reads", () => {
 		await using test = createTestPlatform({ modules: [probe] });
 		test.dbFor(probe)
 			.insert(notes)
-			.values([{ body: "comprar pan" }, { body: "regar" }])
+			.values([
+				{ owner: "ana", visibility: "private", body: "comprar pan" },
+				{ owner: "ana", visibility: "private", body: "regar" },
+			])
 			.run();
 
 		expect(test.invoke(test.member("ana"), "probe.listNotes")).toEqual([
@@ -22,7 +25,10 @@ describe("probe reads", () => {
 		await using test = createTestPlatform({ modules: [probe] });
 		test.dbFor(probe)
 			.insert(notes)
-			.values([{ body: "comprar pan" }, { body: "regar" }])
+			.values([
+				{ owner: "ana", visibility: "private", body: "comprar pan" },
+				{ owner: "ana", visibility: "private", body: "regar" },
+			])
 			.run();
 		const ana = test.member("ana");
 
@@ -70,7 +76,10 @@ describe("probe permissions, with the real authorization", () => {
 
 	it("lets the device account read, but not write: read is its default", async () => {
 		await using test = createTestPlatform({ modules: [probe] });
-		test.dbFor(probe).insert(notes).values({ body: "comprar pan" }).run();
+		test.dbFor(probe)
+			.insert(notes)
+			.values({ owner: "ana", visibility: "public", body: "comprar pan" })
+			.run();
 		const kitchen = test.context(test.deviceAccount, { identity: "device" });
 
 		expect(test.invoke(kitchen, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
