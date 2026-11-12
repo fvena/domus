@@ -238,6 +238,21 @@ module.exports = {
 			to: { path: "^packages/platform/testing/" },
 		},
 		{
+			name: "production-never-reaches-platform-testing",
+			comment:
+				"@domus/platform/testing also holds the privileged preparation (accounts, roles, permission rows without a session or a proof) and synthetic verified contexts (ADR 0023): no production code reaches it through any chain of imports, platform's own included.",
+			severity: "error",
+			from: {
+				path: "^(apps|packages|modules)/",
+				pathNot: [
+					"\\.test\\.ts$",
+					"^modules/[^/]+/tests/",
+					"^packages/(test-utils|platform/testing)/",
+				],
+			},
+			to: { path: "^packages/platform/testing/", reachable: true },
+		},
+		{
 			name: "only-tests-import-test-utils",
 			severity: "error",
 			from: {

@@ -54,6 +54,7 @@ describe("dependency rules", () => {
 			"business-free-packages-stay-business-free: packages/api-client/index.ts -> packages/platform/contracts/index.ts",
 			"business-free-packages-stay-business-free: packages/i18n/index.ts -> packages/platform/http/index.ts",
 			"business-free-packages-stay-business-free: packages/ui/src/bad.ts -> packages/platform/src/index.ts",
+			"business-free-packages-stay-business-free: packages/ui/src/index.ts -> packages/platform/authorization/index.ts",
 			"contracts-are-pure: modules/lists/contracts/node.ts -> path",
 			"contracts-are-pure: packages/module-sdk/contracts/bad.ts -> crypto",
 			"contracts-are-pure: packages/platform/contracts/bad.ts -> fs",
@@ -80,11 +81,15 @@ describe("dependency rules", () => {
 			"only-tests-import-test-utils: apps/api/src/uses-test-utils.ts -> packages/test-utils/src/index.ts",
 			"packages-never-import-modules: packages/platform/src/bad.ts -> modules/lists/server/index.ts",
 			"platform-contracts-stand-alone: packages/platform/contracts/bad.ts -> packages/platform/http/index.ts",
+			"production-never-reaches-platform-testing: apps/api/src/uses-platform-testing.ts -> packages/platform/testing/index.ts",
+			"production-never-reaches-platform-testing: packages/platform/src/indirect-testing.ts -> packages/platform/testing/index.ts",
+			"production-never-reaches-platform-testing: packages/platform/src/uses-testing.ts -> packages/platform/testing/index.ts",
 			"programs-never-reach-platform: apps/assistant/src/bad.ts -> packages/module-sdk/src/index.ts",
 			"programs-never-reach-platform: apps/assistant/src/bad.ts -> packages/platform/src/index.ts",
 			"programs-never-reach-platform: apps/voice-gateway/src/indirect.ts -> packages/platform/http/index.ts",
 			"programs-never-reach-platform: apps/web/src/bad.ts -> packages/module-sdk/src/index.ts",
 			"programs-never-reach-platform: apps/web/src/bad.ts -> packages/platform/src/index.ts",
+			"programs-never-reach-platform: apps/web/src/indirect-authorization.ts -> packages/platform/authorization/index.ts",
 			"sdk-contracts-stand-alone: packages/module-sdk/contracts/bad.ts -> node_modules/drizzle-orm/index.js",
 			"sdk-contracts-stand-alone: packages/module-sdk/contracts/bad.ts -> packages/module-sdk/db/index.ts",
 			"utils-imports-no-other-package: packages/utils/a/package-import.ts -> packages/i18n/index.ts",
@@ -124,12 +129,21 @@ describe("module-sdk", () => {
 		const names = async (entry: string) =>
 			Object.keys(await import(pathToFileURL(join(sdk, entry)).href)).sort();
 
-		expect(await names("index.ts")).toEqual(["PLATFORM_ID", "checkModules", "defineModule"]);
+		expect(await names("index.ts")).toEqual([
+			"PLATFORM_ID",
+			"areaIds",
+			"checkModules",
+			"defineModule",
+			"ownedTableOf",
+		]);
 		expect(await names("contracts/index.ts")).toEqual(["readAction", "writeAction"]);
 		// Table declarations and query helpers; no drizzle() and no connection.
 		expect(await names("db/index.ts")).toEqual([
+			"and",
+			"asc",
 			"blob",
 			"check",
+			"count",
 			"eq",
 			"foreignKey",
 			"id",
@@ -137,6 +151,7 @@ describe("module-sdk", () => {
 			"integer",
 			"moduleTables",
 			"numeric",
+			"ownedTableOf",
 			"primaryKey",
 			"real",
 			"sql",

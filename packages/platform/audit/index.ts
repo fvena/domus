@@ -1,5 +1,6 @@
-// The action log (ADR 0022): one entry per committed write, over the tables of platform/0001. Plain prepared
-// statements of better-sqlite3, without a Drizzle schema. It writes inside the transaction platform/actions
+// The action log (ADR 0022): one entry per committed write, over the tables of platform/0001, without the result
+// column platform/0002 drops (ADR 0023): an entry's content is its input and its inverse. Plain prepared
+// statements of better-sqlite3; `schema.ts` declares the same tables only for drizzle-kit (ADR 0023). It writes inside the transaction platform/actions
 // opens and never commits on its own.
 import type { Actor, Inverse, TouchedRecord } from "@domus/module-sdk";
 import type Database from "better-sqlite3";
@@ -14,10 +15,9 @@ export interface NewEntry {
 	readonly fingerprint: string;
 	/** The platform clock's instant of the write, in milliseconds since the epoch. */
 	readonly at: number;
-	/** From this instant on, the content is expired. */
+	/** From this instant on, the content (input and inverse) is expired. */
 	readonly expiresAt: number;
 	readonly input: unknown;
-	readonly result: unknown;
 	readonly inverse: Inverse | undefined;
 	/** Records of `module`. */
 	readonly touched: readonly TouchedRecord[];
@@ -43,14 +43,13 @@ export interface NumberedEntry {
 	readonly idempotencyKey: string;
 	readonly fingerprint: string;
 	readonly at: number;
-	/** From this instant on, its content (input, result, inverse) is expired. */
+	/** From this instant on, its content (input and inverse) is expired. */
 	readonly expiresAt: number;
 	/** The entry this one undid, when it is an undo. */
 	readonly undoes: number | null;
 	/** The entry that undid this one. */
 	readonly undoneBy: number | null;
 	readonly input: unknown;
-	readonly result: unknown;
 	/** Null when its write cannot be undone. */
 	readonly inverse: Inverse | null;
 }
@@ -60,12 +59,25 @@ export interface LogEntry extends Omit<NumberedEntry, "module"> {
 	readonly touched: readonly LoggedRecord[];
 }
 
-/** The annotation of an entry found by its key: what tells a repeated request from another one. */
+/**
+ * What reading the log answers of one entry: its annotation without its key or fingerprint, never its content
+ * (ADR 0023).
+ */
+export interface Annotation {
+	readonly entry: number;
+	/** The full name, `<module>.<action>`. */
+	readonly action: string;
+	readonly actor: Actor;
+	readonly at: number;
+	readonly undoes: number | null;
+	readonly undoneBy: number | null;
+	readonly touched: readonly LoggedRecord[];
+}
+
+/** The annotation of an entry found by its key: what tells a repeated request from another one and acknowledges it. */
 export interface KeyedEntry {
 	readonly entry: number;
 	readonly fingerprint: string;
-	/** From this instant on, its content is expired. */
-	readonly expiresAt: number;
 }
 
 export interface ActionLog {
@@ -79,6 +91,8 @@ export interface ActionLog {
 	touchedLater(entry: number): boolean;
 	/** Links `entry` to the entry that undid it. Only inside an open transaction, and only once per entry. */
 	markUndone(entry: number, by: number): void;
+	/** The annotations of the entries `account` asked for, directly or through Kira, in order. */
+	annotationsOf(account: string): readonly Annotation[];
 	/** Every entry, in order, with its content even when expired. For the testing entry only. */
 	entries(): readonly LogEntry[];
 }
@@ -96,7 +110,6 @@ interface EntryRow {
 	readonly undoes: number | null;
 	readonly undone_by: number | null;
 	readonly input: string | null;
-	readonly result: string | null;
 	readonly inverse: string | null;
 }
 
@@ -108,14 +121,14 @@ interface TouchedRow extends LoggedRecord {
 export function createActionLog(connection: Database.Database): ActionLog {
 	const insertEntry = connection.prepare(
 		`INSERT INTO platform_action_log
-			(module, action, account, via, key, fingerprint, at, expires_at, undoes, input, result, inverse)
-			VALUES (@module, @action, @account, @via, @key, @fingerprint, @at, @expiresAt, @undoes, @input, @result, @inverse)`,
+			(module, action, account, via, key, fingerprint, at, expires_at, undoes, input, inverse)
+			VALUES (@module, @action, @account, @via, @key, @fingerprint, @at, @expiresAt, @undoes, @input, @inverse)`,
 	);
 	const insertTouched = connection.prepare(
 		"INSERT INTO platform_action_log_touched (entry, module, type, id) VALUES (?, ?, ?, ?)",
 	);
 	const selectByKey = connection.prepare(
-		"SELECT entry, fingerprint, expires_at FROM platform_action_log WHERE account = ? AND via IS ? AND key = ?",
+		"SELECT entry, fingerprint FROM platform_action_log WHERE account = ? AND via IS ? AND key = ?",
 	);
 	const selectByNumber = connection.prepare("SELECT * FROM platform_action_log WHERE entry = ?");
 	const selectTouchedLater = connection.prepare(
@@ -128,6 +141,14 @@ export function createActionLog(connection: Database.Database): ActionLog {
 		"UPDATE platform_action_log SET undone_by = ? WHERE entry = ? AND undone_by IS NULL",
 	);
 	const selectEntries = connection.prepare("SELECT * FROM platform_action_log ORDER BY entry");
+	const selectOwnEntries = connection.prepare(
+		"SELECT entry, module, action, account, via, at, undoes, undone_by FROM platform_action_log WHERE account = ? ORDER BY entry",
+	);
+	const selectOwnTouched = connection.prepare(
+		`SELECT touched.entry, touched.module, touched.type, touched.id FROM platform_action_log_touched AS touched
+			JOIN platform_action_log AS log ON log.entry = touched.entry
+			WHERE log.account = ? ORDER BY touched.entry, touched.rowid`,
+	);
 	const selectTouched = connection.prepare(
 		"SELECT entry, module, type, id FROM platform_action_log_touched ORDER BY entry, rowid",
 	);
@@ -153,7 +174,6 @@ export function createActionLog(connection: Database.Database): ActionLog {
 					expiresAt: entry.expiresAt,
 					undoes: entry.undoes ?? null,
 					input: toJson(entry.input),
-					result: toJson(entry.result),
 					inverse: toJson(entry.inverse),
 				}).lastInsertRowid,
 			);
@@ -169,11 +189,9 @@ export function createActionLog(connection: Database.Database): ActionLog {
 
 		findByKey(actor, idempotencyKey) {
 			const row = selectByKey.get(actor.account, actor.via ?? null, idempotencyKey) as
-				| Pick<EntryRow, "entry" | "fingerprint" | "expires_at">
+				| Pick<EntryRow, "entry" | "fingerprint">
 				| undefined;
-			return (
-				row && { entry: row.entry, fingerprint: row.fingerprint, expiresAt: row.expires_at }
-			);
+			return row && { entry: row.entry, fingerprint: row.fingerprint };
 		},
 
 		find(entry) {
@@ -189,6 +207,19 @@ export function createActionLog(connection: Database.Database): ActionLog {
 			requireTransaction();
 			if (updateUndoneBy.run(by, entry).changes !== 1)
 				throw new Error(`entry ${entry} is missing or already undone`);
+		},
+
+		annotationsOf(account) {
+			const touched = recordsByEntry(selectOwnTouched.all(account) as TouchedRow[]);
+			return (selectOwnEntries.all(account) as EntryRow[]).map((row) => ({
+				entry: row.entry,
+				action: `${row.module}.${row.action}`,
+				actor: actorOf(row),
+				at: row.at,
+				undoes: row.undoes,
+				undoneBy: row.undone_by,
+				touched: touched.get(row.entry) ?? [],
+			}));
 		},
 
 		entries() {
@@ -212,7 +243,7 @@ function entryOf(row: EntryRow): NumberedEntry {
 		entry: row.entry,
 		module: row.module,
 		action: `${row.module}.${row.action}`,
-		actor: row.via === null ? { account: row.account } : { account: row.account, via: row.via },
+		actor: actorOf(row),
 		idempotencyKey: row.key,
 		fingerprint: row.fingerprint,
 		at: row.at,
@@ -220,9 +251,23 @@ function entryOf(row: EntryRow): NumberedEntry {
 		undoes: row.undoes,
 		undoneBy: row.undone_by,
 		input: fromJson(row.input),
-		result: fromJson(row.result),
 		inverse: (fromJson(row.inverse) as Inverse | undefined) ?? null,
 	};
+}
+
+function actorOf(row: Pick<EntryRow, "account" | "via">): Actor {
+	return row.via === null ? { account: row.account } : { account: row.account, via: row.via };
+}
+
+/** The touched records of each entry, in the order they were logged. */
+function recordsByEntry(rows: readonly TouchedRow[]): ReadonlyMap<number, LoggedRecord[]> {
+	const records = new Map<number, LoggedRecord[]>();
+	for (const { entry, module, type, id } of rows) {
+		const list = records.get(entry) ?? [];
+		list.push({ module, type, id });
+		records.set(entry, list);
+	}
+	return records;
 }
 
 /** SQL `NULL` stands for `undefined`, so a JSON `null` survives as itself. */

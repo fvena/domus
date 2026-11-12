@@ -1,11 +1,11 @@
-import { type Actor, defineModule, type ModuleDefinition } from "@domus/module-sdk";
+import { defineModule, type ModuleDefinition } from "@domus/module-sdk";
 import { readAction } from "@domus/module-sdk/contracts";
 import { id, moduleTables, text } from "@domus/module-sdk/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { actionsOf, createPlatform, openPlatform, type Platform } from "../platform";
-import { moduleDatabase } from "../testing";
+import { moduleDatabase, prepareAccount, syntheticContext } from "../testing";
 
 const { table } = moduleTables("notes");
 const items = table("items", { id: id(), body: text().notNull() });
@@ -32,35 +32,37 @@ const throwing = {
 } as const;
 
 const contract = {
-	list: readAction().output(z.array(z.object({ id: z.number(), body: z.string() }))),
+	list: readAction({ level: "read" }).output(
+		z.array(z.object({ id: z.number(), body: z.string() })),
+	),
 	/** Echoes what its handler receives, with an input the schema transforms. */
-	context: readAction().input(z.object({ word: z.string().trim() })),
+	context: readAction({ level: "read" }).input(z.object({ word: z.string().trim() })),
 	/** A read that tries to write: a mistake the platform must stop. */
-	sneakyWrite: readAction(),
+	sneakyWrite: readAction({ level: "read" }),
 	/** Throws something unexpected, carrying a secret in its message. */
-	crash: readAction(),
+	crash: readAction({ level: "read" }),
 	/** Returns what its contract does not accept. */
-	badResult: readAction().output(z.object({ ok: z.literal(true) })),
+	badResult: readAction({ level: "read" }).output(z.object({ ok: z.literal(true) })),
 	/** Accepts anything its schema lets through. */
-	anything: readAction().input(z.any()),
+	anything: readAction({ level: "read" }).input(z.any()),
 	/** Its input schema throws while validating; zod turns that into a rejected promise. */
-	rejectingInput: readAction().input(
+	rejectingInput: readAction({ level: "read" }).input(
 		z.string().refine(() => {
 			throw new Error("secret: the pin is 1234");
 		}),
 	),
 	/** Its output schema throws while validating; zod turns that into a rejected promise. */
-	rejectingOutput: readAction().output(
+	rejectingOutput: readAction({ level: "read" }).output(
 		z.string().transform(() => {
 			throw new Error("secret: the pin is 1234");
 		}),
 	),
 	/** Its input schema throws synchronously while validating. */
-	throwingInput: readAction().input(throwing),
+	throwingInput: readAction({ level: "read" }).input(throwing),
 	/** Its output schema throws synchronously while validating. */
-	throwingOutput: readAction().output(throwing),
+	throwingOutput: readAction({ level: "read" }).output(throwing),
 	/** An async handler, which the types forbid. */
-	async: readAction(),
+	async: readAction({ level: "read" }),
 };
 
 const list = vi.fn((db: ReturnType<typeof moduleDatabase<{ items: typeof items }>>) =>
@@ -89,7 +91,14 @@ const notes = defineModule({
 	},
 });
 
-const ana: Actor = { account: "ana", via: "kira" };
+const ana = syntheticContext({
+	account: "ana",
+	via: "kira",
+	device: "d1",
+	deviceAccount: "ana",
+	channel: "app",
+	identity: "password",
+});
 const NOW = Date.UTC(2026, 10, 12, 9, 30);
 
 let platform: Platform | undefined;
@@ -108,13 +117,78 @@ function allowing(modules: readonly ModuleDefinition[] = [notes]) {
 }
 
 describe("createPlatform", () => {
-	it("denies every action, without running its handler", () => {
+	it("decides with the real authorization: an account that does not exist is denied, without running the handler", () => {
 		platform = createPlatform({ databaseFile: ":memory:", modules: [notes] });
 
-		expect(() => actionsOf(platform!).invoke({ actor: ana, action: "notes.list" })).toThrow(
+		expect(() => actionsOf(platform!).invoke({ context: ana, action: "notes.list" })).toThrow(
 			expect.objectContaining({ code: "FORBIDDEN" }),
 		);
 		expect(list).not.toHaveBeenCalled();
+	});
+
+	it("runs the action of a member, whose role allows it", () => {
+		platform = createPlatform({ databaseFile: ":memory:", modules: [notes] });
+		prepareAccount(platform, {
+			id: "ana",
+			name: "Ana",
+			email: "ana@domus.test",
+			role: "member",
+		});
+
+		expect(actionsOf(platform).invoke({ context: ana, action: "notes.list" })).toEqual([]);
+	});
+});
+
+describe("authorization", () => {
+	it.each([
+		["denies", () => "deny" as const],
+		[
+			"throws",
+			() => {
+				throw new Error("authorizer down");
+			},
+		],
+		["answers something else", () => "maybe" as never],
+	])("ends forbidden without running the handler when it %s", (_, authorizer) => {
+		platform = openPlatform(
+			{ databaseFile: ":memory:", modules: [notes] },
+			{ authorizer, clock: () => NOW },
+		);
+
+		expect(() => actionsOf(platform!).invoke({ context: ana, action: "notes.list" })).toThrow(
+			expect.objectContaining({ code: "FORBIDDEN" }),
+		);
+		expect(list).not.toHaveBeenCalled();
+	});
+
+	it("is asked with the verified context, the action, the permission its contract declares and the validated input", () => {
+		const requests: unknown[] = [];
+		platform = openPlatform(
+			{ databaseFile: ":memory:", modules: [notes] },
+			{
+				authorizer: (request) => {
+					requests.push(request);
+					return "allow";
+				},
+				clock: () => NOW,
+			},
+		);
+
+		actionsOf(platform).invoke({
+			context: ana,
+			action: "notes.context",
+			input: { word: " pan " },
+		});
+
+		expect(requests).toEqual([
+			{
+				context: ana,
+				action: "notes.context",
+				kind: "read",
+				permission: { area: "notes", level: "read" },
+				input: { word: "pan" },
+			},
+		]);
 	});
 });
 
@@ -126,7 +200,7 @@ describe("registering the actions", () => {
 			id: "notes",
 			schema: {},
 			migrations: [],
-			contract: { list: readAction(), count: readAction() },
+			contract: { list: readAction({ level: "read" }), count: readAction({ level: "read" }) },
 			actions: { list: handler } as never,
 		});
 
@@ -140,7 +214,7 @@ describe("registering the actions", () => {
 			id: "notes",
 			schema: {},
 			migrations: [],
-			contract: { list: readAction() },
+			contract: { list: readAction({ level: "read" }) },
 			actions: { list: handler, count: handler } as never,
 		});
 
@@ -154,7 +228,7 @@ describe("registering the actions", () => {
 			id: "notes",
 			schema: {},
 			migrations: [],
-			contract: { list: readAction() },
+			contract: { list: readAction({ level: "read" }) },
 			actions: { list: handler },
 		});
 		const again = defineModule({ ...one });
@@ -167,15 +241,30 @@ describe("registering the actions", () => {
 
 describe("a read", () => {
 	it("is not found when no module declares it", () => {
-		expect(() => allowing().invoke({ actor: ana, action: "notes.missing" })).toThrow(
+		expect(() => allowing().invoke({ context: ana, action: "notes.missing" })).toThrow(
 			expect.objectContaining({ code: "NOT_FOUND" }),
 		);
 	});
 
-	it("hands its handler the validated input, the actor and the clock's instant", () => {
+	it("hands its handler the validated input, the actor of its context and the clock's instant", () => {
 		expect(
-			allowing().invoke({ actor: ana, action: "notes.context", input: { word: "  pan " } }),
-		).toEqual({ input: { word: "pan" }, actor: ana, now: NOW, hasDb: true });
+			allowing().invoke({ context: ana, action: "notes.context", input: { word: "  pan " } }),
+		).toEqual({
+			input: { word: "pan" },
+			actor: { account: "ana", via: "kira" },
+			now: NOW,
+			hasDb: true,
+		});
+	});
+
+	it("does not run with a context it did not verify, however faithful the copy", () => {
+		expect(() =>
+			allowing().invoke({
+				context: { ...ana },
+				action: "notes.context",
+				input: { word: "pan" },
+			}),
+		).toThrow(expect.objectContaining({ code: "INTERNAL_SERVER_ERROR" }));
 	});
 
 	it.each([
@@ -185,7 +274,7 @@ describe("a read", () => {
 		["a bigint", BigInt(1)],
 		["a map", new Map()],
 	])("rejects an input that is not lossless JSON: %s", (_, input) => {
-		expect(() => allowing().invoke({ actor: ana, action: "notes.anything", input })).toThrow(
+		expect(() => allowing().invoke({ context: ana, action: "notes.anything", input })).toThrow(
 			expect.objectContaining({ code: "BAD_REQUEST" }),
 		);
 	});
@@ -193,13 +282,13 @@ describe("a read", () => {
 	it("fails when it tries to write, and leaves the connection writable afterwards", () => {
 		const actions = allowing();
 
-		expect(() => actions.invoke({ actor: ana, action: "notes.sneakyWrite" })).toThrow(
+		expect(() => actions.invoke({ context: ana, action: "notes.sneakyWrite" })).toThrow(
 			expect.objectContaining({ code: "INTERNAL_SERVER_ERROR" }),
 		);
 
 		const db = moduleDatabase(platform!, notes);
 		db.insert(items).values({ body: "a propósito" }).run();
-		expect(actions.invoke({ actor: ana, action: "notes.list" })).toEqual([
+		expect(actions.invoke({ context: ana, action: "notes.list" })).toEqual([
 			{ id: 1, body: "a propósito" },
 		]);
 	});
@@ -215,7 +304,7 @@ describe("a read", () => {
 		(_, action, input) => {
 			let thrown: unknown;
 			try {
-				allowing().invoke({ actor: ana, action, input });
+				allowing().invoke({ context: ana, action, input });
 			} catch (error) {
 				thrown = error;
 			}
@@ -229,13 +318,13 @@ describe("a read", () => {
 	);
 
 	it("fails as an internal error when its handler returns a thenable", () => {
-		expect(() => allowing().invoke({ actor: ana, action: "notes.async" })).toThrow(
+		expect(() => allowing().invoke({ context: ana, action: "notes.async" })).toThrow(
 			expect.objectContaining({ code: "INTERNAL_SERVER_ERROR" }),
 		);
 	});
 
 	it("fails as an internal error when its result breaks the contract", () => {
-		expect(() => allowing().invoke({ actor: ana, action: "notes.badResult" })).toThrow(
+		expect(() => allowing().invoke({ context: ana, action: "notes.badResult" })).toThrow(
 			expect.objectContaining({ code: "INTERNAL_SERVER_ERROR" }),
 		);
 	});

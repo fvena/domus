@@ -16,6 +16,7 @@
 		"zod": "catalog:"
 	},
 	"devDependencies": {
+		"@domus/api-client": "workspace:*",
 		"@domus/test-utils": "workspace:*",
 		"@domus/tsconfig": "workspace:*",
 		"@types/node": "catalog:",

@@ -1,4 +1,4 @@
-import { type Actor, defineModule } from "@domus/module-sdk";
+import { defineModule } from "@domus/module-sdk";
 import { writeAction } from "@domus/module-sdk/contracts";
 import { eq, id, moduleTables, text } from "@domus/module-sdk/db";
 import { afterEach, describe, expect, it } from "vitest";
@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import type { AuthorizationRequest } from "../authorization";
 import { actionsOf, connectionOf, openPlatform, type Platform } from "../platform";
-import { moduleDatabase, readLog } from "../testing";
+import { moduleDatabase, readLog, syntheticContext } from "../testing";
 
 const { table } = moduleTables("shelf");
 const books = table("books", { id: id(), title: text().notNull() });
@@ -25,10 +25,12 @@ const shelf = defineModule({
 		},
 	],
 	contract: {
-		add: writeAction({ undoable: true })
+		add: writeAction({ undoable: true, level: "write" })
 			.input(z.object({ title: z.string() }))
 			.output(z.object({ id: z.number() })),
-		remove: writeAction({ undoable: false }).input(z.object({ id: z.number() })),
+		remove: writeAction({ undoable: false, level: "write" }).input(
+			z.object({ id: z.number() }),
+		),
 	},
 	actions: {
 		add: ({ db, input }) => {
@@ -46,7 +48,14 @@ const shelf = defineModule({
 	},
 });
 
-const ana: Actor = { account: "ana", via: "kira" };
+const ana = syntheticContext({
+	account: "ana",
+	via: "kira",
+	device: "d1",
+	deviceAccount: "ana",
+	channel: "app",
+	identity: "password",
+});
 
 let platform: Platform | undefined;
 afterEach(() => {
@@ -55,7 +64,7 @@ afterEach(() => {
 });
 
 describe("an undo", () => {
-	it("reauthorizes a retry with the inverse its own entry ran, not with the content of the entry it undid", () => {
+	it("reauthorizes a retry with the inverse its own entry ran, not with the content of the entry it undid, and acknowledges it", () => {
 		const requests: AuthorizationRequest[] = [];
 		platform = openPlatform(
 			{ databaseFile: ":memory:", modules: [shelf] },
@@ -69,25 +78,72 @@ describe("an undo", () => {
 		);
 		const actions = actionsOf(platform);
 		actions.invoke({
-			actor: ana,
+			context: ana,
 			action: "shelf.add",
 			input: { title: "Niebla" },
 			idempotencyKey: "k1",
 		});
-		const undone = actions.undo({ actor: ana, entry: 1, idempotencyKey: "u1" });
+		requests.length = 0;
+		actions.undo({ context: ana, entry: 1, idempotencyKey: "u1" });
 		// The content of the undone entry is gone, as phase 1d leaves expired content.
 		connectionOf(platform).exec(
-			"UPDATE platform_action_log SET input = NULL, result = NULL, inverse = NULL WHERE entry = 1",
+			"UPDATE platform_action_log SET input = NULL, inverse = NULL WHERE entry = 1",
 		);
+
+		expect(actions.undo({ context: ana, entry: 1, idempotencyKey: "u1" })).toStrictEqual({
+			entry: 2,
+			repeated: true,
+		});
+		// The inverse, with the permission of its own contract and the context of the entry it undoes: the
+		// same request the first time and on the retry, where only the confirmation counts as given.
+		const request = {
+			context: ana,
+			action: "shelf.remove",
+			kind: "write",
+			permission: { area: "shelf", level: "write" },
+			input: { id: 1 },
+			undoes: { entry: 1, action: "shelf.add", actor: { account: "ana", via: "kira" } },
+		};
+		expect(requests).toEqual([request, { ...request, confirmed: true }]);
+	});
+
+	it("reauthorizes a retry whose own entry expired without the inverse's input, its expired content", () => {
+		const requests: AuthorizationRequest[] = [];
+		let now = Date.UTC(2026, 10, 12);
+		platform = openPlatform(
+			{ databaseFile: ":memory:", modules: [shelf], retention: 1000 },
+			{
+				authorizer: (request) => {
+					requests.push(request);
+					return "allow";
+				},
+				clock: () => now,
+			},
+		);
+		const actions = actionsOf(platform);
+		actions.invoke({
+			context: ana,
+			action: "shelf.add",
+			input: { title: "Niebla" },
+			idempotencyKey: "k1",
+		});
+		actions.undo({ context: ana, entry: 1, idempotencyKey: "u1" });
+		now += 1000;
 		requests.length = 0;
 
-		expect(actions.undo({ actor: ana, entry: 1, idempotencyKey: "u1" })).toStrictEqual(undone);
+		expect(actions.undo({ context: ana, entry: 1, idempotencyKey: "u1" })).toStrictEqual({
+			entry: 2,
+			repeated: true,
+		});
 		expect(requests).toEqual([
 			{
-				actor: ana,
+				context: ana,
 				action: "shelf.remove",
-				input: { id: 1 },
-				undoes: { entry: 1, action: "shelf.add", actor: ana },
+				kind: "write",
+				permission: { area: "shelf", level: "write" },
+				input: undefined,
+				undoes: { entry: 1, action: "shelf.add", actor: { account: "ana", via: "kira" } },
+				confirmed: true,
 			},
 		]);
 	});
@@ -110,11 +166,11 @@ describe("an undo", () => {
 				},
 			],
 			contract: {
-				post: writeAction({ undoable: true })
+				post: writeAction({ undoable: true, level: "write" })
 					.input(z.object({ title: z.string() }))
 					.output(z.object({ id: z.number() })),
 				// Its transforms change a type and a value: a second pass would reject the id or add another "!".
-				retitle: writeAction({ undoable: false }).input(
+				retitle: writeAction({ undoable: false, level: "write" }).input(
 					z.object({
 						id: z.string().transform(Number),
 						title: z.string().transform((title) => `${title}!`),
@@ -156,14 +212,14 @@ describe("an undo", () => {
 		);
 		const actions = actionsOf(platform);
 		actions.invoke({
-			actor: ana,
+			context: ana,
 			action: "board.post",
 			input: { title: "lista" },
 			idempotencyKey: "k1",
 		});
 		requests.length = 0;
 
-		actions.undo({ actor: ana, entry: 1, idempotencyKey: "u1" });
+		actions.undo({ context: ana, entry: 1, idempotencyKey: "u1" });
 
 		expect(requests.map((request) => request.input)).toEqual([{ id: 1, title: "borrador!" }]);
 		expect(received).toEqual([{ id: 1, title: "borrador!" }]);
@@ -179,7 +235,7 @@ describe("an undo", () => {
 		);
 		const actions = actionsOf(platform);
 		actions.invoke({
-			actor: ana,
+			context: ana,
 			action: "shelf.add",
 			input: { title: "Niebla" },
 			idempotencyKey: "k1",
@@ -192,7 +248,7 @@ describe("an undo", () => {
 
 		let thrown: unknown;
 		try {
-			actions.undo({ actor: ana, entry: 1, idempotencyKey: "u1" });
+			actions.undo({ context: ana, entry: 1, idempotencyKey: "u1" });
 		} catch (error) {
 			thrown = error;
 		}

@@ -2,7 +2,7 @@
 
 Programs: configuration, wiring, the HTTP server, start and stop. Business logic lives in `modules/` and `packages/platform`, never here.
 
-- `api`: opens the platform (`createPlatform`, `domus.db` in `DOMUS_DATA_DIR`, with the module list `src/modules.ts` that `pnpm modules:generate` writes), mounts the door on `/health` and `/api/*`, and serves the built web app from `DOMUS_WEB_DIR`. The only program with the data volume; `pnpm dev` puts it in `<repo>/data`.
+- `api`: opens the platform (`createPlatform`, `domus.db` in `DOMUS_DATA_DIR`, with the module list `src/modules.ts` that `pnpm modules:generate` writes), mounts the door on `/health` and `/api/*`, and serves the built web app from `DOMUS_WEB_DIR`. `src/accounts.ts` wires `pnpm accounts` (in the container, `node /app/accounts.mjs`): the platform does the work, the file only asks for the secret without echo. The only program with the data volume; `pnpm dev` puts it in `<repo>/data`.
 - `web`: Vue SPA, no SSR. Talks to the api only through `@domus/api-client`.
 - `assistant`: Kira, the part that thinks. Reaches Domus only over HTTP through the api (`DOMUS_API_URL`), with its one key; it mounts no data.
 - `voice-gateway`: satellites, wake word, speech and who is speaking. Same HTTP-only rule as `assistant`.

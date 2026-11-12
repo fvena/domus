@@ -1,0 +1,1 @@
+ALTER TABLE `platform_action_log` DROP COLUMN `result`;

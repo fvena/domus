@@ -9,8 +9,8 @@ export interface AppOptions extends HttpHandlerOptions {
 }
 
 /** The program around the door: the door answers /health and /api, and the built web app is served here. */
-export function createApp({ webDir, platform, modules }: AppOptions): Hono {
-	const door = createHttpHandler({ platform, modules });
+export function createApp({ webDir, ...doorOptions }: AppOptions): Hono {
+	const door = createHttpHandler(doorOptions);
 	const app = new Hono();
 
 	app.get("/health", (c) => door.fetch(c.req.raw));

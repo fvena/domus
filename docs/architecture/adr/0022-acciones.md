@@ -25,3 +25,4 @@ Precisa los ADR 0020 y 0021: cómo se declara, se ejecuta, se registra y se desh
 **Tablas de la plataforma.** El registro se crea en `platform/0001`, escrita a mano como `0000`. `platform/audit` lo consulta con sentencias preparadas de `better-sqlite3`, sin un segundo esquema en Drizzle. Las pruebas sobre las migraciones reales comprueban que las consultas y las tablas coinciden, también al actualizar una base que solo tenía `0000`. Si la plataforma pasa a generar sus migraciones se sigue decidiendo en la 1c.
 
 Fecha: 2026-11-12. Preguntas del grilling: Q1–Q19 de la fase 1b.
+Precisado por el ADR 0023: una escritura ya no guarda su resultado y repetirla devuelve un acuse sin contenido; leer el registro devuelve solo la anotación; y las acciones se montan en HTTP con una sesión válida.

@@ -30,3 +30,4 @@ Precisa los ADR 0017 y 0020: cómo guarda Domus sus datos, qué forma tiene un m
 
 Fecha: 2026-11-12. Preguntas del grilling: Q1–Q24 de la fase 1a.
 Precisado por el ADR 0022: el código de producción de un módulo recibe su base de datos solo en el contexto de una acción; el hueco hasta la 1c lo cubre `platform/authorization`, que en producción lo deniega todo; y un registro mínimo de acciones se adelanta a la 1b, en `platform/0001`, escrita a mano y consultada con sentencias preparadas.
+Precisado por el ADR 0023: desde `platform/0002`, las migraciones de la plataforma se generan con `drizzle-kit`; `0000` y `0001` siguen escritas a mano, con su hash y su posición.

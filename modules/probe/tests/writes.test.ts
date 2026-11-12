@@ -1,4 +1,4 @@
-import { createTestPlatform, TEST_START } from "@domus/test-utils";
+import { createTestPlatform, pendingFrom, TEST_START } from "@domus/test-utils";
 import { describe, expect, it } from "vitest";
 
 import probe from "../server";
@@ -7,7 +7,7 @@ import { comments, notes } from "../server/schema";
 /** A platform with probe, and Ana writing through Kira. */
 function probePlatform() {
 	const test = createTestPlatform({ modules: [probe] });
-	return { test, ana: test.actor("ana", { via: "kira" }) };
+	return { test, ana: test.member("ana", { via: "kira" }) };
 }
 
 describe("probe writes", () => {
@@ -32,7 +32,6 @@ describe("probe writes", () => {
 				idempotencyKey: "k1",
 				at: TEST_START,
 				input: { body: "comprar pan" },
-				result: { id: 1, body: "comprar pan" },
 				touched: [{ module: "probe", type: "note", id: "1" }],
 				inverse: { action: "probe.deleteNote", input: { id: 1 } },
 				undoes: null,
@@ -81,7 +80,7 @@ describe("probe writes", () => {
 			test.invoke(
 				ana,
 				"probe.restoreNote",
-				{ id: 1, body: "comprar pan" },
+				{ id: 1, body: "comprar pan", visibility: "private" },
 				{ idempotencyKey: "k3" },
 			),
 		).toEqual({ result: { id: 1, body: "comprar pan" }, entry: 3 });
@@ -94,7 +93,10 @@ describe("probe writes", () => {
 			{
 				action: "probe.deleteNote",
 				touched: [{ module: "probe", type: "note", id: "1" }],
-				inverse: { action: "probe.restoreNote", input: { id: 1, body: "comprar pan" } },
+				inverse: {
+					action: "probe.restoreNote",
+					input: { id: 1, body: "comprar pan", visibility: "private" },
+				},
 			},
 			{
 				action: "probe.restoreNote",
@@ -117,9 +119,10 @@ describe("probe writes", () => {
 				{ idempotencyKey: "k2" },
 			),
 		).toEqual({ result: { id: 1, noteId: 1, body: "integral" }, entry: 2 });
-		expect(
+		const pending = pendingFrom(() =>
 			test.invoke(ana, "probe.deleteComment", { id: 1 }, { idempotencyKey: "k3" }),
-		).toEqual({
+		);
+		expect(test.confirm(test.context("ana"), pending)).toEqual({
 			result: { id: 1, noteId: 1, body: "integral" },
 			entry: 3,
 		});
@@ -142,13 +145,13 @@ describe("probe writes", () => {
 		await using _ = test;
 
 		test.invoke(
-			test.actor("ana"),
+			test.member("ana"),
 			"probe.addNote",
 			{ body: "regar" },
 			{ idempotencyKey: "k1" },
 		);
 		test.invoke(
-			test.actor("ana", { via: "kira" }),
+			test.member("ana", { via: "kira" }),
 			"probe.addNote",
 			{ body: "regar" },
 			{ idempotencyKey: "k2" },
@@ -178,8 +181,14 @@ describe("probe writes", () => {
 	it("refuses to delete a note with comments with its contract's error, without change or entry", async () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
-		test.dbFor(probe).insert(notes).values({ body: "comprar pan" }).run();
-		test.dbFor(probe).insert(comments).values({ noteId: 1, body: "integral" }).run();
+		test.dbFor(probe)
+			.insert(notes)
+			.values({ owner: "ana", visibility: "private", body: "comprar pan" })
+			.run();
+		test.dbFor(probe)
+			.insert(comments)
+			.values({ owner: "ana", visibility: "private", noteId: 1, body: "integral" })
+			.run();
 
 		expect(() =>
 			test.invoke(ana, "probe.deleteNote", { id: 1 }, { idempotencyKey: "k1" }),

@@ -9,10 +9,13 @@ describe("probe reads", () => {
 		await using test = createTestPlatform({ modules: [probe] });
 		test.dbFor(probe)
 			.insert(notes)
-			.values([{ body: "comprar pan" }, { body: "regar" }])
+			.values([
+				{ owner: "ana", visibility: "private", body: "comprar pan" },
+				{ owner: "ana", visibility: "private", body: "regar" },
+			])
 			.run();
 
-		expect(test.invoke(test.actor("ana"), "probe.listNotes")).toEqual([
+		expect(test.invoke(test.member("ana"), "probe.listNotes")).toEqual([
 			{ id: 1, body: "comprar pan" },
 			{ id: 2, body: "regar" },
 		]);
@@ -22,9 +25,12 @@ describe("probe reads", () => {
 		await using test = createTestPlatform({ modules: [probe] });
 		test.dbFor(probe)
 			.insert(notes)
-			.values([{ body: "comprar pan" }, { body: "regar" }])
+			.values([
+				{ owner: "ana", visibility: "private", body: "comprar pan" },
+				{ owner: "ana", visibility: "private", body: "regar" },
+			])
 			.run();
-		const ana = test.actor("ana");
+		const ana = test.member("ana");
 
 		expect(test.invoke(ana, "probe.getNote", { id: 2 })).toEqual({ id: 2, body: "regar" });
 		expect(test.invoke(ana, "probe.getNote", { id: 3 })).toBeNull();
@@ -33,52 +39,90 @@ describe("probe reads", () => {
 	it("rejects an input its contract does not accept", async () => {
 		await using test = createTestPlatform({ modules: [probe] });
 
-		expect(() => test.invoke(test.actor("ana"), "probe.getNote", { id: -1 })).toThrow(
+		expect(() => test.invoke(test.member("ana"), "probe.getNote", { id: -1 })).toThrow(
 			expect.objectContaining({ code: "BAD_REQUEST" }),
 		);
 	});
+});
 
-	describe("when authorization does not allow it", () => {
-		// The handler the platform registers is the one in the definition: spied before the platform starts.
-		let listNotes: MockInstance;
-		beforeEach(() => {
-			if (!probe.actions) throw new Error("probe declares its actions");
-			listNotes = vi.spyOn(probe.actions, "listNotes");
-		});
-		afterEach(() => listNotes.mockRestore());
+describe("probe permissions, with the real authorization", () => {
+	const forbidden = expect.objectContaining({ code: "FORBIDDEN" });
 
-		it("ends forbidden without running the handler on a denial", async () => {
-			await using test = createTestPlatform({ modules: [probe] });
-			test.authorize("deny");
+	// The handler the platform registers is the one in the definition: spied before the platform starts.
+	let listNotes: MockInstance;
+	beforeEach(() => {
+		if (!probe.actions) throw new Error("probe declares its actions");
+		listNotes = vi.spyOn(probe.actions, "listNotes");
+	});
+	afterEach(() => listNotes.mockRestore());
 
-			expect(() => test.invoke(test.actor("ana"), "probe.listNotes")).toThrow(
-				expect.objectContaining({ code: "FORBIDDEN" }),
-			);
-			expect(listNotes).not.toHaveBeenCalled();
-		});
+	it("lets a member read and write: write is its default in every area", async () => {
+		await using test = createTestPlatform({ modules: [probe] });
+		const ana = test.member("ana");
 
-		it("ends forbidden without running the handler when the authorizer throws", async () => {
-			await using test = createTestPlatform({ modules: [probe] });
-			test.authorize(() => {
-				throw new Error("authorizer down");
-			});
+		expect(
+			test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" }),
+		).toEqual({ result: { id: 1, body: "comprar pan" }, entry: 1 });
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
+	});
 
-			expect(() => test.invoke(test.actor("ana"), "probe.listNotes")).toThrow(
-				expect.objectContaining({ code: "FORBIDDEN" }),
-			);
-			expect(listNotes).not.toHaveBeenCalled();
-		});
+	it("lets an admin read and write", async () => {
+		await using test = createTestPlatform({ modules: [probe] });
+		const paco = test.context(test.prepare.account({ id: "paco", role: "admin" }));
 
-		it("runs again once the authorizer allows, on the same platform", async () => {
-			await using test = createTestPlatform({ modules: [probe] });
-			const ana = test.actor("ana", { via: "kira" });
-			test.authorize("deny");
-			expect(() => test.invoke(ana, "probe.listNotes")).toThrow();
+		test.invoke(paco, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" });
+		expect(test.invoke(paco, "probe.listNotes")).toEqual([{ id: 1, body: "regar" }]);
+	});
 
-			test.authorize("allow");
+	it("lets the device account read, but not write: read is its default", async () => {
+		await using test = createTestPlatform({ modules: [probe] });
+		test.dbFor(probe)
+			.insert(notes)
+			.values({ owner: "ana", visibility: "public", body: "comprar pan" })
+			.run();
+		const kitchen = test.context(test.deviceAccount, { identity: "device" });
 
-			expect(test.invoke(ana, "probe.listNotes")).toEqual([]);
-			expect(listNotes).toHaveBeenCalledOnce();
-		});
+		expect(test.invoke(kitchen, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
+		expect(() =>
+			test.invoke(kitchen, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" }),
+		).toThrow(forbidden);
+		expect(test.log()).toEqual([]);
+	});
+
+	it("denies, without running the handler, when a row lowers the account to none", async () => {
+		await using test = createTestPlatform({ modules: [probe] });
+		const ana = test.member("ana");
+		test.prepare.grant("ana", "probe", "none");
+
+		expect(() => test.invoke(ana, "probe.listNotes")).toThrow(forbidden);
+		expect(() =>
+			test.invoke(ana, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" }),
+		).toThrow(forbidden);
+		expect(listNotes).not.toHaveBeenCalled();
+		expect(test.log()).toEqual([]);
+	});
+
+	it("follows a row lowered to read, and raised again, on the same platform", async () => {
+		await using test = createTestPlatform({ modules: [probe] });
+		const ana = test.member("ana", { via: "kira" });
+		test.prepare.grant("ana", "probe", "read");
+
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([]);
+		expect(() =>
+			test.invoke(ana, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" }),
+		).toThrow(forbidden);
+
+		test.prepare.grant("ana", "probe", "write");
+
+		expect(
+			test.invoke(ana, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" }),
+		).toEqual({ result: { id: 1, body: "regar" }, entry: 1 });
+	});
+
+	it("denies an account that does not exist", async () => {
+		await using test = createTestPlatform({ modules: [probe] });
+
+		expect(() => test.invoke(test.context("nobody"), "probe.listNotes")).toThrow(forbidden);
+		expect(listNotes).not.toHaveBeenCalled();
 	});
 });

@@ -12,17 +12,14 @@ const DAY = 24 * 60 * 60 * 1000;
 /** A platform with probe, and Ana writing through Kira. */
 function probePlatform(options: { readonly file?: string; readonly retention?: number } = {}) {
 	const test = createTestPlatform({ modules: [probe], ...options });
-	return { test, ana: test.actor("ana", { via: "kira" }) };
+	return { test, ana: test.member("ana", { via: "kira" }) };
 }
 
 const expired = expect.objectContaining({
 	code: "UNPROCESSABLE_CONTENT",
 	data: { reason: "expired" },
 });
-const resultExpired = expect.objectContaining({
-	code: "CONFLICT",
-	data: { reason: "result-expired" },
-});
+const acknowledged = (entry: number) => ({ entry, repeated: true });
 
 describe("probe expiry", () => {
 	it("keeps an entry's content for 30 days from the instant it was written", async () => {
@@ -35,24 +32,19 @@ describe("probe expiry", () => {
 		expect(test.log()).toEqual([expect.objectContaining({ at, expiresAt: at + 30 * DAY })]);
 	});
 
-	it("answers a retry one millisecond before expiresAt with the stored result", async () => {
+	it("answers a retry one millisecond before expiresAt with the acknowledgement", async () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
-		const added = test.invoke(
-			ana,
-			"probe.addNote",
-			{ body: "comprar pan" },
-			{ idempotencyKey: "k1" },
-		);
+		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
 
 		test.clock.set(test.log()[0]!.expiresAt - 1);
 
 		expect(
 			test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" }),
-		).toStrictEqual(added);
+		).toStrictEqual(acknowledged(1));
 	});
 
-	it("answers a retry at expiresAt and after with result-expired, without running the write", async () => {
+	it("answers a retry at expiresAt and after with the same acknowledgement, without running the write", async () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
 		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
@@ -60,35 +52,31 @@ describe("probe expiry", () => {
 
 		for (const instant of [expiresAt, expiresAt + 1, expiresAt + 365 * DAY]) {
 			test.clock.set(instant);
-			expect(() =>
+			expect(
 				test.invoke(
 					ana,
 					"probe.addNote",
 					{ body: "comprar pan" },
 					{ idempotencyKey: "k1" },
 				),
-			).toThrow(resultExpired);
+			).toStrictEqual(acknowledged(1));
 		}
 
 		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
 		expect(test.log()).toHaveLength(1);
 	});
 
-	it("answers an expired retry with result-expired without asking the authorizer: it delivers nothing", async () => {
+	it("authorizes an expired retry again: once a row lowers the account to none, it is denied", async () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
 		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
 		test.clock.set(test.log()[0]!.expiresAt);
-		const requests: unknown[] = [];
-		test.authorize((request) => {
-			requests.push(request);
-			return "deny";
-		});
+		test.prepare.grant("ana", "probe", "none");
 
 		expect(() =>
 			test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" }),
-		).toThrow(resultExpired);
-		expect(requests).toEqual([]);
+		).toThrow(expect.objectContaining({ code: "FORBIDDEN" }));
+		expect(test.log()).toHaveLength(1);
 	});
 
 	it("undoes an entry one millisecond before its expiresAt", async () => {
@@ -130,7 +118,7 @@ describe("probe expiry", () => {
 		expect(test.log()).toEqual([expect.objectContaining({ entry: 1, undoneBy: null })]);
 	});
 
-	it("answers a retried undo whose own entry expired with result-expired", async () => {
+	it("acknowledges a retried undo before and after its own entry expired, authorizing it again", async () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
 		const added = test.invoke(
@@ -140,14 +128,21 @@ describe("probe expiry", () => {
 			{ idempotencyKey: "k1" },
 		);
 		test.clock.advance(DAY);
-		const undone = test.undo(ana, added.entry, { idempotencyKey: "u1" });
+		test.undo(ana, added.entry, { idempotencyKey: "u1" });
 
 		test.clock.set(test.log()[1]!.expiresAt - 1);
-		expect(test.undo(ana, added.entry, { idempotencyKey: "u1" })).toStrictEqual(undone);
+		expect(test.undo(ana, added.entry, { idempotencyKey: "u1" })).toStrictEqual(
+			acknowledged(2),
+		);
 
 		test.clock.set(test.log()[1]!.expiresAt);
-		test.authorize("deny");
-		expect(() => test.undo(ana, added.entry, { idempotencyKey: "u1" })).toThrow(resultExpired);
+		expect(test.undo(ana, added.entry, { idempotencyKey: "u1" })).toStrictEqual(
+			acknowledged(2),
+		);
+		test.prepare.grant("ana", "probe", "none");
+		expect(() => test.undo(ana, added.entry, { idempotencyKey: "u1" })).toThrow(
+			expect.objectContaining({ code: "FORBIDDEN" }),
+		);
 		expect(test.log()).toHaveLength(2);
 	});
 
@@ -171,7 +166,7 @@ describe("probe expiry", () => {
 		it("keeps the expiresAt of existing entries when the retention changes", async () => {
 			const file = join(dir, "domus.db");
 			const before = probePlatform({ file });
-			const added = before.test.invoke(
+			before.test.invoke(
 				before.ana,
 				"probe.addNote",
 				{ body: "comprar pan" },
@@ -196,13 +191,13 @@ describe("probe expiry", () => {
 					{ body: "comprar pan" },
 					{ idempotencyKey: "k1" },
 				),
-			).toStrictEqual(added);
-			expect(() =>
+			).toStrictEqual(acknowledged(1));
+			expect(
 				test.invoke(ana, "probe.addNote", { body: "regar" }, { idempotencyKey: "k2" }),
-			).toThrow(resultExpired);
+			).toStrictEqual(acknowledged(2));
 		});
 
-		it("does not run an expired key again after a restart", async () => {
+		it("acknowledges an expired key after a restart, without running it again", async () => {
 			const file = join(dir, "domus.db");
 			const before = probePlatform({ file });
 			before.test.invoke(
@@ -213,28 +208,28 @@ describe("probe expiry", () => {
 			);
 			const { expiresAt } = before.test.log()[0]!;
 			before.test.clock.set(expiresAt);
-			expect(() =>
+			expect(
 				before.test.invoke(
 					before.ana,
 					"probe.addNote",
 					{ body: "comprar pan" },
 					{ idempotencyKey: "k1" },
 				),
-			).toThrow(resultExpired);
+			).toStrictEqual(acknowledged(1));
 			before.test.close();
 
 			const { test, ana } = probePlatform({ file });
 			await using _ = test;
 			test.clock.set(expiresAt + DAY);
 
-			expect(() =>
+			expect(
 				test.invoke(
 					ana,
 					"probe.addNote",
 					{ body: "comprar pan" },
 					{ idempotencyKey: "k1" },
 				),
-			).toThrow(resultExpired);
+			).toStrictEqual(acknowledged(1));
 			expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
 			expect(test.log()).toHaveLength(1);
 		});

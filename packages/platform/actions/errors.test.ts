@@ -1,9 +1,10 @@
-import { type Actor, defineModule } from "@domus/module-sdk";
+import { defineModule } from "@domus/module-sdk";
 import { readAction } from "@domus/module-sdk/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { actionsOf, openPlatform, type Platform } from "../platform";
+import { syntheticContext } from "../testing";
 
 const errors = { PROBLEM: { message: "no se puede", data: z.object({ reason: z.string() }) } };
 
@@ -12,9 +13,9 @@ const desk = defineModule({
 	schema: {},
 	migrations: [],
 	contract: {
-		refuse: readAction().errors(errors),
+		refuse: readAction({ level: "read" }).errors(errors),
 		/** Throws its declared error with data its schema rejects. */
-		refuseBadly: readAction().errors(errors),
+		refuseBadly: readAction({ level: "read" }).errors(errors),
 	},
 	actions: {
 		refuse: ({ errors }) => {
@@ -26,7 +27,13 @@ const desk = defineModule({
 	},
 });
 
-const ana: Actor = { account: "ana" };
+const ana = syntheticContext({
+	account: "ana",
+	device: "d1",
+	deviceAccount: "ana",
+	channel: "app",
+	identity: "password",
+});
 
 let platform: Platform | undefined;
 afterEach(() => {
@@ -40,7 +47,7 @@ function thrownBy(action: string): unknown {
 		{ authorizer: () => "allow", clock: () => Date.UTC(2026, 10, 12) },
 	);
 	try {
-		actionsOf(platform).invoke({ actor: ana, action, input: undefined });
+		actionsOf(platform).invoke({ context: ana, action, input: undefined });
 	} catch (error) {
 		return error;
 	}
@@ -68,7 +75,7 @@ describe("the type of a handler's errors", () => {
 			id: "typed",
 			schema: {},
 			migrations: [],
-			contract: { refuse: readAction().errors(errors) },
+			contract: { refuse: readAction({ level: "read" }).errors(errors) },
 			actions: {
 				refuse: ({ errors }) => {
 					// @ts-expect-error: PROBLEM needs its data.

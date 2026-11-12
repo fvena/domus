@@ -1,7 +1,9 @@
+import { oc } from "@orpc/contract";
 import { describe, expect, it } from "vitest";
 
-import { moduleTables, text } from "./db";
-import { checkModules, defineModule } from "./index";
+import { type ActionContract, type ActionMeta, readAction, writeAction } from "./contracts";
+import { moduleTables, primaryKey, text } from "./db";
+import { type AreaDefinition, checkModules, defineModule } from "./index";
 
 function moduleWithId(id: string) {
 	return defineModule({ id, schema: {}, migrations: [] });
@@ -53,5 +55,174 @@ describe("checkModules", () => {
 		});
 
 		expect(() => checkModules([probe, lists])).not.toThrow();
+	});
+});
+
+describe("checkModules on areas and permissions", () => {
+	/** A module `notes` with one action of the given contract, and the areas given. */
+	function notesWith(contract: ActionContract, areas?: Record<string, AreaDefinition>) {
+		return defineModule({
+			id: "notes",
+			areas,
+			schema: {},
+			migrations: [],
+			contract: { act: contract },
+			actions: { act: () => undefined as never },
+		});
+	}
+
+	it("accepts actions in the module's own area, one it declares, another module's and the platform's", () => {
+		const lists = defineModule({
+			id: "lists",
+			areas: { "lists.shared": {} },
+			schema: {},
+			migrations: [],
+		});
+
+		for (const area of [
+			undefined,
+			"notes",
+			"notes.health",
+			"lists",
+			"lists.shared",
+			"platform",
+		]) {
+			const module = notesWith(readAction({ area, level: "read" }), {
+				"notes.health": { alwaysPrivate: true },
+			});
+			expect(() => checkModules([module, lists]), String(area)).not.toThrow();
+		}
+		expect(() =>
+			checkModules([notesWith(writeAction({ undoable: false, level: "manage" }))]),
+		).not.toThrow();
+	});
+
+	it("rejects an action in an area that is not registered", () => {
+		expect(() =>
+			checkModules([notesWith(readAction({ area: "notes.health", level: "read" }))]),
+		).toThrow(
+			'module "notes": action "notes.act" asks for area "notes.health", which is not registered',
+		);
+		expect(() =>
+			checkModules([notesWith(readAction({ area: "garden", level: "read" }))]),
+		).toThrow(/area "garden", which is not registered/);
+	});
+
+	it("rejects a write that asks only for read", () => {
+		// @ts-expect-error: the type of a write's permission already leaves read out.
+		const contract = writeAction({ undoable: false, level: "read" });
+
+		expect(() => checkModules([notesWith(contract)])).toThrow(
+			'module "notes": action "notes.act" is a write and cannot ask only for read',
+		);
+	});
+
+	it("rejects an action that declares no permission, or an unknown level", () => {
+		const bare = oc.$meta<ActionMeta>({ kind: "read" } as ActionMeta);
+		// @ts-expect-error: readAction asks for its permission.
+		const missing = readAction({});
+		// @ts-expect-error: only read, write and manage exist.
+		const unknown = readAction({ level: "admin" });
+
+		for (const contract of [bare, missing, unknown])
+			expect(() => checkModules([notesWith(contract)])).toThrow(
+				'module "notes": action "notes.act" declares no permission',
+			);
+	});
+
+	it.each(["lists", "notes.", "notes.Health", "notes.a.b", "notesx.health"])(
+		"rejects the area %j declared by notes",
+		(area) => {
+			expect(() =>
+				checkModules([notesWith(readAction({ level: "read" }), { [area]: {} })]),
+			).toThrow(`module "notes": area "${area}" must be "notes" or "notes.<name>"`);
+		},
+	);
+
+	it("rejects an always private area that is public by default", () => {
+		const module = defineModule({
+			id: "notes",
+			areas: { "notes.health": { alwaysPrivate: true, defaultVisibility: "public" } },
+			schema: {},
+			migrations: [],
+		});
+
+		expect(() => checkModules([module])).toThrow(
+			'module "notes": area "notes.health" is always private and cannot be public by default',
+		);
+	});
+});
+
+describe("checkModules on owned tables", () => {
+	const areas = {
+		notes: {},
+		"notes.health": { alwaysPrivate: true },
+	} satisfies Record<string, AreaDefinition>;
+	const { ownedTable } = moduleTables("notes", areas);
+
+	function notesWithTables(
+		schema: Record<string, unknown>,
+		declared: Record<string, AreaDefinition> = areas,
+	) {
+		return defineModule({ id: "notes", areas: declared, schema, migrations: [] });
+	}
+
+	it("accepts owned tables in the module's own area and in one it declares", () => {
+		const schema = {
+			items: ownedTable("items", { type: "item", area: "notes" }, { body: text() }),
+			health: ownedTable(
+				"health",
+				{ type: "health", area: "notes.health" },
+				{ body: text() },
+			),
+		};
+
+		expect(() => checkModules([notesWithTables(schema)])).not.toThrow();
+	});
+
+	it("rejects an owned table with a composite key", () => {
+		const items = ownedTable(
+			"items",
+			{ type: "item", area: "notes" },
+			{ body: text().notNull() },
+			(self) => [primaryKey({ columns: [self.id, self.body] })],
+		);
+
+		expect(() => checkModules([notesWithTables({ items })])).toThrow(
+			'module "notes": owned table "notes_items" must have the integer "id" as its only key',
+		);
+	});
+
+	it("rejects an owned table whose area the module does not declare", () => {
+		const items = moduleTables("notes", { "notes.garden": {} }).ownedTable(
+			"items",
+			{ type: "item", area: "notes.garden" },
+			{ body: text() },
+		);
+
+		expect(() => checkModules([notesWithTables({ items })])).toThrow(
+			'module "notes": owned table "notes_items" is in area "notes.garden", which the module does not declare',
+		);
+	});
+
+	it("rejects an owned table built for another policy than its module declares", () => {
+		const health = ownedTable("health", { type: "health", area: "notes.health" }, {});
+
+		expect(() =>
+			checkModules([notesWithTables({ health }, { notes: {}, "notes.health": {} })]),
+		).toThrow(
+			'module "notes": owned table "notes_health" was built for area "notes.health" always private, but the module declares it otherwise',
+		);
+	});
+
+	it("rejects two owned tables with the same record type", () => {
+		const schema = {
+			items: ownedTable("items", { type: "item", area: "notes" }, {}),
+			others: ownedTable("others", { type: "item", area: "notes" }, {}),
+		};
+
+		expect(() => checkModules([notesWithTables(schema)])).toThrow(
+			'module "notes": two owned tables have the record type "item"',
+		);
 	});
 });

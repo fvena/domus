@@ -8,9 +8,16 @@ describe("the main entry of platform", () => {
 		expect(platform).not.toHaveProperty("moduleDatabase");
 	});
 
-	// Production has no switch that lets everything through (ADR 0022): another authorizer, and invoking the
-	// actions, come only from @domus/platform/testing until the door serves them in phase 1c.
-	it("offers only createPlatform and the door", () => {
-		expect(Object.keys(platform).sort()).toEqual(["createHttpHandler", "createPlatform"]);
+	// Production has no switch that lets everything through (ADR 0022, ADR 0023): no other authorizer, no
+	// synthetic context and no way to invoke the actions but the door, with a session. Besides them, only the core
+	// of `pnpm accounts`, which asks for the secret in a terminal (ADR 0023).
+	it("offers only createPlatform, the door and the accounts command", () => {
+		expect(Object.keys(platform).sort()).toEqual([
+			"ACCOUNTS_USAGE",
+			"createHttpHandler",
+			"createPlatform",
+			"parseAccountsArguments",
+			"runAccounts",
+		]);
 	});
 });

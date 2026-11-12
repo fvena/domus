@@ -1,4 +1,4 @@
-import { type Actor, defineModule } from "@domus/module-sdk";
+import { defineModule } from "@domus/module-sdk";
 import { readAction, writeAction } from "@domus/module-sdk/contracts";
 import { id, moduleTables, text } from "@domus/module-sdk/db";
 import { ORPCError } from "@orpc/server";
@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { actionsOf, connectionOf, openPlatform, type Platform } from "../platform";
-import { moduleDatabase, readLog } from "../testing";
+import { moduleDatabase, readLog, syntheticContext } from "../testing";
 
 const { table } = moduleTables("ledger");
 const items = table("items", { id: id(), body: text().notNull() });
@@ -30,17 +30,17 @@ const ledger = defineModule({
 	migrations,
 	contract: {
 		/** Inserts an item, then returns whatever the test chose. Its result must be `{ id }`. */
-		add: writeAction({ undoable: true })
+		add: writeAction({ undoable: true, level: "write" })
 			.input(z.any())
 			.output(z.object({ id: z.number() })),
 		/** Like `add`, but its contract takes any result. */
-		addLoose: writeAction({ undoable: true }).input(z.any()).output(z.any()),
-		remove: writeAction({ undoable: true }).input(z.object({ id: z.number() })),
+		addLoose: writeAction({ undoable: true, level: "write" }).input(z.any()).output(z.any()),
+		remove: writeAction({ undoable: true, level: "write" }).input(z.object({ id: z.number() })),
 		/** A write whose input schema lets anything through. */
-		removeLoose: writeAction({ undoable: true }).input(z.any()),
-		list: readAction(),
+		removeLoose: writeAction({ undoable: true, level: "write" }).input(z.any()),
+		list: readAction({ level: "read" }),
 		/** Its input schema throws while validating, carrying a secret in its message. */
-		addThrowing: writeAction({ undoable: false }).input(
+		addThrowing: writeAction({ undoable: false, level: "write" }).input(
 			z.any().refine(() => {
 				throw new Error("secret: the pin is 1234");
 			}),
@@ -63,11 +63,18 @@ const other = defineModule({
 	id: "other",
 	schema: {},
 	migrations: [],
-	contract: { drop: writeAction({ undoable: false }) },
+	contract: { drop: writeAction({ undoable: false, level: "write" }) },
 	actions: { drop: () => ({ result: undefined, touched: [] }) },
 });
 
-const ana: Actor = { account: "ana", via: "kira" };
+const ana = syntheticContext({
+	account: "ana",
+	via: "kira",
+	device: "d1",
+	deviceAccount: "ana",
+	channel: "app",
+	identity: "password",
+});
 const NOW = Date.UTC(2026, 10, 12, 9, 30);
 
 let platform: Platform | undefined;
@@ -102,7 +109,7 @@ describe("a write", () => {
 
 		expect(
 			allowing().invoke({
-				actor: ana,
+				context: ana,
 				action: "ledger.add",
 				input: {},
 				idempotencyKey: "k1",
@@ -122,7 +129,7 @@ describe("a write", () => {
 
 		expect(() =>
 			allowing().invoke({
-				actor: ana,
+				context: ana,
 				action: "ledger.add",
 				input: { body: undefined },
 				idempotencyKey: "k1",
@@ -219,7 +226,7 @@ describe("a write", () => {
 
 		let thrown: unknown;
 		try {
-			allowing().invoke({ actor: ana, action, input: {}, idempotencyKey: "k1" });
+			allowing().invoke({ context: ana, action, input: {}, idempotencyKey: "k1" });
 		} catch (error) {
 			thrown = error;
 		}
@@ -235,7 +242,7 @@ describe("a write", () => {
 		let thrown: unknown;
 		try {
 			allowing().invoke({
-				actor: ana,
+				context: ana,
 				action: "ledger.addThrowing",
 				input: {},
 				idempotencyKey: "k1",
@@ -260,7 +267,7 @@ describe("a write", () => {
 
 		let thrown: unknown;
 		try {
-			actions.invoke({ actor: ana, action: "ledger.add", input: {}, idempotencyKey: "k1" });
+			actions.invoke({ context: ana, action: "ledger.add", input: {}, idempotencyKey: "k1" });
 		} catch (error) {
 			thrown = error;
 		}
@@ -279,7 +286,7 @@ describe("a write", () => {
 
 		expect(() =>
 			actionsOf(platform!).invoke({
-				actor: ana,
+				context: ana,
 				action: "ledger.add",
 				input: {},
 				idempotencyKey: "k1",
@@ -287,13 +294,50 @@ describe("a write", () => {
 		).toThrow(expect.objectContaining({ code: "FORBIDDEN" }));
 		expectNothingLeft();
 	});
+
+	it("asks authorization again on a retry, with the request as it came, and delivers nothing when it throws", () => {
+		outcomeOf = valid;
+		const requests: unknown[] = [];
+		let answer: () => "allow" = () => "allow";
+		platform = openPlatform(
+			{ databaseFile: ":memory:", modules: [ledger, other] },
+			{
+				authorizer: (request) => {
+					requests.push(request);
+					return answer();
+				},
+				clock: () => NOW,
+			},
+		);
+		const call = { context: ana, action: "ledger.add", input: {}, idempotencyKey: "k1" };
+		actionsOf(platform).invoke(call);
+		actionsOf(platform).invoke(call);
+
+		const request = {
+			context: ana,
+			action: "ledger.add",
+			kind: "write",
+			permission: { area: "ledger", level: "write" },
+			input: {},
+		};
+		// On the retry only the confirmation counts as given.
+		expect(requests).toEqual([request, { ...request, confirmed: true }]);
+
+		answer = () => {
+			throw new Error("authorizer down");
+		};
+		expect(() => actionsOf(platform!).invoke(call)).toThrow(
+			expect.objectContaining({ code: "FORBIDDEN" }),
+		);
+		expect(readLog(platform)).toHaveLength(1);
+	});
 });
 
 describe("the type of a write's handler", () => {
 	it("requires the inverse only when its contract declares it undoable", () => {
 		const contract = {
-			undoable: writeAction({ undoable: true }),
-			irreversible: writeAction({ undoable: false }),
+			undoable: writeAction({ undoable: true, level: "write" }),
+			irreversible: writeAction({ undoable: false, level: "write" }),
 		};
 		defineModule({
 			id: "typed",

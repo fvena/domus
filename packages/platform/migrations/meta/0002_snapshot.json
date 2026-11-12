@@ -1,0 +1,739 @@
+{
+	"version": "6",
+	"dialect": "sqlite",
+	"id": "9fce8472-dbc4-453f-b029-904ebebc53b5",
+	"prevId": "3288bc71-f269-4220-be70-0375c46a5d50",
+	"tables": {
+		"platform_account": {
+			"name": "platform_account",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "text",
+					"primaryKey": true,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"account_id": {
+					"name": "account_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"provider_id": {
+					"name": "provider_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"user_id": {
+					"name": "user_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"access_token": {
+					"name": "access_token",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"refresh_token": {
+					"name": "refresh_token",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"id_token": {
+					"name": "id_token",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"access_token_expires_at": {
+					"name": "access_token_expires_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"refresh_token_expires_at": {
+					"name": "refresh_token_expires_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"scope": {
+					"name": "scope",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"password": {
+					"name": "password",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"created_at": {
+					"name": "created_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"updated_at": {
+					"name": "updated_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				}
+			},
+			"indexes": {
+				"platform_account_user": {
+					"name": "platform_account_user",
+					"columns": ["user_id"],
+					"isUnique": false
+				}
+			},
+			"foreignKeys": {
+				"platform_account_user_id_platform_user_id_fk": {
+					"name": "platform_account_user_id_platform_user_id_fk",
+					"tableFrom": "platform_account",
+					"tableTo": "platform_user",
+					"columnsFrom": ["user_id"],
+					"columnsTo": ["id"],
+					"onDelete": "cascade",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"checkConstraints": {}
+		},
+		"platform_action_log": {
+			"name": "platform_action_log",
+			"columns": {
+				"entry": {
+					"name": "entry",
+					"type": "integer",
+					"primaryKey": true,
+					"notNull": true,
+					"autoincrement": true
+				},
+				"module": {
+					"name": "module",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"action": {
+					"name": "action",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"account": {
+					"name": "account",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"via": {
+					"name": "via",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"key": {
+					"name": "key",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"fingerprint": {
+					"name": "fingerprint",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"at": {
+					"name": "at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"expires_at": {
+					"name": "expires_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"undoes": {
+					"name": "undoes",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"undone_by": {
+					"name": "undone_by",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"input": {
+					"name": "input",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"inverse": {
+					"name": "inverse",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				}
+			},
+			"indexes": {
+				"platform_action_log_key_unique": {
+					"name": "platform_action_log_key_unique",
+					"columns": ["account", "\"via\" IS NULL", "ifnull(\"via\"", " '')", "key"],
+					"isUnique": true
+				}
+			},
+			"foreignKeys": {
+				"platform_action_log_undoes_platform_action_log_entry_fk": {
+					"name": "platform_action_log_undoes_platform_action_log_entry_fk",
+					"tableFrom": "platform_action_log",
+					"tableTo": "platform_action_log",
+					"columnsFrom": ["undoes"],
+					"columnsTo": ["entry"],
+					"onDelete": "no action",
+					"onUpdate": "no action"
+				},
+				"platform_action_log_undone_by_platform_action_log_entry_fk": {
+					"name": "platform_action_log_undone_by_platform_action_log_entry_fk",
+					"tableFrom": "platform_action_log",
+					"tableTo": "platform_action_log",
+					"columnsFrom": ["undone_by"],
+					"columnsTo": ["entry"],
+					"onDelete": "no action",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"checkConstraints": {}
+		},
+		"platform_action_log_touched": {
+			"name": "platform_action_log_touched",
+			"columns": {
+				"entry": {
+					"name": "entry",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"module": {
+					"name": "module",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"type": {
+					"name": "type",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"id": {
+					"name": "id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				}
+			},
+			"indexes": {
+				"platform_action_log_touched_record": {
+					"name": "platform_action_log_touched_record",
+					"columns": ["module", "type", "id", "entry"],
+					"isUnique": false
+				}
+			},
+			"foreignKeys": {
+				"platform_action_log_touched_entry_platform_action_log_entry_fk": {
+					"name": "platform_action_log_touched_entry_platform_action_log_entry_fk",
+					"tableFrom": "platform_action_log_touched",
+					"tableTo": "platform_action_log",
+					"columnsFrom": ["entry"],
+					"columnsTo": ["entry"],
+					"onDelete": "no action",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {
+				"platform_action_log_touched_entry_module_type_id_pk": {
+					"columns": ["entry", "module", "type", "id"],
+					"name": "platform_action_log_touched_entry_module_type_id_pk"
+				}
+			},
+			"uniqueConstraints": {},
+			"checkConstraints": {}
+		},
+		"platform_devices": {
+			"name": "platform_devices",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "text",
+					"primaryKey": true,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"created_at": {
+					"name": "created_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"name": {
+					"name": "name",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"checkConstraints": {}
+		},
+		"platform_migrations": {
+			"name": "platform_migrations",
+			"columns": {
+				"module": {
+					"name": "module",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"position": {
+					"name": "position",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"tag": {
+					"name": "tag",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"hash": {
+					"name": "hash",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"applied_at": {
+					"name": "applied_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				}
+			},
+			"indexes": {
+				"platform_migrations_module_tag_unique": {
+					"name": "platform_migrations_module_tag_unique",
+					"columns": ["module", "tag"],
+					"isUnique": true
+				}
+			},
+			"foreignKeys": {},
+			"compositePrimaryKeys": {
+				"platform_migrations_module_position_pk": {
+					"columns": ["module", "position"],
+					"name": "platform_migrations_module_position_pk"
+				}
+			},
+			"uniqueConstraints": {},
+			"checkConstraints": {}
+		},
+		"platform_permissions": {
+			"name": "platform_permissions",
+			"columns": {
+				"account": {
+					"name": "account",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"area": {
+					"name": "area",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"level": {
+					"name": "level",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {
+				"platform_permissions_account_platform_user_id_fk": {
+					"name": "platform_permissions_account_platform_user_id_fk",
+					"tableFrom": "platform_permissions",
+					"tableTo": "platform_user",
+					"columnsFrom": ["account"],
+					"columnsTo": ["id"],
+					"onDelete": "cascade",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {
+				"platform_permissions_account_area_pk": {
+					"columns": ["account", "area"],
+					"name": "platform_permissions_account_area_pk"
+				}
+			},
+			"uniqueConstraints": {},
+			"checkConstraints": {
+				"platform_permissions_level": {
+					"name": "platform_permissions_level",
+					"value": "\"platform_permissions\".\"level\" IN ('none', 'read', 'write', 'manage')"
+				}
+			}
+		},
+		"platform_roles": {
+			"name": "platform_roles",
+			"columns": {
+				"account": {
+					"name": "account",
+					"type": "text",
+					"primaryKey": true,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"role": {
+					"name": "role",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				}
+			},
+			"indexes": {
+				"platform_roles_one_device": {
+					"name": "platform_roles_one_device",
+					"columns": ["role"],
+					"isUnique": true,
+					"where": "\"platform_roles\".\"role\" = 'device'"
+				}
+			},
+			"foreignKeys": {
+				"platform_roles_account_platform_user_id_fk": {
+					"name": "platform_roles_account_platform_user_id_fk",
+					"tableFrom": "platform_roles",
+					"tableTo": "platform_user",
+					"columnsFrom": ["account"],
+					"columnsTo": ["id"],
+					"onDelete": "cascade",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"checkConstraints": {
+				"platform_roles_role": {
+					"name": "platform_roles_role",
+					"value": "\"platform_roles\".\"role\" IN ('admin', 'member', 'device')"
+				}
+			}
+		},
+		"platform_session": {
+			"name": "platform_session",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "text",
+					"primaryKey": true,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"user_id": {
+					"name": "user_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"device_id": {
+					"name": "device_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"token": {
+					"name": "token",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"expires_at": {
+					"name": "expires_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"ip_address": {
+					"name": "ip_address",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"user_agent": {
+					"name": "user_agent",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"created_at": {
+					"name": "created_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"updated_at": {
+					"name": "updated_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				}
+			},
+			"indexes": {
+				"platform_session_token_unique": {
+					"name": "platform_session_token_unique",
+					"columns": ["token"],
+					"isUnique": true
+				},
+				"platform_session_user": {
+					"name": "platform_session_user",
+					"columns": ["user_id"],
+					"isUnique": false
+				}
+			},
+			"foreignKeys": {
+				"platform_session_user_id_platform_user_id_fk": {
+					"name": "platform_session_user_id_platform_user_id_fk",
+					"tableFrom": "platform_session",
+					"tableTo": "platform_user",
+					"columnsFrom": ["user_id"],
+					"columnsTo": ["id"],
+					"onDelete": "cascade",
+					"onUpdate": "no action"
+				},
+				"platform_session_device_id_platform_devices_id_fk": {
+					"name": "platform_session_device_id_platform_devices_id_fk",
+					"tableFrom": "platform_session",
+					"tableTo": "platform_devices",
+					"columnsFrom": ["device_id"],
+					"columnsTo": ["id"],
+					"onDelete": "no action",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"checkConstraints": {}
+		},
+		"platform_user": {
+			"name": "platform_user",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "text",
+					"primaryKey": true,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"name": {
+					"name": "name",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"email": {
+					"name": "email",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"email_verified": {
+					"name": "email_verified",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false,
+					"default": false
+				},
+				"image": {
+					"name": "image",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"created_at": {
+					"name": "created_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"updated_at": {
+					"name": "updated_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				}
+			},
+			"indexes": {
+				"platform_user_email_unique": {
+					"name": "platform_user_email_unique",
+					"columns": ["email"],
+					"isUnique": true
+				}
+			},
+			"foreignKeys": {},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"checkConstraints": {}
+		},
+		"platform_verification": {
+			"name": "platform_verification",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "text",
+					"primaryKey": true,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"identifier": {
+					"name": "identifier",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"value": {
+					"name": "value",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"expires_at": {
+					"name": "expires_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"created_at": {
+					"name": "created_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"updated_at": {
+					"name": "updated_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"checkConstraints": {}
+		}
+	},
+	"views": {},
+	"enums": {},
+	"_meta": {
+		"schemas": {},
+		"tables": {},
+		"columns": {}
+	},
+	"internal": {
+		"indexes": {
+			"platform_action_log_key_unique": {
+				"columns": {
+					"\"via\" IS NULL": {
+						"isExpression": true
+					},
+					"ifnull(\"via\"": {
+						"isExpression": true
+					},
+					" '')": {
+						"isExpression": true
+					}
+				}
+			}
+		}
+	}
+}
