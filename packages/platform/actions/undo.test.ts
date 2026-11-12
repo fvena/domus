@@ -55,7 +55,7 @@ afterEach(() => {
 });
 
 describe("an undo", () => {
-	it("reauthorizes a retry with the inverse its own entry ran, not with the content of the entry it undid", () => {
+	it("reauthorizes a retry with the inverse its own entry ran, not with the content of the entry it undid, and acknowledges it", () => {
 		const requests: AuthorizationRequest[] = [];
 		platform = openPlatform(
 			{ databaseFile: ":memory:", modules: [shelf] },
@@ -74,19 +74,60 @@ describe("an undo", () => {
 			input: { title: "Niebla" },
 			idempotencyKey: "k1",
 		});
-		const undone = actions.undo({ actor: ana, entry: 1, idempotencyKey: "u1" });
+		actions.undo({ actor: ana, entry: 1, idempotencyKey: "u1" });
 		// The content of the undone entry is gone, as phase 1d leaves expired content.
 		connectionOf(platform).exec(
-			"UPDATE platform_action_log SET input = NULL, result = NULL, inverse = NULL WHERE entry = 1",
+			"UPDATE platform_action_log SET input = NULL, inverse = NULL WHERE entry = 1",
 		);
 		requests.length = 0;
 
-		expect(actions.undo({ actor: ana, entry: 1, idempotencyKey: "u1" })).toStrictEqual(undone);
+		expect(actions.undo({ actor: ana, entry: 1, idempotencyKey: "u1" })).toStrictEqual({
+			entry: 2,
+			repeated: true,
+		});
 		expect(requests).toEqual([
 			{
 				actor: ana,
 				action: "shelf.remove",
 				input: { id: 1 },
+				undoes: { entry: 1, action: "shelf.add", actor: ana },
+			},
+		]);
+	});
+
+	it("reauthorizes a retry whose own entry expired without the inverse's input, its expired content", () => {
+		const requests: AuthorizationRequest[] = [];
+		let now = Date.UTC(2026, 10, 12);
+		platform = openPlatform(
+			{ databaseFile: ":memory:", modules: [shelf], retention: 1000 },
+			{
+				authorizer: (request) => {
+					requests.push(request);
+					return "allow";
+				},
+				clock: () => now,
+			},
+		);
+		const actions = actionsOf(platform);
+		actions.invoke({
+			actor: ana,
+			action: "shelf.add",
+			input: { title: "Niebla" },
+			idempotencyKey: "k1",
+		});
+		actions.undo({ actor: ana, entry: 1, idempotencyKey: "u1" });
+		now += 1000;
+		requests.length = 0;
+
+		expect(actions.undo({ actor: ana, entry: 1, idempotencyKey: "u1" })).toStrictEqual({
+			entry: 2,
+			repeated: true,
+		});
+		expect(requests).toEqual([
+			{
+				actor: ana,
+				action: "shelf.remove",
+				input: undefined,
 				undoes: { entry: 1, action: "shelf.add", actor: ana },
 			},
 		]);

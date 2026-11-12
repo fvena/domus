@@ -82,7 +82,6 @@ describe("probe undo", () => {
 				undoes: 1,
 				undoneBy: null,
 				input: { id: 1 },
-				result: { id: 1, body: "comprar pan" },
 				inverse: { action: "probe.restoreNote", input: { id: 1, body: "comprar pan" } },
 				touched: [{ module: "probe", type: "note", id: "1" }],
 			}),
@@ -208,13 +207,16 @@ describe("probe undo", () => {
 		);
 	});
 
-	it("answers a repeated undo with its earlier result and entry, and another key with already-undone", async () => {
+	it("answers a repeated undo with an acknowledgement of its entry, and another key with already-undone", async () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
 		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
-		const first = test.undo(ana, 1, { idempotencyKey: "u1" });
+		test.undo(ana, 1, { idempotencyKey: "u1" });
 
-		expect(test.undo(ana, 1, { idempotencyKey: "u1" })).toStrictEqual(first);
+		expect(test.undo(ana, 1, { idempotencyKey: "u1" })).toStrictEqual({
+			entry: 2,
+			repeated: true,
+		});
 		expect(() => test.undo(ana, 1, { idempotencyKey: "u2" })).toThrow(
 			conflict("already-undone"),
 		);

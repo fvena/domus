@@ -101,10 +101,11 @@ describe("migrations at start", () => {
 		const notes = defineModule({ id: "notes", schema: {}, migrations: [notesV1] });
 
 		const first = createPlatform({ databaseFile, modules: [notes] });
-		expect(first.appliedMigrations).toBe(3);
+		expect(first.appliedMigrations).toBe(4);
 		expect(history(first)).toEqual([
 			["platform", 0, "0000_migration_history", expect.any(String)],
 			["platform", 1, "0001_action_log", expect.any(String)],
+			["platform", 2, expect.stringMatching(/^0001_/), expect.any(String)],
 			["notes", 0, "0000_notes", "hash-of-0000_notes"],
 		]);
 		connectionOf(first).prepare("INSERT INTO notes_items (body) VALUES ('milk')").run();
@@ -112,7 +113,7 @@ describe("migrations at start", () => {
 
 		const second = createPlatform({ databaseFile, modules: [notes] });
 		expect(second.appliedMigrations).toBe(0);
-		expect(history(second)).toHaveLength(3);
+		expect(history(second)).toHaveLength(4);
 		expect(connectionOf(second).prepare("SELECT body FROM notes_items").pluck().all()).toEqual([
 			"milk",
 		]);
