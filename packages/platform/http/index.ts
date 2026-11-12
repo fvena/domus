@@ -4,14 +4,15 @@
 // valid session: the door builds the verified context from it, ignores anything the client declares about who
 // it is, and hands it to the one path of the actions. So do the platform's own operations on one's password
 // (it asks for the current one and keeps only this session), sessions (only one's own, with their device),
-// pending confirmations (confirming or rejecting one's own, by the app) and step-up proofs (asking for one with
-// the password). The sensitive ones (changing permissions and delegation, revoking sessions and devices) are
+// pending confirmations (confirming or rejecting one's own, by the app), step-up proofs (asking for one with
+// the password) and the action log (reading one's own annotations, undoing one's own entry). The sensitive ones (changing permissions and delegation, revoking sessions and devices) are
 // writes on that same path. A write's idempotency key and a sensitive operation's step-up proof come in headers.
 import type { ModuleDefinition } from "@domus/module-sdk";
 import { implement, ORPCError, os } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
 import { Hono } from "hono";
 
+import { READ_LOG } from "../actions";
 import { sealContext, type VerifiedContext } from "../authorization";
 import { PROTOCOL, platformContract } from "../contracts";
 import { AUTH_PREFIX, type AuthOptions, createAuth } from "../identity/auth";
@@ -181,11 +182,29 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 				},
 			),
 		},
+		log: {
+			read: platformProcedures.log.read.handler(
+				async ({ context }) =>
+					actions.invoke({
+						context: await verifiedSession(context),
+						action: READ_LOG,
+					}) as never,
+			),
+			undo: platformProcedures.log.undo.handler(async ({ input, context }) =>
+				actions.undo({
+					context: await verifiedSession(context),
+					entry: input.entry,
+					idempotencyKey: context.idempotencyKey ?? "",
+					...(context.proof === undefined ? {} : { proof: context.proof }),
+				}),
+			),
+		},
 		confirmations: {
 			confirm: platformProcedures.confirmations.confirm.handler(async ({ input, context }) =>
 				actions.confirm({
 					context: await verifiedSession(context),
 					confirmation: input.id,
+					...(context.proof === undefined ? {} : { proof: context.proof }),
 				}),
 			),
 			reject: platformProcedures.confirmations.reject.handler(async ({ input, context }) => {

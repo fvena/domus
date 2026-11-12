@@ -145,6 +145,37 @@ export const revokeDeviceContract = oc
 	.output(writeOutcome(z.object({ endedSessions: z.number().int() })));
 
 /**
+ * The annotation of one entry of the action log (GLOSSARY: registro de acciones): its number, the action by its
+ * full name, who asked for it, when, the entry it undid and the one that undid it, and the records it touched.
+ * Never its input or its inverse.
+ */
+export const logAnnotation = z.object({
+	entry: z.number().int(),
+	action: z.string(),
+	actor: z.object({ account: z.string(), via: z.string().optional() }),
+	at: z.number().int(),
+	undoes: z.number().int().nullable(),
+	undoneBy: z.number().int().nullable(),
+	touched: z.array(z.object({ module: z.string(), type: z.string(), id: z.string() })),
+});
+
+/**
+ * Reading the action log, a read of the platform's area: the annotations of the represented account's own
+ * entries, in order. Via Kira it needs that read delegated; a delegation that asks answers
+ * `CONFIRMATION_REQUIRED`.
+ */
+export const readLogContract = oc.output(z.array(logAnnotation));
+
+/**
+ * Undoing one of one's own entries by its number: its stored inverse runs with the whole authorization, so it
+ * may answer `CONFIRMATION_REQUIRED` or `STEP_UP_REQUIRED`. Another account's entry is not found. A write: it
+ * takes its idempotency key, and its step-up proof, in headers.
+ */
+export const undoContract = oc
+	.input(z.object({ entry: z.number().int().positive() }))
+	.output(writeOutcome(z.unknown()));
+
+/**
  * The platform's operations. Each sensitive one (permissions, delegation, revoking sessions and devices) is a
  * write: it takes its idempotency key and its step-up proof in headers, and answers `STEP_UP_REQUIRED` (403)
  * without a proof that matches it.
@@ -158,4 +189,5 @@ export const platformContract = {
 	permissions: { set: setPermissionContract },
 	delegation: { set: setDelegationContract },
 	devices: { revoke: revokeDeviceContract },
+	log: { read: readLogContract, undo: undoContract },
 };

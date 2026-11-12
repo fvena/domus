@@ -82,6 +82,10 @@ _Evitar_: comando, endpoint.
 La lista, en orden, de las escrituras confirmadas: qué acción, qué actor, qué registros tocó y, mientras dura su plazo, su entrada y su inversa. Nunca guarda el resultado.
 _Evitar_: historial, log.
 
+**Anotación** (`annotation`):
+Lo que se lee de una entrada del registro de acciones: su número, la acción, el actor, el instante, la entrada que deshizo o la que la deshizo, y los registros que tocó. Nunca su entrada ni su inversa. Cada cuenta lee solo las anotaciones de sus propias entradas.
+_Evitar_: resumen, metadatos.
+
 **Clave de idempotencia** (`idempotencyKey`):
 El nombre que quien pide una escritura da a esa operación, para que repetirla no la ejecute dos veces.
 _Evitar_: id de petición.

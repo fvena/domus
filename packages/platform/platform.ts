@@ -191,7 +191,7 @@ export function actionsOf(platform: Platform): Actions {
 	return internalsOf(platform).actions;
 }
 
-/** The action log of a platform. Inside platform only: who reads it is decided in phase 1c. */
+/** The action log of a platform. Inside platform only: an account reads its own annotations through the action `platform.readLog`. */
 export function actionLogOf(platform: Platform): ActionLog {
 	return internalsOf(platform).actionLog;
 }

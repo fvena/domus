@@ -47,7 +47,7 @@ import {
 
 export type { Acknowledgement, ProvenOperation, WriteOutcome, WriteReceipt } from "../actions";
 export type { IssuedProof, ProofRequest } from "../identity/proofs";
-export type { LogEntry } from "../audit";
+export type { Annotation, LogEntry } from "../audit";
 export type { DelegationTable } from "../identity/delegation";
 export type {
 	Channel,

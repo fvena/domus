@@ -38,6 +38,7 @@ import {
 	requestProofOf,
 	syntheticContext,
 	type Acknowledgement,
+	type Annotation,
 	undoEntry,
 	type VerifiedContext,
 	type WriteOutcome,
@@ -261,6 +262,12 @@ export interface TestPlatform<
 	/** True while the session exists. */
 	hasSession(session: string): boolean;
 	/**
+	 * Reads the action log through the platform's real operation: the annotations of the represented account's
+	 * own entries, in order, never their input or inverse. Via Kira it needs the platform's read delegated: a
+	 * denial is thrown as `FORBIDDEN`, and a delegation that asks as `CONFIRMATION_REQUIRED`.
+	 */
+	readLog(context: VerifiedContext): readonly Annotation[];
+	/**
 	 * A read-only snapshot of the action log: every entry, in order, with its content even when expired. That
 	 * exception is only for tests.
 	 */
@@ -412,6 +419,11 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		revokeDevice: (context, session, options) =>
 			operate(context, "revokeDevice", { session }, options),
 		hasSession: (session) => hasSession(platform, session),
+		readLog: (context) =>
+			invokeAction(platform, {
+				context,
+				action: "platform.readLog",
+			}) as readonly Annotation[],
 		log: () => readLog(platform),
 		close,
 		[Symbol.asyncDispose]: () => Promise.resolve(close()),

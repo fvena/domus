@@ -11,7 +11,9 @@
 // again and runs it on this same path, once (ADR 0023). A sensitive operation, an action of level `manage` or a
 // sensitive operation of the platform, needs a step-up proof of that exact operation: it is checked, and used in
 // the same transaction as the operation, so one that rolls back leaves it unused (ADR 0023). The platform's own
-// sensitive operations, such as changing permissions, take this same path as writes of the platform's area.
+// sensitive operations, such as changing permissions, take this same path as writes of the platform's area, and
+// reading the action log, which answers only the annotations of one's own entries, as a read of it. Only the
+// represented account that wrote an entry undoes it; for any other, the entry does not exist.
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
@@ -103,7 +105,8 @@ export interface Actions {
 	/**
 	 * Undoes an entry with the inverse its write stored, never one the caller brings. Returns the inverse's
 	 * result and its one new entry, linked to the entry it undoes, or an acknowledgement when repeated. Throws
-	 * like a write, or a conflict or a "cannot be undone" with its reason.
+	 * like a write, or a conflict or a "cannot be undone" with its reason; "not found" for an entry another
+	 * represented account wrote.
 	 */
 	undo(call: UndoCall): WriteOutcome;
 	/**
@@ -202,11 +205,10 @@ interface RegisteredAction {
 	readonly inputSchema: AnySchema | undefined;
 	/** Checks a read's result, or a write's result inside what `execute` returns. */
 	readonly outputSchema: AnySchema | undefined;
-	/** For a sensitive operation of the platform: which one, and the account it is about. */
-	readonly sensitive?: {
-		readonly operation: SensitiveOperation;
-		readonly subject: (input: unknown, context: VerifiedContext) => string | undefined;
-	};
+	/** For a sensitive operation of the platform: which one. */
+	readonly sensitive?: SensitiveOperation;
+	/** For an operation of the platform on one account's own settings or data: that account. */
+	readonly subject?: (input: unknown, context: VerifiedContext) => string | undefined;
 	/** Runs it with its validated input, and returns what a module's handler would. */
 	readonly execute: (context: VerifiedContext, input: unknown, now: number) => unknown;
 }
@@ -260,9 +262,23 @@ export function createActions({
 			permission: { area: PLATFORM_ID, level: "write" },
 			inputSchema: operation.inputSchema,
 			outputSchema: undefined,
-			sensitive: { operation: operation.sensitive, subject: operation.subject },
+			sensitive: operation.sensitive,
+			subject: operation.subject,
 			execute: (context, input) => ({ result: operation.run(input, context), touched: [] }),
 		});
+	// Reading the log, a read of the platform's area about one's own entries: on this path, so via Kira it goes
+	// through the delegation, and a delegation that asks leaves it waiting as any other read.
+	registry.set(READ_LOG, {
+		module: PLATFORM_ID,
+		name: "readLog",
+		kind: "read",
+		undoable: false,
+		permission: { area: PLATFORM_ID, level: "read" },
+		inputSchema: undefined,
+		outputSchema: undefined,
+		subject: (_input, context) => context.account,
+		execute: (context) => actionLog.annotationsOf(context.account),
+	});
 
 	return {
 		invoke: (call) => guarded(() => invoke(call)),
@@ -305,16 +321,15 @@ export function createActions({
 		return operationFingerprint(operation.action, value);
 	}
 
-	/** What authorization needs to know of a sensitive operation of the platform. */
+	/** What authorization needs to know of an operation of the platform: whether it is sensitive, and its subject. */
 	function sensitivityOf(
 		found: RegisteredAction,
 		input: unknown,
 		context: VerifiedContext,
 	): Pick<AuthorizationRequest, "sensitive" | "subject"> {
-		if (!found.sensitive) return {};
-		const subject = found.sensitive.subject(input, context);
+		const subject = found.subject?.(input, context);
 		return {
-			sensitive: found.sensitive.operation,
+			...(found.sensitive === undefined ? {} : { sensitive: found.sensitive }),
 			...(subject === undefined ? {} : { subject }),
 		};
 	}
@@ -567,7 +582,8 @@ export function createActions({
 					},
 					(key) => {
 						const original = actionLog.find(number);
-						if (!original)
+						// Only the represented account that wrote it undoes an entry: another one's does not exist.
+						if (original?.actor.account !== context.account)
 							throw new ORPCError("NOT_FOUND", { message: `no entry ${number}` });
 						if (original.undoneBy !== null) throw conflict("already-undone");
 						if (!original.inverse) throw notUndoable("irreversible");
@@ -897,6 +913,9 @@ function guarded<T>(operation: () => T): T {
 		throw internalError();
 	}
 }
+
+/** Reading the action log, by its full name: what a pending confirmation of it keeps. */
+export const READ_LOG = `${PLATFORM_ID}.readLog`;
 
 /** The reasons of a conflict the platform answers (ADR 0022, ADR 0023). */
 type ConflictReason =

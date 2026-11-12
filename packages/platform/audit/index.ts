@@ -59,6 +59,21 @@ export interface LogEntry extends Omit<NumberedEntry, "module"> {
 	readonly touched: readonly LoggedRecord[];
 }
 
+/**
+ * What reading the log answers of one entry: its annotation without its key or fingerprint, never its content
+ * (ADR 0023).
+ */
+export interface Annotation {
+	readonly entry: number;
+	/** The full name, `<module>.<action>`. */
+	readonly action: string;
+	readonly actor: Actor;
+	readonly at: number;
+	readonly undoes: number | null;
+	readonly undoneBy: number | null;
+	readonly touched: readonly LoggedRecord[];
+}
+
 /** The annotation of an entry found by its key: what tells a repeated request from another one and acknowledges it. */
 export interface KeyedEntry {
 	readonly entry: number;
@@ -76,6 +91,8 @@ export interface ActionLog {
 	touchedLater(entry: number): boolean;
 	/** Links `entry` to the entry that undid it. Only inside an open transaction, and only once per entry. */
 	markUndone(entry: number, by: number): void;
+	/** The annotations of the entries `account` asked for, directly or through Kira, in order. */
+	annotationsOf(account: string): readonly Annotation[];
 	/** Every entry, in order, with its content even when expired. For the testing entry only. */
 	entries(): readonly LogEntry[];
 }
@@ -124,6 +141,14 @@ export function createActionLog(connection: Database.Database): ActionLog {
 		"UPDATE platform_action_log SET undone_by = ? WHERE entry = ? AND undone_by IS NULL",
 	);
 	const selectEntries = connection.prepare("SELECT * FROM platform_action_log ORDER BY entry");
+	const selectOwnEntries = connection.prepare(
+		"SELECT entry, module, action, account, via, at, undoes, undone_by FROM platform_action_log WHERE account = ? ORDER BY entry",
+	);
+	const selectOwnTouched = connection.prepare(
+		`SELECT touched.entry, touched.module, touched.type, touched.id FROM platform_action_log_touched AS touched
+			JOIN platform_action_log AS log ON log.entry = touched.entry
+			WHERE log.account = ? ORDER BY touched.entry, touched.rowid`,
+	);
 	const selectTouched = connection.prepare(
 		"SELECT entry, module, type, id FROM platform_action_log_touched ORDER BY entry, rowid",
 	);
@@ -184,6 +209,19 @@ export function createActionLog(connection: Database.Database): ActionLog {
 				throw new Error(`entry ${entry} is missing or already undone`);
 		},
 
+		annotationsOf(account) {
+			const touched = recordsByEntry(selectOwnTouched.all(account) as TouchedRow[]);
+			return (selectOwnEntries.all(account) as EntryRow[]).map((row) => ({
+				entry: row.entry,
+				action: `${row.module}.${row.action}`,
+				actor: actorOf(row),
+				at: row.at,
+				undoes: row.undoes,
+				undoneBy: row.undone_by,
+				touched: touched.get(row.entry) ?? [],
+			}));
+		},
+
 		entries() {
 			const touched = selectTouched.all() as TouchedRow[];
 			return (selectEntries.all() as EntryRow[]).map((row) => {
@@ -205,7 +243,7 @@ function entryOf(row: EntryRow): NumberedEntry {
 		entry: row.entry,
 		module: row.module,
 		action: `${row.module}.${row.action}`,
-		actor: row.via === null ? { account: row.account } : { account: row.account, via: row.via },
+		actor: actorOf(row),
 		idempotencyKey: row.key,
 		fingerprint: row.fingerprint,
 		at: row.at,
@@ -215,6 +253,21 @@ function entryOf(row: EntryRow): NumberedEntry {
 		input: fromJson(row.input),
 		inverse: (fromJson(row.inverse) as Inverse | undefined) ?? null,
 	};
+}
+
+function actorOf(row: Pick<EntryRow, "account" | "via">): Actor {
+	return row.via === null ? { account: row.account } : { account: row.account, via: row.via };
+}
+
+/** The touched records of each entry, in the order they were logged. */
+function recordsByEntry(rows: readonly TouchedRow[]): ReadonlyMap<number, LoggedRecord[]> {
+	const records = new Map<number, LoggedRecord[]>();
+	for (const { entry, module, type, id } of rows) {
+		const list = records.get(entry) ?? [];
+		list.push({ module, type, id });
+		records.set(entry, list);
+	}
+	return records;
 }
 
 /** SQL `NULL` stands for `undefined`, so a JSON `null` survives as itself. */
