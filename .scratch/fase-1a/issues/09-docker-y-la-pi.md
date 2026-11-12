@@ -1,6 +1,6 @@
 # 09. El binario nativo en Docker y la comprobación en la Pi
 
-Status: ready-for-human
+Status: resolved
 Blocked by: 08
 
 Spec: [`../spec.md`](../spec.md), sección «Docker y la Pi».
@@ -24,3 +24,4 @@ La imagen `api` lleva `better-sqlite3` para su arquitectura, y la Pi demuestra q
 ## Comments
 
 - Hecha en `b1ca928`: `better-sqlite3` fuera del bundle y en la imagen `api`, comprobado en local con arm64 y amd64. Falta la comprobación de persistencia en la Pi, que hace Paco con los pasos de `docs/despliegue.md`, sección «La base de datos», cuando la fase 1a esté en `main`.
+- 2026-11-12: Paco actualizó la Pi a `main` (`40b9ee2`) e hizo la comprobación de persistencia: la fila de `platform/0000` es la misma en las tres lecturas, antes y después de `restart` y de `--force-recreate`.
