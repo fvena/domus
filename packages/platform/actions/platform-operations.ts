@@ -3,6 +3,7 @@
 // delegation and sessions, and the settings of the scheduled tasks of `background/operations.ts`. Each one is registered as an action of the platform's area, so it goes through the
 // same validation, authorization, delegation, confirmation and proofs as a module's.
 import { PLATFORM_ID } from "@domus/module-sdk";
+import type { TouchedRecord } from "@domus/module-sdk";
 import type { AnySchema } from "@orpc/contract";
 import type { z } from "zod";
 
@@ -18,7 +19,7 @@ export const READ_DELEGATION = `${PLATFORM_ID}.readDelegation`;
 
 /**
  * An operation of the platform (ADR 0023) on the path of the actions. A read of the platform's area, or a write
- * of it: with a key and logged without touched records. A sensitive one, or one at level `manage`, is a write
+ * of it: with a key and logged with the records it declares it touches. A sensitive one, or one at level `manage`, is a write
  * that needs a step-up proof.
  */
 export interface PlatformOperation {
@@ -44,6 +45,11 @@ export interface PlatformOperation {
 	 * Not asked on a repeat, which answers its acknowledgement.
 	 */
 	readonly find?: (input: unknown, context: VerifiedContext) => void;
+	/**
+	 * For a write: the records it changes, logged with its entry, so a later write of the same record keeps an undo
+	 * of it from overwriting that change (`changed-since`). None unless it says so.
+	 */
+	readonly touches?: (input: unknown) => readonly TouchedRecord[];
 	/** Reads or changes it, once authorized; returns its result. */
 	readonly run: (input: unknown, context: VerifiedContext) => unknown;
 }
@@ -51,11 +57,12 @@ export interface PlatformOperation {
 /** One operation with its input typed by its schema, which the path of the actions validates before either runs. */
 interface TypedOperation<TSchema extends z.ZodType> extends Omit<
 	PlatformOperation,
-	"inputSchema" | "subject" | "find" | "run"
+	"inputSchema" | "subject" | "find" | "touches" | "run"
 > {
 	readonly inputSchema: TSchema;
 	readonly subject: (input: z.infer<TSchema>, context: VerifiedContext) => string | undefined;
 	readonly find?: (input: z.infer<TSchema>, context: VerifiedContext) => void;
+	readonly touches?: (input: z.infer<TSchema>) => readonly TouchedRecord[];
 	readonly run: (input: z.infer<TSchema>, context: VerifiedContext) => unknown;
 }
 
@@ -75,6 +82,7 @@ export function platformActions(
 	for (const operation of operations) {
 		const kind = operation.kind ?? "write";
 		const undoable = kind === "write" && operation.undoable === true;
+		const touched = (input: unknown) => operation.touches?.(input) ?? [];
 		registered.set(`${PLATFORM_ID}.${operation.name}`, {
 			module: PLATFORM_ID,
 			name: operation.name,
@@ -92,11 +100,11 @@ export function platformActions(
 					: undoable
 						? (context, input) => ({
 								...(operation.run(input, context) as object),
-								touched: [],
+								touched: touched(input),
 							})
 						: (context, input) => ({
 								result: operation.run(input, context),
-								touched: [],
+								touched: touched(input),
 							}),
 		});
 	}

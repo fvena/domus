@@ -29,6 +29,8 @@ export function taskOperations(background: Background): readonly PlatformOperati
 		input: { task },
 	});
 	const noSubject = () => undefined;
+	/** The task a write changes, so a later change of it keeps an undo from overwriting that one. */
+	const touchesTask = ({ task }: { task: string }) => [{ type: "scheduledTask", id: task }];
 
 	return [
 		{
@@ -44,6 +46,7 @@ export function taskOperations(background: Background): readonly PlatformOperati
 			undoable: true,
 			inputSchema: TASK_INPUTS.setTaskTime,
 			subject: noSubject,
+			touches: touchesTask,
 			run: ({ task, time }) => {
 				const before = settingsOf(task);
 				background.setTime(task, time);
@@ -59,6 +62,7 @@ export function taskOperations(background: Background): readonly PlatformOperati
 			undoable: true,
 			inputSchema: TASK_INPUTS.pauseTask,
 			subject: noSubject,
+			touches: touchesTask,
 			run: ({ task }) => {
 				const before = settingsOf(task);
 				background.pause(task);
@@ -71,6 +75,7 @@ export function taskOperations(background: Background): readonly PlatformOperati
 			undoable: true,
 			inputSchema: TASK_INPUTS.resumeTask,
 			subject: noSubject,
+			touches: touchesTask,
 			run: ({ task }) => {
 				const before = settingsOf(task);
 				background.resume(task);
@@ -82,6 +87,7 @@ export function taskOperations(background: Background): readonly PlatformOperati
 			level: "manage",
 			inputSchema: TASK_INPUTS.launchTask,
 			subject: noSubject,
+			touches: touchesTask,
 			run: ({ task }) => {
 				settingsOf(task);
 				try {

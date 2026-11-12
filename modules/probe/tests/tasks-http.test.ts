@@ -185,12 +185,6 @@ describe("changing the scheduled tasks over HTTP", () => {
 		const paco = await signedIn(test, "paco");
 		const sixAm = { task: "cleanup", time: "06:00" };
 		const before = await paco.tasks.list();
-		await paco.tasks.setTime(sixAm, {
-			context: { idempotencyKey: "t1", proof: await proofOf(paco, "setTaskTime", sixAm) },
-		});
-		await paco.tasks.pause(cleanup, {
-			context: { idempotencyKey: "t2", proof: await proofOf(paco, "pauseTask", cleanup) },
-		});
 		/** Undoes `entry` with a proof of that undo. */
 		const undo = async (entry: number, idempotencyKey: string) => {
 			const { proof } = await paco.proofs.request({
@@ -200,15 +194,45 @@ describe("changing the scheduled tasks over HTTP", () => {
 			return paco.log.undo({ entry }, { context: { idempotencyKey, proof } });
 		};
 
-		expect(await undo(2, "u1")).toEqual({
+		await paco.tasks.setTime(sixAm, {
+			context: { idempotencyKey: "t1", proof: await proofOf(paco, "setTaskTime", sixAm) },
+		});
+		expect(await undo(1, "u1")).toEqual({ result: { task: "cleanup", time: null }, entry: 2 });
+		expect(await paco.tasks.list()).toEqual(before);
+
+		await paco.tasks.pause(cleanup, {
+			context: { idempotencyKey: "t2", proof: await proofOf(paco, "pauseTask", cleanup) },
+		});
+		expect(await undo(3, "u2")).toEqual({
 			result: { task: "cleanup", paused: false },
-			entry: 3,
+			entry: 4,
 		});
 		expect(await paco.tasks.list()).toMatchObject([
-			{ paused: false, frequency: { at: "06:00" } },
+			{ paused: false, frequency: { at: "04:30" } },
 		]);
-		expect(await undo(1, "u2")).toEqual({ result: { task: "cleanup", time: null }, entry: 4 });
-		expect(await paco.tasks.list()).toEqual(before);
+	});
+
+	it("does not undo a change that a later change of the same task followed", async () => {
+		await using test = await household();
+		const paco = await signedIn(test, "paco");
+		for (const [time, key] of [
+			["06:00", "t1"],
+			["07:00", "t2"],
+		] as const) {
+			const input = { task: "cleanup", time };
+			await paco.tasks.setTime(input, {
+				context: { idempotencyKey: key, proof: await proofOf(paco, "setTaskTime", input) },
+			});
+		}
+		await paco.tasks.launch(cleanup, {
+			context: { idempotencyKey: "t3", proof: await proofOf(paco, "launchTask", cleanup) },
+		});
+		const { proof } = await paco.proofs.request({ password: PASSWORD, operation: { undo: 2 } });
+
+		await expect(
+			paco.log.undo({ entry: 2 }, { context: { idempotencyKey: "u1", proof } }),
+		).rejects.toMatchObject({ code: "CONFLICT", data: { reason: "changed-since" } });
+		expect(await paco.tasks.list()).toMatchObject([{ frequency: { at: "07:00" } }]);
 	});
 
 	it("does not undo a launch", async () => {

@@ -105,6 +105,7 @@ export function createBackground({
 		clock,
 		timer,
 		kinds,
+		onStart: (taskRun, startedAt) => scheduler.start(taskRun, startedAt),
 		onFinish: (job) => scheduler.finish(job),
 		onIdle: () => wake(),
 	});

@@ -300,6 +300,8 @@ En la 1d1, todo trabajo es mantenimiento de la plataforma: no tiene actor ni pas
 
 - Una tarea que no existe responde «no encontrado» después de la autorización y del comprobante, como las demás operaciones de la plataforma: un miembro que intenta una escritura `manage` recibe «no permitido» exista o no la tarea, y el admin sin comprobante recibe `STEP_UP_REQUIRED`. Solo las operaciones sobre sesiones buscan antes de autorizar, porque una sesión ajena debe responder igual que una inexistente; una tarea no es de nadie.
 - «Atascada» no es un resultado de una ejecución: es un estado del trabajo. La ejecución sigue sin resultado mientras su trabajo está atascado (decisión de la 03). La migración `platform/0009` quita ese valor de la columna de resultados.
+- Las escrituras de las tareas (cambiar la hora, pausar, reanudar y lanzar) anotan en el registro la tarea que tocan (`scheduledTask`). Así, deshacer un cambio responde `changed-since` si después otra escritura tocó la misma tarea, como en cualquier módulo, y nunca pisa un ajuste posterior. Solo se deshace el último cambio de cada tarea.
+- Una ejecución anota su inicio cuando se reclama su trabajo por primera vez, no al terminar. Mientras corre, espera un reintento o está atascada, la lista ya muestra cuándo empezó.
 
 ## Tareas
 

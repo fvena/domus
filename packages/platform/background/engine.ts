@@ -93,6 +93,11 @@ export interface EngineOptions {
 	/** How stopping waits, at most {@link STOP_MARGIN}, for the jobs it cancelled. */
 	readonly timer: Timer;
 	readonly kinds: ReadonlyMap<string, JobKind>;
+	/**
+	 * Runs inside the transaction that claims a job of a task run, with the start of its first attempt: the run
+	 * shows it has started while its job runs, waits for a retry or is stuck.
+	 */
+	readonly onStart?: (taskRun: number, startedAt: number) => void;
 	/** Runs inside the transaction that records a job's end for good: what the job belonged to ends with it. */
 	readonly onFinish?: (job: FinishedJob) => void;
 	/** Called after a job ended and its end was recorded: a lane is free, so something may be due. */
@@ -156,6 +161,7 @@ export function createEngine({
 	clock,
 	timer,
 	kinds,
+	onStart,
 	onFinish,
 	onIdle,
 }: EngineOptions): Engine {
@@ -195,7 +201,9 @@ export function createEngine({
 	const claim = connection.transaction((lane: Lane, now: number): JobRow | undefined => {
 		const row = selectDue.get(lane, now) as JobRow | undefined;
 		if (!row || markRunning.run(now, row.id).changes !== 1) return undefined;
-		return { ...row, attempts: row.attempts + 1, started_at: row.started_at ?? now };
+		const startedAt = row.started_at ?? now;
+		if (row.task_run !== null) onStart?.(row.task_run, startedAt);
+		return { ...row, attempts: row.attempts + 1, started_at: startedAt };
 	});
 
 	/** Records a job's end: pending again for a retry, or its end for good with what it belonged to. */

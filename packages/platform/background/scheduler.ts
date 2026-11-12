@@ -59,6 +59,8 @@ export interface Scheduler {
 	enqueueDue(): void;
 	/** The earliest next run of a declared, unpaused task. */
 	nextDue(): number | undefined;
+	/** Records when a run started, from the first claim of its job. Runs inside the transaction of that claim. */
+	start(taskRun: number, startedAt: number): void;
 	/** Records how a run ended, from its job's end. Runs inside the transaction that records the job's end. */
 	finish(job: FinishedJob): void;
 	/** Stops creating runs of the task. Pausing a paused task changes nothing. */
@@ -185,6 +187,9 @@ export function createScheduler({
 		`SELECT planned_date, planned_at, started_at, finished_at, result, error FROM platform_task_runs
 			WHERE task = ? ORDER BY id DESC LIMIT 1`,
 	);
+	const startRun = connection.prepare(
+		"UPDATE platform_task_runs SET started_at = coalesce(started_at, ?) WHERE id = ?",
+	);
 	const endRun = connection.prepare(
 		`UPDATE platform_task_runs SET started_at = ?, finished_at = ?, result = ?, error = ?
 			WHERE id = ?`,
@@ -267,6 +272,10 @@ export function createScheduler({
 				.filter(({ row }) => !row.paused)
 				.map(({ row }) => row.next_at);
 			return due.length === 0 ? undefined : Math.min(...due);
+		},
+
+		start(taskRun, startedAt) {
+			startRun.run(startedAt, taskRun);
 		},
 
 		finish(job) {

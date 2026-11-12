@@ -249,6 +249,46 @@ describe("the background control of createTestPlatform", () => {
 		});
 	});
 
+	it("records the start of a run when its job starts, before it ends", async () => {
+		let started!: () => void;
+		const running = new Promise<void>((resolve) => (started = resolve));
+		let release!: () => void;
+		const released = new Promise<void>((resolve) => (release = resolve));
+		await using test = createTestPlatform({
+			modules: [],
+			tasks: [
+				{
+					id: "held",
+					frequency: { every: "day", at: "02:00" },
+					job: {
+						lane: "maintenance",
+						run: async () => {
+							started();
+							await released;
+						},
+					},
+				},
+			],
+		});
+		test.background.start();
+		test.clock.set(at("2026-01-01T01:00:00Z"));
+		await running;
+
+		const held = () => test.background.runs().find((run) => run.task === "held");
+		try {
+			expect(held()).toMatchObject({ startedAt: at("2026-01-01T01:00:00Z"), result: null });
+			test.clock.set(at("2026-01-01T01:05:00Z"));
+		} finally {
+			release();
+		}
+		await test.background.settled();
+		expect(held()).toMatchObject({
+			startedAt: at("2026-01-01T01:00:00Z"),
+			finishedAt: at("2026-01-01T01:05:00Z"),
+			result: "ok",
+		});
+	});
+
 	it("creates no run while the task has one in progress, and records that planned date as skipped", async () => {
 		let started!: () => void;
 		const running = new Promise<void>((resolve) => (started = resolve));
