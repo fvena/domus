@@ -32,3 +32,13 @@ La copia que se porta bien cuando algo sale mal: aplica la retención, distingue
 - [x] `backup-stale` no aparece justo antes de las 48 h ni exactamente a las 48 h desde la captura, y sí justo después.
 - [x] Un primer intento fallido sin ninguna copia guardada da `backup-stale` y deja de dar `none-yet`.
 - [x] `pnpm check` pasa.
+
+## Comments
+
+- Hecho en `b00d6e8`. Decisiones tomadas al implementar, también en la spec («Notas»): `backups` dice `none` con un intento fallido y ninguna copia guardada; la retención lleva `--group-by host`, porque restic agrupa también por la ruta absoluta de la instantánea; `unlock` con el código `10` sigue y lo decide `backup`, así que una contraseña incorrecta falla en `unlock` con el `12`; el bloqueo vigente queda en el registro como `ResticLockedError backup-11`; todo intento que no llegó a guardar la copia (también un bloqueo, un tiempo agotado o una parada) anota el intento fallido, y la retención no lo anota.
+- Para la 04 y la 05:
+    - **Hijos** (`backups/child.ts`): `runChild(command, args, { env, cwd?, signal }, { clock, timer })` manda SIGTERM al abortar la señal y SIGKILL a los `KILL_GRACE` (5 s) con el temporizador de la plataforma, y solo se resuelve cuando el hijo terminó; si la señal se abortó, rechaza con `cancelled()`. `createBackups` recibe ya `timer`.
+    - **restic**: `run(args, signal, cwd?)`; `REPOSITORY_LOCKED = 11` y `ResticLockedError` (pasajero). `resticFailure(step, code)` en `backups/index.ts` decide pasajero o permanente; `backup-check` puede usarlo igual.
+    - **Marcas**: `failed(at)` y `retention(at, result)` ya existen; falta `check` (04) y la procedencia (05). `watch()` en `backups/index.ts` calcula `backup-stale` y `backup-retention-failed`; la 04 añade `backup-check-failed` ahí.
+    - **Pruebas**: `fakeRestic((path) => ({ <subcomando>: "<cuerpo sh>" }))` en `backups.test.ts` escribe un restic falso que pasa al real lo que no finge (un cuerpo que no sale también pasa) y apunta los subcomandos en `calls()`. La prueba de SIGKILL deja un proceso en bucle si falla a mitad: `pkill -9 -f "domus-fake-restic-.*/restic"`.
+    - Si el tiempo máximo se agota durante `forget`, el motor reintenta el trabajo entero y repite la copia (ADR 0025); con 30 min no se espera, y la medición de la 07 lo revisa.
