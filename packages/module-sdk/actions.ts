@@ -2,6 +2,7 @@
 // The context is the only place where a module's production code gets its database: the SDK offers no
 // other way to obtain it.
 import type {
+	AnySchema,
 	ContractProcedure,
 	ErrorMap,
 	InferSchemaInput,
@@ -32,10 +33,37 @@ export interface Actor {
  * leaves the platform as it is; any other exception leaves as an internal error.
  */
 export type ActionErrors<TErrorMap extends ErrorMap> = {
-	readonly [TCode in keyof TErrorMap & string]: (options?: {
-		readonly message?: string;
-	}) => ORPCError<TCode, unknown>;
+	readonly [TCode in keyof TErrorMap & string]: ErrorConstructor<
+		TCode,
+		ErrorDataOf<TErrorMap[TCode]>
+	>;
 };
+
+/**
+ * The constructor of one declared error. Its data is the input of the error's schema: required when the
+ * schema requires it, optional when it admits `undefined`, absent when the error declares no data. oRPC's
+ * own constructor map lets any data through under this compiler, so Domus spells it out.
+ */
+type ErrorConstructor<TCode extends string, TData> = [TData] extends [undefined]
+	? (options?: ErrorOptions) => ORPCError<TCode, undefined>
+	: undefined extends TData
+		? (options?: ErrorOptions & { readonly data?: TData }) => ORPCError<TCode, TData>
+		: (options: ErrorOptions & { readonly data: TData }) => ORPCError<TCode, TData>;
+
+interface ErrorOptions {
+	readonly message?: string;
+	readonly cause?: unknown;
+}
+
+/** The input of a declared error's data schema, or `undefined` when it declares none. */
+type ErrorDataOf<TItem> = [ErrorSchemaOf<TItem>] extends [never]
+	? undefined
+	: InferSchemaInput<ErrorSchemaOf<TItem>>;
+
+type ErrorSchemaOf<TItem> = Extract<
+	NonNullable<TItem extends { readonly data?: infer TSchema } ? TSchema : never>,
+	AnySchema
+>;
 
 /** What a handler receives. A handler never keeps it to use after it returns. */
 export interface ActionContext<

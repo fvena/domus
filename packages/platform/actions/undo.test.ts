@@ -92,6 +92,86 @@ describe("an undo", () => {
 		]);
 	});
 
+	it("runs the inverse with exactly the input it authorized, transformed by its contract once", () => {
+		const { table: boardTable } = moduleTables("board");
+		const notes = boardTable("notes", { id: id(), title: text().notNull() });
+		const received: unknown[] = [];
+		const board = defineModule({
+			id: "board",
+			schema: { notes },
+			migrations: [
+				{
+					tag: "0000_board",
+					position: 0,
+					hash: "hash-of-0000_board",
+					statements: [
+						"CREATE TABLE `board_notes` (`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL, `title` text NOT NULL);",
+					],
+				},
+			],
+			contract: {
+				post: writeAction({ undoable: true })
+					.input(z.object({ title: z.string() }))
+					.output(z.object({ id: z.number() })),
+				// Its transforms change a type and a value: a second pass would reject the id or add another "!".
+				retitle: writeAction({ undoable: false }).input(
+					z.object({
+						id: z.string().transform(Number),
+						title: z.string().transform((title) => `${title}!`),
+					}),
+				),
+			},
+			actions: {
+				post: ({ db, input }) => {
+					const { id } = db.insert(notes).values(input).returning().get();
+					return {
+						result: { id },
+						touched: [{ type: "note", id }],
+						inverse: {
+							action: "board.retitle",
+							input: { id: String(id), title: "borrador" },
+						},
+					};
+				},
+				retitle: ({ db, input }) => {
+					received.push(input);
+					db.update(notes)
+						.set({ title: input.title })
+						.where(eq(notes.id, input.id))
+						.run();
+					return { result: undefined, touched: [{ type: "note", id: input.id }] };
+				},
+			},
+		});
+		const requests: AuthorizationRequest[] = [];
+		platform = openPlatform(
+			{ databaseFile: ":memory:", modules: [board] },
+			{
+				authorizer: (request) => {
+					requests.push(request);
+					return "allow";
+				},
+				clock: () => Date.UTC(2026, 10, 12),
+			},
+		);
+		const actions = actionsOf(platform);
+		actions.invoke({
+			actor: ana,
+			action: "board.post",
+			input: { title: "lista" },
+			idempotencyKey: "k1",
+		});
+		requests.length = 0;
+
+		actions.undo({ actor: ana, entry: 1, idempotencyKey: "u1" });
+
+		expect(requests.map((request) => request.input)).toEqual([{ id: 1, title: "borrador!" }]);
+		expect(received).toEqual([{ id: 1, title: "borrador!" }]);
+		expect(moduleDatabase(platform, board).select().from(notes).all()).toEqual([
+			{ id: 1, title: "borrador!" },
+		]);
+	});
+
 	it("rolls back the inverse, its entry and the undone-by link together when something fails", () => {
 		platform = openPlatform(
 			{ databaseFile: ":memory:", modules: [shelf] },

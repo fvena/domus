@@ -158,13 +158,7 @@ export function createActions({
 				errors: createORPCErrorConstructorMap(found.errorMap),
 			});
 		} catch (error) {
-			if (
-				error instanceof ORPCError &&
-				error.defined &&
-				found.errorMap[error.code] !== undefined
-			)
-				throw error;
-			throw internalError();
+			throw declaredOrInternal(found, error);
 		}
 		// An async handler, which its type forbids: what it would do later falls outside the transaction.
 		if (isThenable(outcome)) {
@@ -241,14 +235,13 @@ export function createActions({
 				if (!original.inverse) throw notUndoable("irreversible");
 				if (isExpired(original.expiresAt)) throw notUndoable("expired");
 				if (actionLog.touchedLater(number)) throw conflict("changed-since");
-				authorize(requestFor(original, original.inverse));
 
-				// The inverse runs inside this operation, with its checks and its module's rules, without another
-				// idempotent operation or another transaction.
-				const inverse = checkInverse(original.module, original.inverse);
-				const target = registry.get(inverse.action);
-				if (!target) throw internalError();
-				const receipt = perform(target, actor, inverse.input, {
+				// The stored inverse is validated once, against the current contract; the same validated input is
+				// authorized and runs inside this operation, with its module's rules, without another idempotent
+				// operation or another transaction.
+				const { stored, target, input } = checkInverse(original.module, original.inverse);
+				authorize(requestFor(original, { action: stored.action, input }));
+				const receipt = perform(target, actor, input, {
 					idempotencyKey: key,
 					fingerprint,
 					undoes: number,
@@ -294,6 +287,29 @@ export function createActions({
 	/** True from `expiresAt` on, by the platform clock: the content of that entry is no longer used. */
 	function isExpired(expiresAt: number): boolean {
 		return clock() >= expiresAt;
+	}
+
+	/**
+	 * What a handler's exception leaves as: an error its contract declares, with its data validated by that
+	 * error's schema, as oRPC does; anything else, data that fails the schema included, an internal error.
+	 */
+	function declaredOrInternal(
+		found: RegisteredAction,
+		error: unknown,
+	): ORPCError<string, unknown> {
+		if (!(error instanceof ORPCError) || !error.defined) return internalError();
+		const declared = found.errorMap[error.code];
+		if (declared === undefined) return internalError();
+		if (declared.data === undefined) return error;
+
+		const data = validate(declared.data, error.data);
+		if (!data.ok) return internalError();
+		return new ORPCError(error.code, {
+			defined: true,
+			status: error.status,
+			message: error.message,
+			data: data.value,
+		});
 	}
 
 	/** Runs an authorized write's handler, checks what it returned and logs its entry. */
@@ -342,12 +358,19 @@ export function createActions({
 		return {
 			result: output.value,
 			touched,
-			inverse: found.undoable ? checkInverse(found.module, inverse) : undefined,
+			inverse: found.undoable ? checkInverse(found.module, inverse).stored : undefined,
 		};
 	}
 
-	/** A valid inverse names a write of the same module, and its input passes that write's contract. */
-	function checkInverse(module: string, inverse: unknown): Inverse {
+	/**
+	 * A valid inverse names a write of the same module, and its input passes that write's contract. The log
+	 * keeps the input as the handler gave it (`stored`), the way a caller gives one, so an undo validates it
+	 * once against the current contract and authorizes and runs that same validated input (`input`).
+	 */
+	function checkInverse(
+		module: string,
+		inverse: unknown,
+	): { stored: Inverse; target: RegisteredAction; input: unknown } {
 		if (typeof inverse !== "object" || inverse === null) throw internalError();
 		const { action, input } = inverse as Record<string, unknown>;
 		const target = typeof action === "string" ? registry.get(action) : undefined;
@@ -355,13 +378,14 @@ export function createActions({
 			typeof action !== "string" ||
 			!target ||
 			target.module !== module ||
-			target.kind !== "write"
+			target.kind !== "write" ||
+			!isLosslessJson(input)
 		)
 			throw internalError();
 
 		const validated = validate(target.inputSchema, input);
 		if (!validated.ok || !isLosslessJson(validated.value)) throw internalError();
-		return { action, input: validated.value };
+		return { stored: { action, input }, target, input: validated.value };
 	}
 }
 
