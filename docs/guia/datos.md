@@ -28,7 +28,7 @@ El historial evita un error que no se vería a simple vista: que alguien retoque
 
 - El fichero: `<DOMUS_DATA_DIR>/domus.db`. En Docker es `/data/domus.db`, dentro del volumen `domus_domus-data`; con `pnpm dev`, `data/domus.db` en la raíz del repositorio.
 - Abrirla: `createPlatform({ databaseFile, modules })` en `packages/platform/platform.ts`, con `better-sqlite3`, modo WAL y claves ajenas activadas.
-- El ejecutor: `packages/platform/migrator.ts`. El historial es la tabla `platform_migrations`. La primera migración de la plataforma, `platform/0000`, está escrita a mano en `packages/platform/migrations.ts`.
+- El ejecutor: `packages/platform/migrator.ts`. El historial es la tabla `platform_migrations`. Las migraciones de la plataforma están escritas a mano en `packages/platform/migrations.ts`: `platform/0000`, el historial, y `platform/0001`, el [registro de acciones](acciones.md).
 - Migraciones de un módulo: las genera `pnpm db:generate` con drizzle-kit en `modules/<id>/server/migrations/`, y el mismo comando escribe `server/migrations.ts`.
 - En el registro de api: `database at <ruta>: <N> migrations applied`.
 - Decisiones: [ADR 0002](../architecture/adr/0002-vue-spa-sqlite-y-pwa.md) y [ADR 0021](../architecture/adr/0021-datos-de-los-modulos-y-migraciones.md).

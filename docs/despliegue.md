@@ -28,6 +28,12 @@ ssh kira 'cd ~/domus && docker compose ps && docker compose logs --no-color assi
 - Los tres contenedores salen `healthy`.
 - `assistant` y `voice-gateway` dicen «api at http://api:3000: ready». Si dicen «does not speak protocol», las imágenes son de versiones distintas: vuelve a construir.
 - `curl -s -X POST localhost:3000/api/rpc/status` en la Pi devuelve `{"json":{"service":"domus","protocol":1}}`.
+- `status` es la única RPC: las acciones de los módulos no se montan en HTTP hasta la 1c (ADR 0022). En la Pi, esta orden escribe `404` para cada ruta con forma de acción:
+
+    ```bash
+    for rpc in probe/listNotes probe.listNotes probe/addNote; do curl -s -o /dev/null -w "$rpc %{http_code}\n" -X POST "localhost:3000/api/rpc/$rpc"; done
+    ```
+
 - `docker compose logs --no-color api | grep database` dice `database at /data/domus.db: <N> migrations applied`: las que había pendientes en ese arranque, y `0` si no había ninguna. Si una migración falla, `api` no arranca y la base de datos queda como estaba.
 
 ## La base de datos
@@ -42,10 +48,11 @@ En la Pi, dentro de `~/domus` (`ssh kira`, `cd ~/domus`). Esta orden lee el hist
 docker compose exec api node -e "const db = new (require('better-sqlite3'))('/data/domus.db', { readonly: true, fileMustExist: true }); console.log(db.prepare('SELECT * FROM platform_migrations ORDER BY module, position').all()); db.close()"
 ```
 
-1. Ejecútala y apunta la fila de `platform` en `position` `0` (`0000_migration_history`), `hash` y `applied_at` incluidos.
+1. Ejecútala y apunta las filas de `platform`: `position` `0` (`0000_migration_history`) y `position` `1` (`0001_action_log`, el registro de acciones), `hash` y `applied_at` incluidos.
 2. `docker compose restart api` y vuelve a ejecutarla.
 3. `docker compose up -d --force-recreate api`, que cambia el contenedor y conserva el volumen, y vuelve a ejecutarla.
+4. Comprueba otra vez que `status` es la única RPC, con las dos órdenes `curl` de «Comprobar».
 
-Las tres lecturas dan la misma fila completa, `applied_at` incluido, y ninguna fila nueva. Si `applied_at` cambia, el contenedor no está usando el volumen.
+Las tres lecturas dan las mismas filas completas, `applied_at` incluido, y ninguna fila nueva. Si `applied_at` cambia, el contenedor no está usando el volumen. La primera vez que `api` arranca con `0001_action_log` en una base que solo tenía `0000`, su registro dice `1 migrations applied`, y `0` en los arranques siguientes.
 
 Aún no hay secretos: llegan con el núcleo (fase 1). Cuando lleguen, este documento dirá dónde viven.
