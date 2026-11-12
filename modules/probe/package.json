@@ -1,0 +1,23 @@
+{
+	"name": "@domus/probe",
+	"version": "0.0.0",
+	"private": true,
+	"exports": {
+		"./server": "./server/index.ts"
+	},
+	"scripts": {
+		"clean": "git clean -xdf .cache .turbo dist node_modules",
+		"type-check": "tsc --noEmit",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@domus/module-sdk": "workspace:*"
+	},
+	"devDependencies": {
+		"@domus/test-utils": "workspace:*",
+		"@domus/tsconfig": "workspace:*",
+		"@types/node": "catalog:",
+		"typescript": "catalog:",
+		"vitest": "catalog:"
+	}
+}

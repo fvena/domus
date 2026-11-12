@@ -24,8 +24,11 @@ export interface Platform {
 
 const IN_MEMORY = ":memory:";
 
-/** The connection behind each platform, kept out of its public shape: only platform reaches it. */
-const connections = new WeakMap<Platform, Database.Database>();
+/** The connection and modules behind each platform, kept out of its public shape: only platform reaches them. */
+const internals = new WeakMap<
+	Platform,
+	{ readonly db: Database.Database; readonly modules: readonly ModuleDefinition[] }
+>();
 
 /** Opens SQLite and applies the pending migrations. On any failure it closes the connection and throws. */
 export function createPlatform({ databaseFile, modules }: PlatformOptions): Platform {
@@ -60,13 +63,22 @@ export function createPlatform({ databaseFile, modules }: PlatformOptions): Plat
 			if (db.open) db.close();
 		},
 	};
-	connections.set(platform, db);
+	internals.set(platform, { db, modules });
 	return platform;
+}
+
+function internalsOf(platform: Platform) {
+	const found = internals.get(platform);
+	if (!found) throw new Error("not a platform made by createPlatform");
+	return found;
 }
 
 /** The SQLite connection of a platform. Inside platform only. */
 export function connectionOf(platform: Platform): Database.Database {
-	const db = connections.get(platform);
-	if (!db) throw new Error("not a platform made by createPlatform");
-	return db;
+	return internalsOf(platform).db;
+}
+
+/** The modules a platform received, in their order. Inside platform only. */
+export function modulesOf(platform: Platform): readonly ModuleDefinition[] {
+	return internalsOf(platform).modules;
 }

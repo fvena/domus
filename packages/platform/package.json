@@ -16,6 +16,7 @@
 		"@orpc/contract": "catalog:",
 		"@orpc/server": "catalog:",
 		"better-sqlite3": "catalog:",
+		"drizzle-orm": "catalog:",
 		"hono": "catalog:",
 		"zod": "catalog:"
 	},

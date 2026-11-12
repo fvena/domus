@@ -2,7 +2,7 @@
 // sqliteTable is not offered: every table comes from moduleTables, which puts the module's prefix on it.
 import { integer, sqliteTableCreator } from "drizzle-orm/sqlite-core";
 
-export { sql } from "drizzle-orm";
+export { eq, sql } from "drizzle-orm";
 export {
 	blob,
 	check,

@@ -2,10 +2,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import type { ModuleDefinition, ModuleSchema } from "@domus/module-sdk";
 import {
 	createHttpHandler,
 	createPlatform,
 	type HttpHandler,
+	type ModuleDatabase,
+	moduleDatabase,
 	type Platform,
 	type PlatformOptions,
 } from "@domus/platform";
@@ -26,6 +29,11 @@ export interface TestPlatform extends AsyncDisposable {
 	readonly door: HttpHandler;
 	/** `":memory:"` or the path of the file in use. */
 	readonly databaseFile: string;
+	/**
+	 * The Drizzle client of one of `modules`, typed with its schema, for storage tests to prepare and read
+	 * data directly. Only tests have it: every action will run through authorization.
+	 */
+	dbFor<TSchema extends ModuleSchema>(module: ModuleDefinition<TSchema>): ModuleDatabase<TSchema>;
 	/** Closes the platform and removes the temporary folder it created. Safe to call more than once. */
 	close(): void;
 }
@@ -59,6 +67,7 @@ export function createTestPlatform({ modules, file }: TestPlatformOptions): Test
 		platform,
 		door: createHttpHandler(),
 		databaseFile,
+		dbFor: (module) => moduleDatabase(platform, module),
 		close,
 		[Symbol.asyncDispose]: () => Promise.resolve(close()),
 	};
