@@ -122,6 +122,7 @@ Al escribir, los triggers temporales comprueban que nadie se salta las reglas de
     - Cerrar la sesión actual: no pide comprobante.
     - Revocar otra sesión mía: pide comprobante.
     - Revocar las sesiones de la cuenta de aparato: solo el admin, con comprobante.
+    - Revocar un aparato de la cuenta de aparato: solo el admin, con comprobante. Cierra todas las sesiones de ese aparato y caducan sus pendientes y comprobantes. Es distinto de revocar mis sesiones en un navegador, que no toca las de otras cuentas.
 - Al revocar una sesión caducan con ella las confirmaciones pendientes y los comprobantes nacidos en esa sesión.
 - El emparejamiento con código y las credenciales de los satélites son de la fase 3.
 
@@ -145,7 +146,8 @@ Al escribir, los triggers temporales comprueban que nadie se salta las reglas de
 - **Áreas.** Un módulo declara sus áreas en su definición. Su área por defecto tiene el id del módulo, y puede declarar otras con ese id como prefijo. Cada área declara:
     - su visibilidad por defecto (`private` o `public`);
     - si lo público lo edita cualquiera con `write` (por defecto, no);
-    - si es `alwaysPrivate`.
+    - si es `alwaysPrivate`;
+    - si leerla en un aparato compartido pide confirmación (`confirmOnSharedDevice`). Es independiente de `alwaysPrivate`: un área puede ser siempre privada sin esta regla. La salud declara las dos.
 
     La plataforma tiene su propia área, `platform`, para sus operaciones.
 
@@ -188,15 +190,15 @@ Al escribir, los triggers temporales comprueban que nadie se salta las reglas de
 - El orden:
     1. El permiso de la cuenta representada en el área tiene que alcanzar el nivel pedido.
     2. Vía Kira, la delegación de esa cuenta para ese área y nivel: `no` deniega y `confirmar` pide confirmación.
-    3. Las operaciones sensibles piden comprobante (ver «Comprobantes»). Si la identidad se acreditó por `voice` o por `device`, se deniegan.
+    3. Las operaciones sensibles piden comprobante (ver «Comprobantes»). Si la identidad se acreditó por `voice` o por `device`, se deniegan. Vía Kira, cambiar el acceso o la delegación se deniega siempre, aunque traiga comprobante.
     4. Si la acción declara que pide confirmación siempre, se pide confirmación una sola vez, nunca dos.
-    5. Regla de las áreas `alwaysPrivate` en un aparato compartido: si la cuenta del aparato es la de aparato, leer un área `alwaysPrivate` pide confirmación cuando hay un miembro reconocido y se deniega cuando no lo hay. Es un mecanismo general de las áreas siempre privadas, no algo propio de la salud.
+    5. Regla del aparato compartido: si la cuenta del aparato es la de aparato, leer un área con `confirmOnSharedDevice` pide confirmación cuando hay un miembro reconocido y se deniega cuando no lo hay. Es un mecanismo general que la salud activa por configuración.
 - La visibilidad de cada registro no la decide esta función fila a fila. La aplica el predicado que reciben los manejadores y la comprueba la captura de escrituras, las dos construidas sobre las mismas reglas de la autorización.
 - La autorización de producción sustituye a la que lo denegaba todo. El autorizador programable de la 1b sigue existiendo solo en la entrada de pruebas de `platform`, para las pruebas internas que necesitan forzar un fallo.
 
 ### Visibilidad en las lecturas (Q5, Q13)
 
-- `module-sdk/db` ofrece una forma de declarar una tabla con dueño: añade las columnas de dueño (la cuenta) y de visibilidad (`private` o `public`), y declara el tipo de registro y el área de la tabla. Una tabla con dueño tiene que usar la columna `id` entera de `module-sdk/db` como clave.
+- `module-sdk/db` ofrece una forma de declarar una tabla con dueño: añade las columnas de dueño (la cuenta) y de visibilidad (`private` o `public`), y declara el tipo de registro y el área de la tabla. Una tabla con dueño tiene que usar la columna `id` entera de `module-sdk/db` como clave. No admite claves compuestas, y la plataforma rechaza al arrancar una tabla con dueño que no cumpla.
 - Un área `alwaysPrivate` pone en sus tablas un `CHECK` que rechaza `public`. Lo genera `drizzle-kit`.
 - El contexto del manejador da un predicado de visibilidad por tabla con dueño: «el dueño es la cuenta representada, o el registro es público». Se aplica en `where`, también en conteos y búsquedas.
 - En un join entre tablas con dueño del mismo módulo, cada tabla lleva su propio predicado. Las formas admitidas (consulta simple, conteo, búsqueda y join dentro del módulo) quedan escritas en el `AGENTS.md` de `modules/`. Lo demás es disciplina comprobada en la revisión.
@@ -325,11 +327,13 @@ Al escribir, los triggers temporales comprueban que nadie se salta las reglas de
 - **Áreas:**
     - `probe`: privada por defecto; lo público no lo edita cualquiera.
     - `probe.board`: pública por defecto; lo público lo edita quien tenga `write`.
-    - `probe.health`: `alwaysPrivate`.
+    - `probe.health`: `alwaysPrivate` y `confirmOnSharedDevice`.
+    - `probe.secret`: `alwaysPrivate` sin `confirmOnSharedDevice`, para probar que una regla no implica la otra.
 - **Datos:**
     - Las notas y los comentarios de la 1b pasan a tener dueño.
     - Una tabla `board`, con dueño, en `probe.board`, con acciones para añadir, editar y borrar.
     - Una tabla `health`, con dueño, en `probe.health`, con acciones para leer y apuntar.
+    - Una tabla `secret`, con dueño, en `probe.secret`, con acciones para leer y apuntar.
 - **Acciones nuevas o cambiadas:**
     - Una acción para cambiar la visibilidad de una nota.
     - Una acción de nivel `manage` en `probe` (`configure`), para el comprobante.
@@ -365,7 +369,8 @@ Al escribir, los triggers temporales comprueban que nadie se salta las reglas de
     - `no` y `confirmar` vía Kira, y un área sin fila;
     - confirmación siempre, una sola vez;
     - operaciones sensibles con `voice` y `device`;
-    - la regla de `alwaysPrivate` en un aparato compartido, con y sin miembro reconocido;
+    - la regla de `confirmOnSharedDevice`, con y sin miembro reconocido, y que un área `alwaysPrivate` sin ella no la aplica;
+    - vía Kira, cambiar el acceso o la delegación se deniega aunque haya comprobante;
     - una excepción deniega.
 - **Pruebas de la captura de escrituras** (`platform`), con módulos escritos dentro de la prueba:
     - insertar con otro dueño;
@@ -460,5 +465,21 @@ Al escribir, los triggers temporales comprueban que nadie se salta las reglas de
 ## Notas
 
 - Los documentos de arquitectura, el glosario y el plan ya están al día en la rama del grilling. Al cerrar, se actualizan `docs/plan.md`, `docs/despliegue.md` y `docs/guia/`.
-- Algunas decisiones de detalle se toman en esta spec y no en el grilling: los valores por defecto de cada perfil, que haya una sola cuenta de aparato creada al arrancar, los nombres de los errores nuevos y la forma del acuse. Si la implementación muestra que alguna no encaja, se corrige aquí antes de seguir.
+- Algunas decisiones de detalle se toman en esta spec y no en el grilling: los valores por defecto de cada perfil (`admin`, `manage` fijo; `member`, `write`; `device`, `read` salvo en las áreas `alwaysPrivate`), la bandera `confirmOnSharedDevice`, separada de `alwaysPrivate`, que haya una sola cuenta de aparato creada al arrancar, los nombres de los errores nuevos y la forma del acuse. Si la implementación muestra que alguna no encaja, se corrige aquí antes de seguir.
 - La 1c cambia una decisión de la 1b (la devolución del resultado guardado). Las pruebas de la 1b que la comprobaban se reescriben con el acuse, no se borran.
+
+## Tareas
+
+| Tarea                                                     | Qué                                                      | Bloqueada por      |
+| --------------------------------------------------------- | -------------------------------------------------------- | ------------------ |
+| [01](issues/01-migraciones-de-la-plataforma-generadas.md) | Migraciones de la plataforma generadas                   | —                  |
+| [02](issues/02-repetir-sin-devolver-contenido.md)         | Repetir sin devolver contenido                           | 01                 |
+| [03](issues/03-entrar-por-http-y-una-lectura.md)          | Entrar por HTTP y una lectura permitida de punta a punta | 01                 |
+| [04](issues/04-pnpm-accounts-y-contrasenas.md)            | `pnpm accounts` y cambiar la contraseña                  | 03                 |
+| [05](issues/05-visibilidad-al-leer.md)                    | Visibilidad al leer                                      | 03                 |
+| [06](issues/06-comprobar-las-escrituras.md)               | Comprobar las escrituras con triggers temporales         | 05                 |
+| [07](issues/07-delegacion.md)                             | Delegación                                               | 03                 |
+| [08](issues/08-confirmaciones-pendientes.md)              | Confirmaciones pendientes                                | 02, 06, 07         |
+| [09](issues/09-comprobantes-y-operaciones-sensibles.md)   | Comprobantes y operaciones sensibles                     | 04, 07, 08         |
+| [10](issues/10-registro-y-deshacer.md)                    | Registro y deshacer con autorización real                | 02, 06, 07, 08, 09 |
+| [11](issues/11-la-pi-y-el-cierre.md)                      | La Pi y el cierre de la 1c                               | todas              |
