@@ -36,3 +36,5 @@ Un contenido se conserva mientras tenga una referencia viva, un archivo preparad
 **Restaurar no es reiniciar.** Restaurar es un procedimiento explícito. Antes de que arranque ningún consumidor, descarta los trabajos pendientes y los que estaban en ejecución en la copia, y recalcula las próximas ejecuciones desde el momento de restaurar, sin recuperar efectos antiguos. Un reinicio normal conserva su recuperación. Una restauración se prueba en un entorno aislado, y la 1d termina restaurando el conjunto de base y archivos.
 
 Fecha: 2026-11-12. Preguntas del grilling: Q1–Q20 de la fase 1d.
+
+Precisado por el ADR 0026: las copias son dos tareas, `backup` y `backup-check`, y el vigilante lee sus propias marcas, con las 48 h contadas desde la captura; restaurar toma un cerrojo exclusivo sobre la base, prepara y sanea la copia aparte, cierra todas las sesiones e instala la base con un intercambio que resiste un corte.
