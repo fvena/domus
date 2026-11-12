@@ -12,7 +12,7 @@ const DAY = 24 * 60 * 60 * 1000;
 /** A platform with probe, and Ana writing through Kira. */
 function probePlatform(options: { readonly file?: string; readonly retention?: number } = {}) {
 	const test = createTestPlatform({ modules: [probe], ...options });
-	return { test, ana: test.actor("ana", { via: "kira" }) };
+	return { test, ana: test.member("ana", { via: "kira" }) };
 }
 
 const expired = expect.objectContaining({
@@ -74,21 +74,16 @@ describe("probe expiry", () => {
 		expect(test.log()).toHaveLength(1);
 	});
 
-	it("answers an expired retry with result-expired without asking the authorizer: it delivers nothing", async () => {
+	it("answers an expired retry with result-expired before authorization: it delivers nothing", async () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
 		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
 		test.clock.set(test.log()[0]!.expiresAt);
-		const requests: unknown[] = [];
-		test.authorize((request) => {
-			requests.push(request);
-			return "deny";
-		});
+		test.prepare.grant("ana", "probe", "none");
 
 		expect(() =>
 			test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" }),
 		).toThrow(resultExpired);
-		expect(requests).toEqual([]);
 	});
 
 	it("undoes an entry one millisecond before its expiresAt", async () => {
@@ -146,7 +141,7 @@ describe("probe expiry", () => {
 		expect(test.undo(ana, added.entry, { idempotencyKey: "u1" })).toStrictEqual(undone);
 
 		test.clock.set(test.log()[1]!.expiresAt);
-		test.authorize("deny");
+		test.prepare.grant("ana", "probe", "none");
 		expect(() => test.undo(ana, added.entry, { idempotencyKey: "u1" })).toThrow(resultExpired);
 		expect(test.log()).toHaveLength(2);
 	});

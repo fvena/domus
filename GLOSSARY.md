@@ -44,6 +44,10 @@ _Evitar_: perfil de IA, permisos de Kira.
 Una entrada de una cuenta desde un aparato. Un mismo aparato puede guardar sesiones de varias cuentas, y revocar una no toca las demás.
 _Evitar_: login, conexión.
 
+**Contexto verificado** (`VerifiedContext`):
+Lo que la puerta sabe de quién pide una operación y desde dónde, sacado de sus credenciales: la cuenta representada, `via`, el aparato, la sesión, la cuenta del aparato, el canal, cómo se acreditó la identidad y la conversación. Nada de lo que declare el cliente lo cambia.
+_Evitar_: contexto de usuario, identidad declarada.
+
 **Visibilidad** (`visibility`):
 Si un registro con dueño lo ve solo su dueño (privado) o toda la casa (público). Ser público deja verlo, no editarlo.
 _Evitar_: compartido, nivel de acceso.

@@ -6,24 +6,31 @@ import type {
 	ActionInput,
 	ActionMetaOf,
 	ActionOutput,
-	Actor,
 	ModuleDefinition,
 	ModuleSchema,
 } from "@domus/module-sdk";
 import type { WriteActionMeta } from "@domus/module-sdk/contracts";
 import { createHttpHandler, type HttpHandler, type Platform } from "@domus/platform";
 import {
-	type Authorizer,
-	createPlatformWith,
-	type Decision,
+	createPlatformWithClock,
+	deviceAccountOf,
+	type Grant,
+	hasAccount,
 	invokeAction,
 	type LogEntry,
 	type ModuleDatabase,
 	moduleDatabase,
+	prepareAccount,
+	prepareGrant,
+	preparePassword,
 	readLog,
+	syntheticContext,
 	undoEntry,
+	type VerifiedContext,
 	type WriteReceipt,
 } from "@domus/platform/testing";
+
+import { createTestBrowser, type TestBrowser } from "./browser";
 
 type AnyModule = ModuleDefinition;
 
@@ -93,35 +100,64 @@ export interface TestClock {
 	advance(milliseconds: number): void;
 }
 
+/** A new account of the privileged preparation. `id` doubles as its name and the start of its email. */
+export interface PreparedAccount {
+	readonly id: string;
+	readonly role: "admin" | "member";
+	readonly name?: string;
+	readonly email?: string;
+}
+
+/**
+ * The privileged preparation: accounts, passwords and permission rows written straight into the platform,
+ * without a session or a proof. Only tests have it.
+ */
+export interface TestPreparation {
+	/** Creates an account with its role and no password. Returns its id. A repeated id or email throws. */
+	account(account: PreparedAccount): string;
+	/** Gives an account a password, so it can sign in over HTTP through the door. */
+	password(account: string, password: string): Promise<void>;
+	/** Stores the row that replaces the default of the account's role in the area: `none` to `manage`. */
+	grant(account: string, area: string, grant: Grant): void;
+}
+
+/** What a synthetic context may set besides its account. */
+export type ContextOptions = Partial<Omit<VerifiedContext, "account">>;
+
 export interface TestPlatform<
 	TModules extends readonly AnyModule[] = readonly AnyModule[],
 > extends AsyncDisposable {
 	readonly platform: Platform;
-	/** The door, in process, on this platform. */
+	/** The door, in process, on this platform. Its origin is {@link TEST_ORIGIN}. */
 	readonly door: HttpHandler;
 	/** `":memory:"` or the path of the file in use. */
 	readonly databaseFile: string;
+	/** A new browser, without cookies, on {@link door}. */
+	browser(): TestBrowser;
 	/** Starts at {@link TEST_START}, in milliseconds since the epoch. */
 	readonly clock: TestClock;
+	readonly prepare: TestPreparation;
+	/** The id of the one device account, which the platform creates at start. */
+	readonly deviceAccount: string;
 	/**
 	 * The Drizzle client of one of `modules`, typed with its schema, for tests to prepare and read data
 	 * directly, outside the actions. Only tests have it.
 	 */
 	dbFor<TSchema extends ModuleSchema>(module: ModuleDefinition<TSchema>): ModuleDatabase<TSchema>;
 	/**
-	 * What the authorizer answers from the next call on: "allow", "deny", or a function that decides, or
-	 * throws, for each request. It starts allowing.
+	 * A synthetic verified context for `account`. Unless `options` say otherwise: no via, a test device and
+	 * session, the account itself as the device's, the app channel, proven by password, no conversation.
 	 */
-	authorize(answer: Decision | Authorizer): void;
-	/** A synthetic actor: an account and, when another app carries the request, its `via`. */
-	actor(account: string, options?: { readonly via?: string }): Actor;
+	context(account: string, options?: ContextOptions): VerifiedContext;
+	/** Creates the member `id` the first time, and returns a synthetic context for it as {@link context}. */
+	member(id: string, options?: ContextOptions): VerifiedContext;
 	/**
-	 * Runs an action of `modules` through the platform's real path. A read takes no key and returns its
-	 * result. A write takes its key and returns its result and entry number. Platform errors, and those a
-	 * contract declares, are thrown with their oRPC `code`.
+	 * Runs an action of `modules` through the platform's real path, with the real authorization. A read takes
+	 * no key and returns its result. A write takes its key and returns its result and entry number. Platform
+	 * errors, and those a contract declares, are thrown with their oRPC `code`.
 	 */
 	invoke<TName extends ActionName<TModules>>(
-		actor: Actor,
+		context: VerifiedContext,
 		action: TName,
 		...args: InvokeArguments<ActionContractOf<TModules, TName>>
 	): InvokeResult<ActionContractOf<TModules, TName>>;
@@ -129,7 +165,7 @@ export interface TestPlatform<
 	 * Undoes the entry numbered `entry` through the platform's real path, with its own key: the inverse the
 	 * entry stored runs and logs one new entry. Returns the inverse's result and that entry's number.
 	 */
-	undo(actor: Actor, entry: number, options: WriteOptions): WriteReceipt;
+	undo(context: VerifiedContext, entry: number, options: WriteOptions): WriteReceipt;
 	/**
 	 * A read-only snapshot of the action log: every entry, in order, with its content even when expired. That
 	 * exception is only for tests.
@@ -142,9 +178,15 @@ export interface TestPlatform<
 /** Where the clock of every test platform starts: 2026-01-01T00:00:00Z. */
 export const TEST_START = Date.UTC(2026, 0, 1);
 
+/** The origin the door of a test platform answers on. */
+export const TEST_ORIGIN = "http://domus.test";
+
+/** The secret that signs the sessions of a test platform: only for tests. */
+const TEST_AUTH_SECRET = "test-only-secret-that-signs-test-sessions";
+
 /**
  * A real platform for tests, with the migrations of the platform and of `modules` applied: in memory by
- * default, or on a file. Its authorizer and clock are the test's. Use it with `await using`.
+ * default, or on a file. Its authorization is the real one; its clock is the test's. Use it with `await using`.
  */
 export function createTestPlatform<const TModules extends readonly AnyModule[]>({
 	modules,
@@ -158,7 +200,6 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		databaseFile = join(tempDir, "domus.db");
 	}
 
-	let authorizer: Authorizer = () => "allow";
 	let now = TEST_START;
 	const clock: TestClock = {
 		now: () => now,
@@ -172,10 +213,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 
 	let platform: Platform;
 	try {
-		platform = createPlatformWith(
-			{ databaseFile, modules, retention },
-			{ authorizer: (request) => authorizer(request), clock: () => now },
-		);
+		platform = createPlatformWithClock({ databaseFile, modules, retention }, () => now);
 	} catch (error) {
 		if (tempDir) rmSync(tempDir, { recursive: true, force: true });
 		throw error;
@@ -186,26 +224,52 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		if (tempDir) rmSync(tempDir, { recursive: true, force: true });
 	};
 
+	const prepare: TestPreparation = {
+		account: ({ id, role, name = id, email = `${id}@domus.test` }) =>
+			prepareAccount(platform, { id, role, name, email }),
+		password: (account, password) => preparePassword(platform, account, password),
+		grant: (account, area, grant) => prepareGrant(platform, account, area, grant),
+	};
+	const context = (account: string, options: ContextOptions = {}) =>
+		syntheticContext({
+			account,
+			device: "test-device",
+			session: "test-session",
+			deviceAccount: account,
+			channel: "app",
+			identity: "password",
+			...options,
+		});
+
+	const door = createHttpHandler({
+		platform,
+		modules,
+		auth: { secret: TEST_AUTH_SECRET, origins: [TEST_ORIGIN] },
+	});
+
 	return {
 		platform,
-		door: createHttpHandler({ platform, modules }),
+		door,
 		databaseFile,
+		browser: () => createTestBrowser(door, TEST_ORIGIN),
 		clock,
+		prepare,
+		deviceAccount: deviceAccountOf(platform),
 		dbFor: (module) => moduleDatabase(platform, module),
-		authorize: (answer) => {
-			authorizer = typeof answer === "function" ? answer : () => answer;
+		context,
+		member: (id, options) => {
+			if (!hasAccount(platform, id)) prepare.account({ id, role: "member" });
+			return context(id, options);
 		},
-		actor: (account, options) =>
-			options?.via === undefined ? { account } : { account, via: options.via },
-		invoke: (actor, action, ...[input, options]) =>
+		invoke: (context, action, ...[input, options]) =>
 			invokeAction(platform, {
-				actor,
+				context,
 				action,
 				input,
 				idempotencyKey: options?.idempotencyKey,
 			}) as never,
-		undo: (actor, entry, { idempotencyKey }) =>
-			undoEntry(platform, { actor, entry, idempotencyKey }),
+		undo: (context, entry, { idempotencyKey }) =>
+			undoEntry(platform, { context, entry, idempotencyKey }),
 		log: () => readLog(platform),
 		close,
 		[Symbol.asyncDispose]: () => Promise.resolve(close()),

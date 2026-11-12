@@ -1,7 +1,7 @@
 // `pnpm db:generate` also writes the platform's migrations (ADR 0023): drizzle-kit's first one is the base,
 // which stands for the hand-written platform/0000 + platform/0001 and never runs; the next ones get their
 // positions from 2 on, under their generated names.
-import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -22,12 +22,18 @@ function read(folder: string): { journal: Journal; files: MigrationFile[] } {
 	return { journal, files: readMigrationFiles({ migrationsFolder: folder }) };
 }
 
-/** The real base, alone, as drizzle-kit wrote it. */
-const base = read(realFolder);
+/** The real base, alone, as drizzle-kit wrote it: the first entry of the real folder. */
+const base = (() => {
+	const { journal, files } = read(realFolder);
+	return {
+		journal: { ...journal, entries: journal.entries.slice(0, 1) },
+		files: files.slice(0, 1),
+	};
+})();
 
 describe("the base", () => {
-	it("is the platform's only generated migration so far, and nothing of it runs", () => {
-		expect(base.journal.entries).toHaveLength(1);
+	it("is the platform's first generated migration, and nothing of it runs", () => {
+		expect(base.journal.entries[0]!.tag).toBe("0000_nice_lenny_balinger");
 		expect(toPlatformMigrations(base.journal, base.files, handWrittenMigrations)).toEqual([]);
 	});
 
@@ -73,9 +79,21 @@ describe("a migration generated after the base", () => {
 	let generated: ReturnType<typeof toPlatformMigrations>;
 
 	beforeAll(() => {
-		// A copy of the real folder, and a schema that adds one table to the platform's.
+		// A copy of the real base alone, and a schema that adds one table to the tables of 0000 + 0001.
 		folder = mkdtempSync(join(tmpdir(), "domus-platform-migrations-"));
-		cpSync(realFolder, folder, { recursive: true });
+		const tag = base.journal.entries[0]!.tag;
+		cpSync(join(realFolder, `${tag}.sql`), join(folder, `${tag}.sql`));
+		cpSync(
+			join(realFolder, "meta/0000_snapshot.json"),
+			join(folder, "meta/0000_snapshot.json"),
+		);
+		const real = JSON.parse(readFileSync(join(realFolder, "meta/_journal.json"), "utf8")) as {
+			entries: unknown[];
+		};
+		writeFileSync(
+			join(folder, "meta/_journal.json"),
+			JSON.stringify({ ...real, entries: real.entries.slice(0, 1) }, null, 2),
+		);
 		drizzleKitGenerate(join(import.meta.dirname, "fixtures/platform-schema/schema.ts"), folder);
 		const { journal, files } = read(folder);
 		generated = toPlatformMigrations(journal, files, handWrittenMigrations);

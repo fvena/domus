@@ -6,6 +6,7 @@ import { defineModule, type ModuleDefinition, type ModuleMigration } from "@domu
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { migrations as platformMigrations } from "./migrations";
 import { connectionOf, createPlatform, type Platform } from "./platform";
 
 /** A migration written by hand, as `pnpm db:generate` would carry it. */
@@ -101,10 +102,13 @@ describe("migrations at start", () => {
 		const notes = defineModule({ id: "notes", schema: {}, migrations: [notesV1] });
 
 		const first = createPlatform({ databaseFile, modules: [notes] });
-		expect(first.appliedMigrations).toBe(3);
+		expect(first.appliedMigrations).toBe(platformMigrations.length + 1);
 		expect(history(first)).toEqual([
 			["platform", 0, "0000_migration_history", expect.any(String)],
 			["platform", 1, "0001_action_log", expect.any(String)],
+			...platformMigrations
+				.slice(2)
+				.map(({ position, tag }) => ["platform", position, tag, expect.any(String)]),
 			["notes", 0, "0000_notes", "hash-of-0000_notes"],
 		]);
 		connectionOf(first).prepare("INSERT INTO notes_items (body) VALUES ('milk')").run();
@@ -112,7 +116,7 @@ describe("migrations at start", () => {
 
 		const second = createPlatform({ databaseFile, modules: [notes] });
 		expect(second.appliedMigrations).toBe(0);
-		expect(history(second)).toHaveLength(3);
+		expect(history(second)).toHaveLength(platformMigrations.length + 1);
 		expect(connectionOf(second).prepare("SELECT body FROM notes_items").pluck().all()).toEqual([
 			"milk",
 		]);

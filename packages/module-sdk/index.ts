@@ -18,6 +18,8 @@ export type {
 	WriteOutcome,
 } from "./actions";
 export {
+	type AreaDefinition,
+	areaIds,
 	checkModules,
 	defineModule,
 	type ModuleDefinition,

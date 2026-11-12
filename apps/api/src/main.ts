@@ -11,7 +11,7 @@ const config = readConfig();
 const platform = createPlatform({ databaseFile: config.databaseFile, modules });
 console.log(`database at ${config.databaseFile}: ${platform.appliedMigrations} migrations applied`);
 
-const app = createApp({ webDir: config.webDir, platform, modules });
+const app = createApp({ webDir: config.webDir, platform, modules, auth: config.auth });
 const server = serve({ fetch: app.fetch, port: config.port }, ({ port }) => {
 	console.log(`api listening on port ${port}`);
 });

@@ -12,23 +12,23 @@ const NOTE_NOT_FOUND = { message: "There is no note with this id." };
 
 export const probeContract = {
 	/** Every note, oldest first. */
-	listNotes: readAction().output(z.array(note)),
+	listNotes: readAction({ level: "read" }).output(z.array(note)),
 	/** One note by its id, or `null` when there is none. */
-	getNote: readAction()
+	getNote: readAction({ level: "read" })
 		.input(z.object({ id: recordId }))
 		.output(note.nullable()),
 
 	/** Adds a note. Undone by deleting it. */
-	addNote: writeAction({ undoable: true })
+	addNote: writeAction({ undoable: true, level: "write" })
 		.input(z.object({ body: z.string().min(1) }))
 		.output(note),
 	/** Changes the text of a note. Undone by editing it back to the previous text. */
-	editNote: writeAction({ undoable: true })
+	editNote: writeAction({ undoable: true, level: "write" })
 		.input(z.object({ id: recordId, body: z.string().min(1) }))
 		.output(note)
 		.errors({ NOTE_NOT_FOUND }),
 	/** Deletes a note without comments and returns it. Undone by restoring it. */
-	deleteNote: writeAction({ undoable: true })
+	deleteNote: writeAction({ undoable: true, level: "write" })
 		.input(z.object({ id: recordId }))
 		.output(note)
 		.errors({
@@ -36,16 +36,16 @@ export const probeContract = {
 			NOTE_HAS_COMMENTS: { message: "A note with comments cannot be deleted." },
 		}),
 	/** Brings back a deleted note with its id and text. Undone by deleting it again. */
-	restoreNote: writeAction({ undoable: true })
+	restoreNote: writeAction({ undoable: true, level: "write" })
 		.input(z.object({ id: recordId, body: z.string().min(1) }))
 		.output(note),
 	/** Adds a comment to a note. It touches only the comment. Undone by deleting it. */
-	addComment: writeAction({ undoable: true })
+	addComment: writeAction({ undoable: true, level: "write" })
 		.input(z.object({ noteId: recordId, body: z.string().min(1) }))
 		.output(comment)
 		.errors({ NOTE_NOT_FOUND }),
 	/** Deletes a comment and returns it. It cannot be undone. */
-	deleteComment: writeAction({ undoable: false })
+	deleteComment: writeAction({ undoable: false, level: "write" })
 		.input(z.object({ id: recordId }))
 		.output(comment)
 		.errors({ COMMENT_NOT_FOUND: { message: "There is no comment with this id." } }),

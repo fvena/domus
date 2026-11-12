@@ -8,8 +8,8 @@ describe("the main entry of platform", () => {
 		expect(platform).not.toHaveProperty("moduleDatabase");
 	});
 
-	// Production has no switch that lets everything through (ADR 0022): another authorizer, and invoking the
-	// actions, come only from @domus/platform/testing until the door serves them in phase 1c.
+	// Production has no switch that lets everything through (ADR 0022, ADR 0023): no other authorizer, no
+	// synthetic context and no way to invoke the actions but the door, with a session.
 	it("offers only createPlatform and the door", () => {
 		expect(Object.keys(platform).sort()).toEqual(["createHttpHandler", "createPlatform"]);
 	});

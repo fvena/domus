@@ -1,5 +1,6 @@
-// probe, the test module of phase 1 (ADR 0021, ADR 0022). testOnly keeps it out of the module list of
-// apps/api: tests import it and hand it to test-utils. It stores notes and comments and offers actions on them.
+// probe, the test module of phase 1 (ADR 0021, ADR 0022, ADR 0023). testOnly keeps it out of the module list of
+// apps/api: tests import it and hand it to test-utils. It stores notes and comments and offers actions on them,
+// each asking for a level in its one area, `probe`.
 import { defineModule, type ModuleDatabase } from "@domus/module-sdk";
 import { eq } from "@domus/module-sdk/db";
 
@@ -15,6 +16,7 @@ function findNote(db: ModuleDatabase<typeof schema>, id: number) {
 export default defineModule({
 	id: "probe",
 	testOnly: true,
+	areas: { probe: {} },
 	schema,
 	migrations,
 	contract: probeContract,

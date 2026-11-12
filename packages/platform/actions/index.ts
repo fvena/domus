@@ -23,14 +23,25 @@ import type Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 
 import type { ActionLog, NumberedEntry } from "../audit";
-import { type AuthorizationRequest, type Authorizer, isAllowed } from "../authorization";
+import {
+	actorOf,
+	type AuthorizationRequest,
+	type Authorizer,
+	isAllowed,
+	isVerified,
+	type RequiredPermission,
+	type VerifiedContext,
+} from "../authorization";
 
 /** The platform clock: instants in milliseconds since the epoch (ADR 0021). */
 export type Clock = () => number;
 
-/** One invocation: who asks, the action's full name (`<module>.<action>`), its input and, for a write, its key. */
+/**
+ * One invocation: the verified context of who asks (ADR 0023), the action's full name (`<module>.<action>`),
+ * its input and, for a write, its key. Its handler receives only the actor the context names.
+ */
 export interface ActionCall {
-	readonly actor: Actor;
+	readonly context: VerifiedContext;
 	readonly action: string;
 	readonly input?: unknown;
 	/** The idempotency key the caller gives a write. A read takes none. */
@@ -57,9 +68,9 @@ export interface Actions {
 	undo(call: UndoCall): WriteReceipt;
 }
 
-/** An undo: who asks, the number of the entry to undo and the caller's own idempotency key. */
+/** An undo: the verified context of who asks, the number of the entry to undo and the caller's own idempotency key. */
 export interface UndoCall {
-	readonly actor: Actor;
+	readonly context: VerifiedContext;
 	readonly entry: number;
 	readonly idempotencyKey: string;
 }
@@ -82,6 +93,8 @@ interface RegisteredAction {
 	readonly kind: "read" | "write";
 	/** Only a write can be undoable. */
 	readonly undoable: boolean;
+	/** What its contract asks for, with the module's own area when it names none. */
+	readonly permission: RequiredPermission;
 	readonly inputSchema: AnySchema | undefined;
 	readonly outputSchema: AnySchema | undefined;
 	/** The errors its contract declares: the only ones its handler's throws leave with. */
@@ -111,6 +124,10 @@ export function createActions({
 				name,
 				kind: meta.kind,
 				undoable: meta.kind === "write" && meta.undoable,
+				permission: {
+					area: meta.permission.area ?? module.id,
+					level: meta.permission.level,
+				},
 				inputSchema,
 				outputSchema,
 				errorMap,
@@ -125,7 +142,9 @@ export function createActions({
 		undo: (call) => guarded(() => undo(call)),
 	};
 
-	function invoke({ actor, action, input, idempotencyKey }: ActionCall): unknown {
+	function invoke({ context, action, input, idempotencyKey }: ActionCall): unknown {
+		// Only a context the door or the testing entry sealed: nothing on the way can stand in for it.
+		if (!isVerified(context)) throw internalError();
 		const found = registry.get(action);
 		if (!found) throw new ORPCError("NOT_FOUND", { message: `no action "${action}"` });
 
@@ -137,8 +156,8 @@ export function createActions({
 			});
 
 		return found.kind === "write"
-			? write(found, actor, action, validated.value, idempotencyKey)
-			: read(found, actor, action, validated.value);
+			? write(found, context, action, validated.value, idempotencyKey)
+			: read(found, context, action, validated.value);
 	}
 
 	/** Asks authorization, which fails closed: anything but an explicit "allow" ends forbidden. */
@@ -168,13 +187,18 @@ export function createActions({
 		return outcome;
 	}
 
-	function read(found: RegisteredAction, actor: Actor, action: string, input: unknown): unknown {
-		authorize({ actor, action, input });
+	function read(
+		found: RegisteredAction,
+		context: VerifiedContext,
+		action: string,
+		input: unknown,
+	): unknown {
+		authorize({ context, action, permission: found.permission, input });
 
 		let result: unknown;
 		connection.pragma("query_only = ON");
 		try {
-			result = run(found, actor, input, clock());
+			result = run(found, actorOf(context), input, clock());
 		} finally {
 			connection.pragma("query_only = OFF");
 		}
@@ -186,13 +210,19 @@ export function createActions({
 
 	function write(
 		found: RegisteredAction,
-		actor: Actor,
+		context: VerifiedContext,
 		action: string,
 		input: unknown,
 		idempotencyKey: string | undefined,
 	): WriteReceipt {
+		const actor = actorOf(context);
 		const fingerprint = writeFingerprint(action, input);
-		const request: AuthorizationRequest = { actor, action, input };
+		const request: AuthorizationRequest = {
+			context,
+			action,
+			permission: found.permission,
+			input,
+		};
 
 		return once(
 			actor,
@@ -206,16 +236,23 @@ export function createActions({
 		);
 	}
 
-	function undo({ actor, entry: number, idempotencyKey }: UndoCall): WriteReceipt {
+	function undo({ context, entry: number, idempotencyKey }: UndoCall): WriteReceipt {
+		if (!isVerified(context)) throw internalError();
+		const actor = actorOf(context);
 		const fingerprint = undoFingerprint(number);
 
 		/** The request to authorization for an inverse, with the context of the entry it undoes. */
-		const requestFor = (original: NumberedEntry, inverse: Inverse): AuthorizationRequest => ({
-			actor,
-			action: inverse.action,
-			input: inverse.input,
-			undoes: { entry: original.entry, action: original.action, actor: original.actor },
-		});
+		const requestFor = (original: NumberedEntry, inverse: Inverse): AuthorizationRequest => {
+			const target = registry.get(inverse.action);
+			if (!target) throw internalError();
+			return {
+				context,
+				action: inverse.action,
+				permission: target.permission,
+				input: inverse.input,
+				undoes: { entry: original.entry, action: original.action, actor: original.actor },
+			};
+		};
 
 		return once(
 			actor,

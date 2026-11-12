@@ -27,6 +27,9 @@ services:
             - domus-data:/data
         environment:
             TZ: ${TZ:-Europe/Madrid}
+            # Both come from the `.env` next to this file, which is not in git (docs/despliegue.md).
+            DOMUS_AUTH_SECRET: ${DOMUS_AUTH_SECRET:?set DOMUS_AUTH_SECRET in .env}
+            DOMUS_ORIGINS: ${DOMUS_ORIGINS:-http://localhost:3000}
 
     assistant:
         <<: *hardening

@@ -5,6 +5,7 @@
 import { sql } from "drizzle-orm";
 import {
 	type AnySQLiteColumn,
+	check,
 	index,
 	integer,
 	primaryKey,
@@ -82,6 +83,118 @@ export const actionLogTouched = sqliteTable(
 			table.type,
 			table.id,
 			table.entry,
+		),
+	],
+);
+
+// Identity (ADR 0023). Better Auth reads and writes the next four tables through its Drizzle adapter, by these
+// JS property names; their SQL columns are snake_case. Only email and password: `verification` stays empty,
+// but Better Auth checks that it exists.
+
+/** An account: a member or the one device account. Better Auth calls it user. */
+export const user = sqliteTable("platform_user", {
+	id: text().primaryKey(),
+	name: text().notNull(),
+	email: text().notNull().unique(),
+	emailVerified: integer("email_verified", { mode: "boolean" }).notNull().default(false),
+	image: text(),
+	createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+	updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+/** A device: a browser installed or, later, a satellite. It outlives its sessions and can change account. */
+export const devices = sqliteTable("platform_devices", {
+	id: text().primaryKey(),
+	createdAt: integer("created_at").notNull(),
+	name: text(),
+});
+
+/** A session of an account from a device. Which device is kept here, on the server, never read from a cookie. */
+export const session = sqliteTable(
+	"platform_session",
+	{
+		id: text().primaryKey(),
+		userId: text("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		deviceId: text("device_id")
+			.notNull()
+			.references(() => devices.id),
+		token: text().notNull().unique(),
+		expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+		ipAddress: text("ip_address"),
+		userAgent: text("user_agent"),
+		createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+		updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+	},
+	(table) => [index("platform_session_user").on(table.userId)],
+);
+
+/** How an account signs in: only `credential`, with its password hash. The device account has none. */
+export const account = sqliteTable(
+	"platform_account",
+	{
+		id: text().primaryKey(),
+		accountId: text("account_id").notNull(),
+		providerId: text("provider_id").notNull(),
+		userId: text("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		accessToken: text("access_token"),
+		refreshToken: text("refresh_token"),
+		idToken: text("id_token"),
+		accessTokenExpiresAt: integer("access_token_expires_at", { mode: "timestamp_ms" }),
+		refreshTokenExpiresAt: integer("refresh_token_expires_at", { mode: "timestamp_ms" }),
+		scope: text(),
+		password: text(),
+		createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+		updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+	},
+	(table) => [index("platform_account_user").on(table.userId)],
+);
+
+/** Required by Better Auth; nothing of email and password writes it in Domus. */
+export const verification = sqliteTable("platform_verification", {
+	id: text().primaryKey(),
+	identifier: text().notNull(),
+	value: text().notNull(),
+	expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+	createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+	updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+/** The role of each account: `admin`, `member` or `device`. There is exactly one device account. */
+export const roles = sqliteTable(
+	"platform_roles",
+	{
+		account: text()
+			.primaryKey()
+			.references(() => user.id, { onDelete: "cascade" }),
+		role: text({ enum: ["admin", "member", "device"] }).notNull(),
+	},
+	(table) => [
+		check("platform_roles_role", sql`${table.role} IN ('admin', 'member', 'device')`),
+		uniqueIndex("platform_roles_one_device")
+			.on(table.role)
+			.where(sql`${table.role} = 'device'`),
+	],
+);
+
+/** A row that replaces the default of an account's role in one area: `none`, `read`, `write` or `manage`. */
+export const permissions = sqliteTable(
+	"platform_permissions",
+	{
+		account: text()
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		area: text().notNull(),
+		level: text({ enum: ["none", "read", "write", "manage"] }).notNull(),
+	},
+	(table) => [
+		primaryKey({ columns: [table.account, table.area] }),
+		check(
+			"platform_permissions_level",
+			sql`${table.level} IN ('none', 'read', 'write', 'manage')`,
 		),
 	],
 );

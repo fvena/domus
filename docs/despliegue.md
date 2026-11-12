@@ -55,4 +55,13 @@ docker compose exec api node -e "const db = new (require('better-sqlite3'))('/da
 
 Las tres lecturas dan las mismas filas completas, `applied_at` incluido, y ninguna fila nueva. Si `applied_at` cambia, el contenedor no está usando el volumen. La primera vez que `api` arranca con `0001_action_log` en una base que solo tenía `0000`, su registro dice `1 migrations applied`, y `0` en los arranques siguientes.
 
-Aún no hay secretos: llegan con el núcleo (fase 1). Cuando lleguen, este documento dirá dónde viven.
+## Secretos
+
+`api` firma las sesiones con `DOMUS_AUTH_SECRET` y acepta peticiones con cookies solo desde los orígenes de `DOMUS_ORIGINS`. Los dos viven en el fichero `.env` junto a `docker-compose.yml` en la Pi, fuera de git, y `docker compose` no arranca sin el secreto:
+
+```sh
+DOMUS_AUTH_SECRET=<salida de: openssl rand -base64 32>
+DOMUS_ORIGINS=http://kira.local:3000,https://kira.taildd967b.ts.net
+```
+
+Cambiar el secreto cierra todas las sesiones.

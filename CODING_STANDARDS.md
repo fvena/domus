@@ -28,4 +28,4 @@ Read during review. Mechanical rules live in tooling and are not repeated here: 
 The dependency rules force these; they are not findings while they stay this small:
 
 - `checkApi` and the connection wiring in `apps/assistant` and `apps/voice-gateway`: apps cannot import each other, and `utils` cannot import `platform/contracts`.
-- The `/api/rpc` prefix in `platform/http` and `api-client`: `api-client` may not import `platform`; `platform/http/http.test.ts` pins both together.
+- The `/api/rpc` prefix in `platform/http` and `api-client`: `api-client` may not import `platform`; `platform/http/http.test.ts` pins both together. The `idempotency-key` header is the same case, pinned by `api-client.test.ts` and the HTTP tests of `probe`.

@@ -31,7 +31,7 @@ afterEach(() => db.close());
 function upgradedBase() {
 	db = new Database(":memory:");
 	expect(migrate(db, [{ module: "platform", migrations: migrations.slice(0, 1) }])).toBe(1);
-	expect(migrate(db, [{ module: "platform", migrations }])).toBe(1);
+	expect(migrate(db, [{ module: "platform", migrations }])).toBe(migrations.length - 1);
 	return createActionLog(db);
 }
 

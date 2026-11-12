@@ -11,7 +11,7 @@ import { comments, notes } from "../server/schema";
 /** A platform with probe, and Ana writing through Kira. */
 function probePlatform(file?: string) {
 	const test = createTestPlatform({ modules: [probe], file });
-	return { test, ana: test.actor("ana", { via: "kira" }) };
+	return { test, ana: test.member("ana", { via: "kira" }) };
 }
 
 const keyReused = expect.objectContaining({ code: "CONFLICT", data: { reason: "key-reused" } });
@@ -91,9 +91,9 @@ describe("probe idempotency", () => {
 		await using _ = test;
 		const actors = [
 			ana,
-			test.actor("luis", { via: "kira" }),
-			test.actor("ana", { via: "web" }),
-			test.actor("ana"),
+			test.member("luis", { via: "kira" }),
+			test.member("ana", { via: "web" }),
+			test.member("ana"),
 		];
 
 		const entries = actors.map(
@@ -123,43 +123,26 @@ describe("probe idempotency", () => {
 		expect(test.invoke(ana, "probe.listNotes")).toEqual([]);
 	});
 
-	it.each([
-		["denies", () => "deny" as const],
-		[
-			"throws",
-			() => {
-				throw new Error("authorizer down");
-			},
-		],
-	])("delivers nothing on a retry when the authorizer now %s", async (_, authorizer) => {
-		const { test, ana } = probePlatform();
-		await using __ = test;
-		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
+	it.each(["none", "read"] as const)(
+		"delivers nothing on a retry once a row lowers the account to %s",
+		async (grant) => {
+			const { test, ana } = probePlatform();
+			await using __ = test;
+			test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
 
-		test.authorize(authorizer);
+			test.prepare.grant("ana", "probe", grant);
 
-		expect(() =>
-			test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" }),
-		).toThrow(expect.objectContaining({ code: "FORBIDDEN" }));
-		expect(test.log()).toHaveLength(1);
-	});
-
-	it("asks the authorizer again on a retry, with the request as it came", async () => {
-		const { test, ana } = probePlatform();
-		await using _ = test;
-		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
-		const requests: unknown[] = [];
-		test.authorize((request) => {
-			requests.push(request);
-			return "allow";
-		});
-
-		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
-
-		expect(requests).toEqual([
-			{ actor: ana, action: "probe.addNote", input: { body: "comprar pan" } },
-		]);
-	});
+			expect(() =>
+				test.invoke(
+					ana,
+					"probe.addNote",
+					{ body: "comprar pan" },
+					{ idempotencyKey: "k1" },
+				),
+			).toThrow(expect.objectContaining({ code: "FORBIDDEN" }));
+			expect(test.log()).toHaveLength(1);
+		},
+	);
 
 	describe("on a file opened again", () => {
 		let dir: string;

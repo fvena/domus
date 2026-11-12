@@ -1,6 +1,6 @@
-// The platform as a whole (ADR 0021, ADR 0022): what createPlatform opens at start and close releases at stop.
-// It checks the module definitions, opens SQLite and brings its schema up to date before anything uses it, and
-// runs the modules' actions with the production authorizer, which in phase 1b denies everything.
+// The platform as a whole (ADR 0021, ADR 0022, ADR 0023): what createPlatform opens at start and close releases
+// at stop. It checks the module definitions, opens SQLite and brings its schema up to date before anything uses
+// it, makes sure the one device account exists, and runs the modules' actions with the production authorizer.
 import { isAbsolute } from "node:path";
 
 import { checkModules, type ModuleDefinition, PLATFORM_ID } from "@domus/module-sdk";
@@ -8,7 +8,9 @@ import Database from "better-sqlite3";
 
 import { type Actions, type Clock, createActions } from "./actions";
 import { type ActionLog, createActionLog } from "./audit";
-import { type Authorizer, denyEverything } from "./authorization";
+import { type Authorizer, createAuthorizer } from "./authorization";
+import { accessView, registeredAreas } from "./identity/access";
+import { ensureDeviceAccount } from "./identity/accounts";
 import { migrations } from "./migrations";
 import { migrate } from "./migrator";
 
@@ -35,10 +37,13 @@ export interface Platform {
 	close(): void;
 }
 
-/** What decides and what tells the time. Production fixes both; only the testing entry chooses them. */
+/**
+ * What tells the time and, only for the internal tests of platform that must force a failure, another
+ * authorizer than the production one. The testing entry hands test-utils the clock alone.
+ */
 export interface PlatformRuntime {
-	readonly authorizer: Authorizer;
 	readonly clock: Clock;
+	readonly authorizer?: Authorizer;
 }
 
 const IN_MEMORY = ":memory:";
@@ -51,21 +56,19 @@ const internals = new WeakMap<
 		readonly modules: readonly ModuleDefinition[];
 		readonly actions: Actions;
 		readonly actionLog: ActionLog;
+		readonly clock: Clock;
 	}
 >();
 
-/**
- * Opens SQLite and applies the pending migrations. On any failure it closes the connection and throws. It
- * takes no authorizer: in phase 1b every action is denied.
- */
+/** Opens SQLite and applies the pending migrations. On any failure it closes the connection and throws. */
 export function createPlatform(options: PlatformOptions): Platform {
-	return openPlatform(options, { authorizer: denyEverything, clock: Date.now });
+	return openPlatform(options, { clock: Date.now });
 }
 
-/** createPlatform with a given runtime. Inside platform only; the testing entry hands it to test-utils. */
+/** createPlatform with a given runtime. Inside platform only; the testing entry hands test-utils its clock part. */
 export function openPlatform(
 	{ databaseFile, modules, retention = DEFAULT_RETENTION }: PlatformOptions,
-	{ authorizer, clock }: PlatformRuntime,
+	{ clock, authorizer }: PlatformRuntime,
 ): Platform {
 	if (databaseFile !== IN_MEMORY && !isAbsolute(databaseFile)) {
 		throw new Error(
@@ -92,6 +95,7 @@ export function openPlatform(
 			{ module: PLATFORM_ID, migrations },
 			...modules.map((module) => ({ module: module.id, migrations: module.migrations })),
 		]);
+		ensureDeviceAccount(db, clock());
 	} catch (error) {
 		db.close();
 		throw error;
@@ -107,12 +111,12 @@ export function openPlatform(
 	const actions = createActions({
 		connection: db,
 		modules,
-		authorizer,
+		authorizer: authorizer ?? createAuthorizer(accessView(db, registeredAreas(modules))),
 		clock,
 		actionLog,
 		retention,
 	});
-	internals.set(platform, { db, modules, actions, actionLog });
+	internals.set(platform, { db, modules, actions, actionLog, clock });
 	return platform;
 }
 
@@ -132,7 +136,7 @@ export function modulesOf(platform: Platform): readonly ModuleDefinition[] {
 	return internalsOf(platform).modules;
 }
 
-/** The actions of a platform's modules. Inside platform only: no door serves them until phase 1c. */
+/** The actions of a platform's modules. Inside platform only: the door serves them with a verified context. */
 export function actionsOf(platform: Platform): Actions {
 	return internalsOf(platform).actions;
 }
@@ -140,4 +144,9 @@ export function actionsOf(platform: Platform): Actions {
 /** The action log of a platform. Inside platform only: who reads it is decided in phase 1c. */
 export function actionLogOf(platform: Platform): ActionLog {
 	return internalsOf(platform).actionLog;
+}
+
+/** The platform clock. Inside platform only. */
+export function clockOf(platform: Platform): Clock {
+	return internalsOf(platform).clock;
 }

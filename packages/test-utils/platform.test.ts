@@ -15,17 +15,17 @@ const clockwork = defineModule({
 	schema: {},
 	migrations: [],
 	contract: {
-		whoAndWhen: readAction().output(
+		whoAndWhen: readAction({ level: "read" }).output(
 			z.object({
 				actor: z.object({ account: z.string(), via: z.string().optional() }),
 				now: z.number(),
 			}),
 		),
-		double: readAction()
+		double: readAction({ level: "read" })
 			.input(z.object({ value: z.number() }))
 			.output(z.number()),
 		/** A write that changes nothing but is logged. */
-		tick: writeAction({ undoable: false })
+		tick: writeAction({ undoable: false, level: "write" })
 			.input(z.object({ value: z.number() }))
 			.output(z.number()),
 	},
@@ -39,7 +39,7 @@ const clockwork = defineModule({
 describe("createTestPlatform with actions", () => {
 	it("hands handlers a clock that moves only when the test moves it", async () => {
 		await using test = createTestPlatform({ modules: [clockwork] });
-		const ana = test.actor("ana");
+		const ana = test.member("ana");
 		expect(test.invoke(ana, "clockwork.whoAndWhen").now).toBe(TEST_START);
 
 		test.clock.advance(1500);
@@ -50,19 +50,105 @@ describe("createTestPlatform with actions", () => {
 		expect(test.clock.now()).toBe(Date.UTC(2027, 0, 1));
 	});
 
-	it("makes actors of one account with and without via, and with different via", async () => {
+	it("hands handlers the actor of a synthetic context: its account and via, nothing else", async () => {
 		await using test = createTestPlatform({ modules: [clockwork] });
 		const seen = (via?: string) =>
-			test.invoke(test.actor("ana", { via }), "clockwork.whoAndWhen").actor;
+			test.invoke(test.member("ana", { via }), "clockwork.whoAndWhen").actor;
 
 		expect(seen()).toEqual({ account: "ana" });
 		expect(seen("kira")).toEqual({ account: "ana", via: "kira" });
 		expect(seen("panel")).toEqual({ account: "ana", via: "panel" });
 	});
 
+	it("decides with the real authorization: an account without a role is denied", async () => {
+		await using test = createTestPlatform({ modules: [clockwork] });
+
+		expect(() => test.invoke(test.context("nobody"), "clockwork.double", { value: 2 })).toThrow(
+			expect.objectContaining({ code: "FORBIDDEN" }),
+		);
+	});
+
+	it("prepares accounts with their role, and rows that replace a role's default", async () => {
+		await using test = createTestPlatform({ modules: [clockwork] });
+		const paco = test.context(test.prepare.account({ id: "paco", role: "admin" }));
+		const ana = test.member("ana");
+		const kitchen = test.context(test.deviceAccount);
+		const tick = (context: typeof ana, key: string) =>
+			test.invoke(context, "clockwork.tick", { value: 1 }, { idempotencyKey: key });
+
+		expect(tick(paco, "k1").entry).toBe(1);
+		expect(tick(ana, "k1").entry).toBe(2);
+		expect(() => tick(kitchen, "k1")).toThrow(expect.objectContaining({ code: "FORBIDDEN" }));
+
+		test.prepare.grant("ana", "clockwork", "read");
+		test.prepare.grant(test.deviceAccount, "clockwork", "write");
+
+		expect(() => tick(ana, "k2")).toThrow(expect.objectContaining({ code: "FORBIDDEN" }));
+		expect(tick(kitchen, "k2").entry).toBe(3);
+	});
+
+	it("rejects a prepared account whose id or email is taken", async () => {
+		await using test = createTestPlatform({ modules: [clockwork] });
+		test.prepare.account({ id: "ana", role: "member" });
+
+		expect(() =>
+			test.prepare.account({ id: "ana", role: "admin", email: "x@domus.test" }),
+		).toThrow();
+		expect(() =>
+			test.prepare.account({ id: "ana2", role: "member", email: "ana@domus.test" }),
+		).toThrow();
+	});
+
+	it("makes synthetic contexts with any combination of their fields", async () => {
+		await using test = createTestPlatform({ modules: [clockwork] });
+
+		expect(test.context("ana")).toStrictEqual({
+			account: "ana",
+			device: "test-device",
+			session: "test-session",
+			deviceAccount: "ana",
+			channel: "app",
+			identity: "password",
+		});
+		// A member recognized by voice on a shared screen signed in with the device account.
+		expect(
+			test.context("ana", {
+				via: "kira",
+				device: "kitchen",
+				session: undefined,
+				deviceAccount: test.deviceAccount,
+				channel: "contexto",
+				identity: "voice",
+				conversation: "c1",
+			}),
+		).toStrictEqual({
+			account: "ana",
+			via: "kira",
+			device: "kitchen",
+			deviceAccount: test.deviceAccount,
+			channel: "contexto",
+			identity: "voice",
+			conversation: "c1",
+		});
+	});
+
+	it("gives a prepared account a password it signs in with through the door", async () => {
+		await using test = createTestPlatform({ modules: [clockwork] });
+		test.prepare.account({ id: "ana", role: "member" });
+		await test.prepare.password("ana", "a long password");
+		const browser = test.browser();
+
+		expect((await browser.signIn("ana@domus.test", "a wrong password")).status).toBe(401);
+		expect((await browser.signIn("ana@domus.test", "a long password")).status).toBe(200);
+		expect(Object.keys(browser.cookies()).sort()).toEqual([
+			"better-auth.session_token",
+			"domus.device",
+		]);
+	});
+
 	it("types invoke with the names, inputs and outputs of the modules it receives", async () => {
 		await using test = createTestPlatform({ modules: [clockwork] });
-		const ana = test.actor("ana");
+		const ana = test.member("ana");
 
 		expectTypeOf(test.invoke(ana, "clockwork.double", { value: 2 })).toEqualTypeOf<number>();
 		expect(test.invoke(ana, "clockwork.double", { value: 2 })).toBe(4);
@@ -78,7 +164,7 @@ describe("createTestPlatform with actions", () => {
 
 	it("types a write: it takes its key and returns its result and entry number", async () => {
 		await using test = createTestPlatform({ modules: [clockwork] });
-		const ana = test.actor("ana");
+		const ana = test.member("ana");
 
 		const written = test.invoke(ana, "clockwork.tick", { value: 7 }, { idempotencyKey: "k1" });
 
@@ -90,7 +176,7 @@ describe("createTestPlatform with actions", () => {
 
 	it("gives a read-only snapshot of the action log that the test cannot change", async () => {
 		await using test = createTestPlatform({ modules: [clockwork] });
-		test.invoke(test.actor("ana"), "clockwork.tick", { value: 7 }, { idempotencyKey: "k1" });
+		test.invoke(test.member("ana"), "clockwork.tick", { value: 7 }, { idempotencyKey: "k1" });
 
 		const snapshot = test.log();
 		// @ts-expect-error: the snapshot is read-only.
@@ -123,9 +209,11 @@ describe("createTestPlatform", () => {
 				},
 			],
 		});
+		await using bare = createTestPlatform({ modules: [] });
 		await using test = createTestPlatform({ modules: [notes] });
-		// platform/0000, platform/0001 and the module's.
-		expect(test.platform.appliedMigrations).toBe(3);
+		// The platform's own, which apply with no module, and the module's.
+		expect(bare.platform.appliedMigrations).toBeGreaterThanOrEqual(2);
+		expect(test.platform.appliedMigrations).toBe(bare.platform.appliedMigrations + 1);
 	});
 
 	it("puts the file in a temporary folder it removes on close", () => {

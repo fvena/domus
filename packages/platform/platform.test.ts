@@ -2,6 +2,8 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { defineModule } from "@domus/module-sdk";
+import { readAction } from "@domus/module-sdk/contracts";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -35,6 +37,61 @@ describe("createPlatform", () => {
 			"milk",
 		]);
 		second.close();
+	});
+
+	it("creates the one device account at start, without a password, and keeps it on the next start", () => {
+		const databaseFile = join(dir, "domus.db");
+		const accounts = (platform: ReturnType<typeof createPlatform>) =>
+			connectionOf(platform)
+				.prepare(
+					"SELECT r.account, r.role, u.email, (SELECT count(*) FROM platform_account a WHERE a.user_id = u.id) AS credentials FROM platform_roles r JOIN platform_user u ON u.id = r.account",
+				)
+				.all();
+
+		const first = createPlatform({ databaseFile, modules: [] });
+		const created = accounts(first);
+		first.close();
+		const second = createPlatform({ databaseFile, modules: [] });
+
+		expect(created).toEqual([
+			{
+				account: expect.any(String),
+				role: "device",
+				email: "device@domus.invalid",
+				credentials: 0,
+			},
+		]);
+		expect(accounts(second)).toEqual(created);
+		expect(() =>
+			connectionOf(second)
+				.prepare(
+					"INSERT INTO platform_user (id, name, email, created_at, updated_at) VALUES ('d2', 'Otro', 'd2@domus.invalid', 0, 0)",
+				)
+				.run(),
+		).not.toThrow();
+		// Exactly one device account: a second one is refused by the database itself.
+		expect(() =>
+			connectionOf(second)
+				.prepare("INSERT INTO platform_roles (account, role) VALUES ('d2', 'device')")
+				.run(),
+		).toThrow(/UNIQUE/);
+		second.close();
+	});
+
+	it("refuses to start with an action in an area that is not registered, before opening the file", () => {
+		const databaseFile = join(dir, "domus.db");
+		const notes = defineModule({
+			id: "notes",
+			schema: {},
+			migrations: [],
+			contract: { read: readAction({ area: "notes.health", level: "read" }) },
+			actions: { read: () => undefined },
+		});
+
+		expect(() => createPlatform({ databaseFile, modules: [notes] })).toThrow(
+			/area "notes.health", which is not registered/,
+		);
+		expect(existsSync(databaseFile)).toBe(false);
 	});
 
 	it("opens in memory with foreign keys on", () => {

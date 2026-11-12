@@ -7,7 +7,7 @@ import { comments, notes } from "../server/schema";
 /** A platform with probe, and Ana writing through Kira. */
 function probePlatform() {
 	const test = createTestPlatform({ modules: [probe] });
-	return { test, ana: test.actor("ana", { via: "kira" }) };
+	return { test, ana: test.member("ana", { via: "kira" }) };
 }
 
 describe("probe writes", () => {
@@ -142,13 +142,13 @@ describe("probe writes", () => {
 		await using _ = test;
 
 		test.invoke(
-			test.actor("ana"),
+			test.member("ana"),
 			"probe.addNote",
 			{ body: "regar" },
 			{ idempotencyKey: "k1" },
 		);
 		test.invoke(
-			test.actor("ana", { via: "kira" }),
+			test.member("ana", { via: "kira" }),
 			"probe.addNote",
 			{ body: "regar" },
 			{ idempotencyKey: "k2" },

@@ -6,7 +6,7 @@ import probe from "../server";
 /** A platform with probe, and Ana writing through Kira. */
 function probePlatform() {
 	const test = createTestPlatform({ modules: [probe] });
-	return { test, ana: test.actor("ana", { via: "kira" }) };
+	return { test, ana: test.member("ana", { via: "kira" }) };
 }
 
 const conflict = (reason: string) =>
@@ -77,7 +77,7 @@ describe("probe undo", () => {
 			expect.objectContaining({
 				entry: 2,
 				action: "probe.deleteNote",
-				actor: ana,
+				actor: { account: "ana", via: "kira" },
 				idempotencyKey: "u1",
 				undoes: 1,
 				undoneBy: null,
@@ -268,62 +268,30 @@ describe("probe undo", () => {
 		expect(() => test.undo(ana, undone.entry, { idempotencyKey: "u2" })).toThrow(irreversible);
 	});
 
-	it.each([
-		["denies", () => "deny" as const],
-		[
-			"throws",
-			() => {
-				throw new Error("authorizer down");
-			},
-		],
-	])("does not undo when the authorizer %s", async (_, authorizer) => {
+	it("does not undo when the account's permission no longer reaches the inverse's", async () => {
 		const { test, ana } = probePlatform();
 		await using __ = test;
 		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
 
-		test.authorize(authorizer);
+		test.prepare.grant("ana", "probe", "read");
 
 		expect(() => test.undo(ana, 1, { idempotencyKey: "u1" })).toThrow(
 			expect.objectContaining({ code: "FORBIDDEN" }),
 		);
-		test.authorize("allow");
 		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
 		expect(test.log()).toHaveLength(1);
 	});
 
-	it("delivers nothing on a repeated undo when the authorizer now denies", async () => {
+	it("delivers nothing on a repeated undo once the account's permission no longer reaches", async () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
 		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
 		test.undo(ana, 1, { idempotencyKey: "u1" });
 
-		test.authorize("deny");
+		test.prepare.grant("ana", "probe", "none");
 
 		expect(() => test.undo(ana, 1, { idempotencyKey: "u1" })).toThrow(
 			expect.objectContaining({ code: "FORBIDDEN" }),
 		);
-	});
-
-	it("asks the authorizer about the inverse, with the context of the entry it undoes, first and on a retry", async () => {
-		const { test, ana } = probePlatform();
-		await using _ = test;
-		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
-		const luis = test.actor("luis");
-		const requests: unknown[] = [];
-		test.authorize((request) => {
-			requests.push(request);
-			return "allow";
-		});
-
-		test.undo(luis, 1, { idempotencyKey: "u1" });
-		test.undo(luis, 1, { idempotencyKey: "u1" });
-
-		const request = {
-			actor: luis,
-			action: "probe.deleteNote",
-			input: { id: 1 },
-			undoes: { entry: 1, action: "probe.addNote", actor: ana },
-		};
-		expect(requests).toEqual([request, request]);
 	});
 });
