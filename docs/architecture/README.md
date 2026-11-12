@@ -49,7 +49,7 @@ Ver [ADR 0001](adr/0001-domus-con-kira-dentro.md) y [ADR 0002](adr/0002-vue-spa-
     - La columna «ver» de la tabla decide qué ve la IA: lo que la IA no ve no sale hacia el modelo (P17).
     - No hay aprobación de lo que propone otra persona, ni aprobación automática, ni modo «solo sugerir» para las apps conectadas.
 - **Visibilidad** ([ADR 0009](adr/0009-visibilidad-privado-o-publico.md)): solo privado o público, con dueño por registro (P19). Cada área elige su valor por defecto; la salud es siempre privada.
-- **Una sola decisión** ([ADR 0010](adr/0010-una-sola-decision-de-autorizacion.md), P48): `platform/authorization` decide si algo se permite, si pide confirmación y si se puede ver, combinando permisos de la persona, filtro de la IA y visibilidad. Al confirmar lo vuelve a comprobar y verifica que la operación es exactamente la misma. La auditoría guarda las dos identidades: la persona y «vía Kira».
+- **Una sola decisión** ([ADR 0010](adr/0010-una-sola-decision-de-autorizacion.md), P48; recorrido en el [ADR 0022](adr/0022-acciones.md)): `platform/authorization` decide si algo se permite, si pide confirmación y si se puede ver, combinando permisos de la persona, filtro de la IA y visibilidad. Al confirmar lo vuelve a comprobar y verifica que la operación es exactamente la misma. La auditoría guarda las dos identidades: la persona y «vía Kira».
 
 ## 4. IA, memoria y mecanismos generales
 
@@ -62,7 +62,7 @@ Ver [ADR 0001](adr/0001-domus-con-kira-dentro.md) y [ADR 0002](adr/0002-vue-spa-
 
 ## 5. Estructura del repositorio
 
-Ver [ADR 0017](adr/0017-estructura-del-repositorio.md), [ADR 0020](adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md), [ADR 0021](adr/0021-datos-de-los-modulos-y-migraciones.md) y [ADR 0018](adr/0018-patrones-de-openclaw-y-hermes.md).
+Ver [ADR 0017](adr/0017-estructura-del-repositorio.md), [ADR 0020](adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md), [ADR 0021](adr/0021-datos-de-los-modulos-y-migraciones.md), [ADR 0022](adr/0022-acciones.md) y [ADR 0018](adr/0018-patrones-de-openclaw-y-hermes.md).
 
 ```
 domus/
@@ -103,6 +103,8 @@ Además, `tooling/scripts` comprueba el índice y los enlaces de los ADR, el tam
 
 **Datos** ([ADR 0021](adr/0021-datos-de-los-modulos-y-migraciones.md)): un solo fichero SQLite (`domus.db` en `DOMUS_DATA_DIR`) con `better-sqlite3`, WAL y claves ajenas, abierto por `platform`. Los módulos llegan a Drizzle solo por `@domus/module-sdk/db`; cada tabla lleva el id de su módulo como prefijo (`probe_notes`) y las de la plataforma, `platform_`, y las claves ajenas no salen del módulo. Es disciplina comprobada, no una barrera de seguridad. Las migraciones de los módulos se generan con `pnpm db:generate` (las de la plataforma se escriben a mano, con la misma forma), se guardan en git como datos y un ejecutor propio las aplica al arrancar en una sola transacción, tras validar el historial de `platform_migrations`.
 
+**Acciones** ([ADR 0022](adr/0022-acciones.md)): un módulo solo lee y cambia sus datos desde el contexto de una acción, y todo llamante recorre el mismo camino en `platform/actions`: validar, autorizar, ejecutar y registrar. Cada contrato declara si es lectura o escritura y, si es escritura, si se puede deshacer. El manejador es síncrono y corre en una transacción junto con su entrada del registro de acciones. Toda escritura lleva una clave de idempotencia, única por cuenta y `via`: repetirla devuelve el resultado guardado, tras volver a autorizar, y nunca ejecuta dos veces, tampoco cuando el contenido ha caducado (30 días). Deshacer ejecuta la inversa guardada si nada posterior tocó los mismos registros y la inversa cumple las reglas del módulo. Hasta la 1c, `platform/authorization` lo deniega todo en producción y solo las pruebas ponen un autorizador programable.
+
 **`utils`:** entra solo lo que no sabe nada del negocio y usan al menos dos sitios, y un tema no importa otro sin motivo. Temas: `connection` (los estados conectando, listo e incompatible de los programas que hablan con la api) y `program` (puerto, direcciones, `/health` y parada de los tres programas); en la fase 1 llega `date-time`: fechas en la hora de la casa sobre `date-fns` y formatos sobre `Intl`. No lleva intérprete de lenguaje; el tiempo meteorológico va a su módulo.
 
 **Patrones de OpenClaw y Hermes** (P40): skills como carpetas; cada canal declara su formato; pruebas de escenario con canal falso y modelo falso; una prueba de que el prompt y las tools no cambian entre turnos; un `AGENTS.md` por carpeta con tamaño máximo; la «escalera» de dónde va una funcionalidad nueva (en `AGENTS.md`). No se adoptan tiendas de plugins, proveedores de sobra, «un agent por persona» ni manifiestos enormes.
@@ -116,6 +118,8 @@ El plan por fases, con lo que incluye cada una, cuándo se da por terminada y su
 ## 7. Abierto
 
 - **P49, el interruptor para apagar un módulo.** Se decide al revisar los módulos. Si existe, apaga el módulo entero: rutas, tools de Kira y tareas programadas.
+- **Llamadas entre acciones de módulos y acciones con efectos fuera de SQLite** ([ADR 0022](adr/0022-acciones.md)): se deciden con su primer caso real.
+- **Borrar datos privados** ([ADR 0022](adr/0022-acciones.md)): antes de admitir datos privados reales se define cómo afecta su borrado al registro de acciones, a las inversas y a las copias de seguridad.
 - **Se deciden en la fase 5:** la forma del agent, el vocabulario, los evals, los parámetros y el afinado de voz.
 
 ## Índice de ADR
@@ -143,3 +147,4 @@ El plan por fases, con lo que incluye cada una, cuándo se da por terminada y su
 | [0019](adr/0019-oxlint-y-oxfmt.md)                                      | Oxlint y Oxfmt para lint y formato                  |
 | [0020](adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md) | Composición de la API y comunicación entre procesos |
 | [0021](adr/0021-datos-de-los-modulos-y-migraciones.md)                  | Datos de los módulos y migraciones                  |
+| [0022](adr/0022-acciones.md)                                            | Acciones                                            |

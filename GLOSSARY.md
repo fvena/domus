@@ -20,6 +20,10 @@ _Evitar_: tipo de aparato, kiosco.
 Una operación que ejecuta Kira representando a un miembro o a una cuenta de aparato. Sus permisos efectivos son los del representado, rebajados por la tabla de delegación, y la auditoría guarda a los dos.
 _Evitar_: suplantar, actuar como.
 
+**Actor** (`actor`):
+Quién pide una acción: la cuenta representada (un miembro o la cuenta de aparato) y, si la lleva otro, la app autenticada que la lleva, como Kira.
+_Evitar_: usuario.
+
 ## Arquitectura
 
 **Módulo** (`module`):
@@ -27,8 +31,20 @@ Un área de la vida de la casa (listas, calendario, cocina…) con sus datos, su
 _Evitar_: extensión, plugin, funcionalidad.
 
 **Acción** (`action`):
-Una operación con nombre que cambia o lee datos de Domus, con entrada validada, autorizada siempre y registrada en la auditoría, la pida quien la pida.
+Una operación con nombre que lee o cambia los datos de un módulo, con su entrada validada y autorizada siempre, la pida quien la pida. Es el único acceso a esos datos que el módulo tiene en producción. Las migraciones, la preparación de las pruebas y lo que nunca es acción (contraseñas, PIN, llaves, emparejamiento) van por otro camino.
 _Evitar_: comando, endpoint.
+
+**Registro de acciones** (`action log`):
+La lista, en orden, de las escrituras confirmadas: qué acción, qué actor, qué registros tocó y, mientras dura su plazo, su entrada, su resultado y su inversa.
+_Evitar_: historial, log.
+
+**Clave de idempotencia** (`idempotencyKey`):
+El nombre que quien pide una escritura da a esa operación, para que repetirla no la ejecute dos veces.
+_Evitar_: id de petición.
+
+**Inversa** (`inverse`):
+La acción, con su entrada, que deshace una escritura concreta. La deja la propia escritura al ejecutarse; deshacer es ejecutar la inversa.
+_Evitar_: rollback, compensación.
 
 **Contrato** (`contract`):
 La cara pública de un módulo o de la plataforma: qué acciones ofrece y la forma de su entrada y su salida.

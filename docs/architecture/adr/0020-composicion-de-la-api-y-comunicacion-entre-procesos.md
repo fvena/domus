@@ -18,3 +18,4 @@ Precisa los ADR 0005 y 0017 sin sustituirlos: dice dónde vive la puerta, cómo 
 
 Fecha: 2026-11-11. Preguntas del grilling: P1–P18 de la revisión de arquitectura de la fase 0.
 Precisado por el ADR 0021: la lista de módulos ya no se genera en el build; la escribe `pnpm modules:generate`, se guarda en git y se comprueba. `createHttpHandler({ platform, modules })` los recibe sin publicar nada nuevo, y hasta la 1c las acciones de los módulos no se montan en el router HTTP.
+Precisado por el ADR 0022: toda acción, lectura o escritura, pasa por un solo recorrido en `platform/actions`; deshacer es una operación de la plataforma que despacha la inversa guardada, y la 1b no implementa llamadas entre acciones de módulos.
