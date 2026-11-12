@@ -29,6 +29,13 @@
 			"when": 1794486303640,
 			"tag": "0003_open_tarot",
 			"breakpoints": true
+		},
+		{
+			"idx": 4,
+			"version": "6",
+			"when": 1794487838537,
+			"tag": "0004_vengeful_the_leader",
+			"breakpoints": true
 		}
 	]
 }

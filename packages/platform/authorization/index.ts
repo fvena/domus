@@ -36,19 +36,24 @@ export type Role = "admin" | "member" | "device";
 export interface RequiredPermission {
 	readonly area: string;
 	readonly level: PermissionLevel;
+	/** The action asks for confirmation every time, whoever asks (GLOSSARY: confirmación pendiente). */
+	readonly alwaysConfirm?: boolean;
 }
 
 /**
- * What an action asks before it runs: the verified context, which action by its full name, the permission its
- * contract declares and its validated input. When the action is the inverse an undo runs, `undoes` carries
- * the context of the entry it undoes.
+ * What an action asks before it runs: the verified context, which action by its full name, whether it reads
+ * or writes, the permission its contract declares and its validated input. When the action is the inverse an
+ * undo runs, `undoes` carries the context of the entry it undoes. `confirmed` says the person has confirmed
+ * this very operation: the requirement to confirm counts as met, and only that one.
  */
 export interface AuthorizationRequest {
 	readonly context: VerifiedContext;
 	readonly action: string;
+	readonly kind: "read" | "write";
 	readonly permission: RequiredPermission;
 	readonly input: unknown;
 	readonly undoes?: UndoContext;
+	readonly confirmed?: boolean;
 	/**
 	 * For an operation of the platform on one account's own settings, such as its delegation table: that
 	 * account. Only the account itself reaches them, and the admin those of the device account.
@@ -83,8 +88,11 @@ export interface AccessView {
 	area(id: string): AreaPolicy | undefined;
 }
 
-/** Later tickets add asking for confirmation and for a step-up proof. */
-export type Decision = "allow" | "deny";
+/**
+ * Allow, deny, or ask the person to confirm first (a pending confirmation). Ticket 09 adds asking for a
+ * step-up proof.
+ */
+export type Decision = "allow" | "deny" | "confirm";
 
 export type Authorizer = (request: AuthorizationRequest) => Decision;
 
@@ -143,14 +151,29 @@ export function decide(request: AuthorizationRequest, view: AccessView): Decisio
 	if (subject !== undefined && !reachesSettingsOf(view, context.account, subject)) return "deny";
 	// 1. The represented account's permission in the area reaches the level asked for.
 	if (!reaches(grantOf(view, context.account, permission.area), permission.level)) return "deny";
+	// Each later step may deny or ask for confirmation; a denial wins, and confirmation is asked only once.
+	let ask = false;
 	// 2. Via Kira, the represented account's delegation for that area and level: `no` and an area without a
-	// row deny. `confirm` denies too until pending confirmations exist (ticket 08).
-	if (context.via !== undefined && delegationOf(view, context.account, permission) !== "yes")
-		return "deny";
+	// row deny, `confirm` asks the person.
+	if (context.via !== undefined) {
+		const delegated = delegationOf(view, context.account, permission);
+		if (delegated === "no") return "deny";
+		if (delegated === "confirm") ask = true;
+	}
 	// 3. Sensitive operations ask for a step-up proof (ticket 09).
-	// 4. An action that always asks for confirmation (ticket 08).
-	// 5. The shared device rule for `confirmOnSharedDevice` areas (ticket 08).
-	return "allow";
+	// 4. An action that always asks for confirmation.
+	if (permission.alwaysConfirm === true) ask = true;
+	// 5. The shared device rule: on a device signed in with the device account, reading an area that declares
+	// `confirmOnSharedDevice` asks a recognized member and is denied to the device account itself.
+	if (
+		request.kind === "read" &&
+		view.roleOf(context.deviceAccount) === "device" &&
+		view.area(permission.area)?.confirmOnSharedDevice === true
+	) {
+		if (context.account === context.deviceAccount) return "deny";
+		ask = true;
+	}
+	return ask && request.confirmed !== true ? "confirm" : "allow";
 }
 
 /** The production authorizer: {@link decide} over the view it is given. */
@@ -160,9 +183,15 @@ export function createAuthorizer(view: AccessView): Authorizer {
 
 /** Fails closed: only an explicit "allow" lets the action run; a denial, any other answer or a throw stop it. */
 export function isAllowed(authorizer: Authorizer, request: AuthorizationRequest): boolean {
+	return decisionOf(authorizer, request) === "allow";
+}
+
+/** The authorizer's decision, failing closed: a throw or any answer it does not know denies. */
+export function decisionOf(authorizer: Authorizer, request: AuthorizationRequest): Decision {
 	try {
-		return authorizer(request) === "allow";
+		const decision = authorizer(request);
+		return decision === "allow" || decision === "confirm" ? decision : "deny";
 	} catch {
-		return false;
+		return "deny";
 	}
 }

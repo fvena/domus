@@ -1,4 +1,4 @@
-import { createTestPlatform, TEST_START } from "@domus/test-utils";
+import { createTestPlatform, pendingFrom, TEST_START } from "@domus/test-utils";
 import { describe, expect, it } from "vitest";
 
 import probe from "../server";
@@ -119,9 +119,10 @@ describe("probe writes", () => {
 				{ idempotencyKey: "k2" },
 			),
 		).toEqual({ result: { id: 1, noteId: 1, body: "integral" }, entry: 2 });
-		expect(
+		const pending = pendingFrom(() =>
 			test.invoke(ana, "probe.deleteComment", { id: 1 }, { idempotencyKey: "k3" }),
-		).toEqual({
+		);
+		expect(test.confirm(test.context("ana"), pending)).toEqual({
 			result: { id: 1, noteId: 1, body: "integral" },
 			entry: 3,
 		});

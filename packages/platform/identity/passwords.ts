@@ -6,6 +6,7 @@
 import { hashPassword, verifyPassword } from "better-auth/crypto";
 import type Database from "better-sqlite3";
 
+import { endConfirmationsOf } from "../actions/confirmations";
 import type { AreaPolicy, Role } from "../authorization";
 import { PASSWORD_LENGTH } from "../contracts";
 import { insertAccount, setPasswordHash } from "./accounts";
@@ -67,7 +68,8 @@ export async function replacePassword(
 		if (keep !== undefined && !sessionExists(connection, account, keep))
 			throw new SessionGoneError();
 		setPasswordHash(connection, account, hash, now);
-		// Ticket 08 and 09: the account's pending confirmations and proofs end here too, in this transaction.
+		endConfirmationsOf(connection, account);
+		// Ticket 09: the account's step-up proofs end here too, in this transaction.
 		return connection
 			.prepare("DELETE FROM platform_session WHERE user_id = ? AND id IS NOT ?")
 			.run(account, keep ?? null).changes;

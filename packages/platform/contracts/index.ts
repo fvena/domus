@@ -48,8 +48,28 @@ export const listSessionsContract = oc.output(
 	),
 );
 
+/**
+ * What `CONFIRMATION_REQUIRED` carries: the id of the pending confirmation the operation waits as. Its status
+ * is 428; an action answers it when the person must confirm first (ADR 0023).
+ */
+export const confirmationRequiredData = z.object({ confirmation: z.string() });
+
+/** A pending confirmation by its id. */
+const pendingConfirmation = z.object({ id: z.string().min(1).max(64) });
+
+/**
+ * Confirming one of one's own pending confirmations from the app: its operation is evaluated again and runs
+ * once. Answers what the operation answers: a read's result, or a write's result and entry (or its
+ * acknowledgement). Another account's is not found; a conflict says when it expired or was already consumed.
+ */
+export const confirmContract = oc.input(pendingConfirmation).output(z.unknown());
+
+/** Rejecting one of one's own pending confirmations from the app, with the same rules as confirming. */
+export const rejectContract = oc.input(pendingConfirmation);
+
 export const platformContract = {
 	status: statusContract,
 	password: { change: changePasswordContract },
 	sessions: { list: listSessionsContract },
+	confirmations: { confirm: confirmContract, reject: rejectContract },
 };

@@ -9,6 +9,7 @@ import Database from "better-sqlite3";
 
 import { type Actions, type Clock, createActions } from "./actions";
 import { type Capture, installCapture } from "./actions/capture";
+import { type ConfirmationTimes, createConfirmations } from "./actions/confirmations";
 import { type ActionLog, createActionLog } from "./audit";
 import { type AreaPolicy, type Authorizer, createAuthorizer } from "./authorization";
 import { accessView, registeredAreas } from "./identity/access";
@@ -28,10 +29,22 @@ export interface PlatformOptions {
 	 * written, so a change applies only to new entries.
 	 */
 	readonly retention?: number;
+	/**
+	 * The deadlines of a new pending confirmation, in milliseconds: its voice window and its expiry,
+	 * {@link DEFAULT_CONFIRMATION_TIMES} for each one unset. Each pending confirmation keeps the absolute
+	 * instants it got when it was born, so a change applies only to new ones.
+	 */
+	readonly confirmation?: Partial<ConfirmationTimes>;
 }
 
 /** The retention of the action log's content unless one is given: 30 days. */
 const DEFAULT_RETENTION = 30 * 24 * 60 * 60 * 1000;
+
+/** A pending confirmation's voice window, 60 seconds, and its expiry, 24 hours, unless others are given. */
+const DEFAULT_CONFIRMATION_TIMES: ConfirmationTimes = {
+	window: 60 * 1000,
+	expiry: 24 * 60 * 60 * 1000,
+};
 
 export interface Platform {
 	/** How many migrations this start applied, for the log of `apps/api`. */
@@ -72,7 +85,7 @@ export function createPlatform(options: PlatformOptions): Platform {
 
 /** createPlatform with a given runtime. Inside platform only; the testing entry hands test-utils its clock part. */
 export function openPlatform(
-	{ databaseFile, modules, retention = DEFAULT_RETENTION }: PlatformOptions,
+	{ databaseFile, modules, retention = DEFAULT_RETENTION, confirmation = {} }: PlatformOptions,
 	{ clock, authorizer }: PlatformRuntime,
 ): Platform {
 	if (databaseFile !== IN_MEMORY && !isAbsolute(databaseFile)) {
@@ -85,6 +98,12 @@ export function openPlatform(
 			`retention must be a positive whole number of milliseconds, got ${String(retention)}`,
 		);
 	}
+	const confirmationTimes: ConfirmationTimes = { ...DEFAULT_CONFIRMATION_TIMES, ...confirmation };
+	for (const [name, value] of Object.entries(confirmationTimes))
+		if (!Number.isSafeInteger(value) || value <= 0)
+			throw new Error(
+				`confirmation.${name} must be a positive whole number of milliseconds, got ${String(value)}`,
+			);
 	checkModules(modules);
 
 	const areas = registeredAreas(modules);
@@ -129,6 +148,7 @@ export function openPlatform(
 		clock,
 		actionLog,
 		retention,
+		confirmations: createConfirmations(db, confirmationTimes),
 	});
 	internals.set(platform, {
 		db,

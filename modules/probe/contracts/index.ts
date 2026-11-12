@@ -68,8 +68,8 @@ export const probeContract = {
 		.input(z.object({ noteId: recordId, body: z.string().min(1) }))
 		.output(comment)
 		.errors({ NOTE_NOT_FOUND }),
-	/** Deletes a comment and returns it. It cannot be undone. */
-	deleteComment: writeAction({ undoable: false, level: "write" })
+	/** Deletes a comment and returns it. It cannot be undone, so it always asks for confirmation first. */
+	deleteComment: writeAction({ undoable: false, level: "write", alwaysConfirm: true })
 		.input(z.object({ id: recordId }))
 		.output(comment)
 		.errors({ COMMENT_NOT_FOUND: { message: "There is no comment with this id." } }),

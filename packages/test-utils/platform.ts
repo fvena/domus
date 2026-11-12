@@ -12,6 +12,7 @@ import type {
 import type { WriteActionMeta } from "@domus/module-sdk/contracts";
 import { createHttpHandler, type HttpHandler, type Platform } from "@domus/platform";
 import {
+	confirmPending,
 	createPlatformWithClock,
 	type Delegated,
 	type DelegationTable,
@@ -29,6 +30,7 @@ import {
 	preparePassword,
 	readDelegationOf,
 	readLog,
+	rejectPending,
 	syntheticContext,
 	type Acknowledgement,
 	undoEntry,
@@ -100,6 +102,8 @@ export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	readonly file?: true | string;
 	/** How long the content of a new log entry stays usable, in milliseconds. Unset: the platform's 30 days. */
 	readonly retention?: number;
+	/** The voice window and the expiry of a new pending confirmation, in milliseconds. Unset: 60 s and 24 h. */
+	readonly confirmation?: { readonly window?: number; readonly expiry?: number };
 }
 
 /** The platform clock of a test: it moves only when the test moves it. */
@@ -180,6 +184,15 @@ export interface TestPlatform<
 	 */
 	undo(context: VerifiedContext, entry: number, options: WriteOptions): WriteOutcome;
 	/**
+	 * Confirms the pending confirmation `id` through the platform's real operation: its operation is evaluated
+	 * again and runs once. Returns a read's result, or a write's result and entry (or acknowledgement). Throws
+	 * `NOT_FOUND` for one out of reach, and a `CONFLICT` with its reason when its window closed, it expired or
+	 * it was already consumed or rejected.
+	 */
+	confirm(context: VerifiedContext, id: string): unknown;
+	/** Rejects the pending confirmation `id` through the platform's real operation, with the same rules. */
+	reject(context: VerifiedContext, id: string): void;
+	/**
 	 * Reads the delegation table of `account` through the platform's real operation: each registered area with
 	 * its three levels, `no` where there is no row. Each person reads their own and the admin the device
 	 * account's; anything else is thrown as `FORBIDDEN`.
@@ -211,6 +224,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 	modules,
 	file,
 	retention,
+	confirmation,
 }: TestPlatformOptions<TModules>): TestPlatform<TModules> {
 	let tempDir: string | undefined;
 	let databaseFile = file ?? ":memory:";
@@ -232,7 +246,10 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 
 	let platform: Platform;
 	try {
-		platform = createPlatformWithClock({ databaseFile, modules, retention }, () => now);
+		platform = createPlatformWithClock(
+			{ databaseFile, modules, retention, confirmation },
+			() => now,
+		);
 	} catch (error) {
 		if (tempDir) rmSync(tempDir, { recursive: true, force: true });
 		throw error;
@@ -291,9 +308,32 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 			}) as never,
 		undo: (context, entry, { idempotencyKey }) =>
 			undoEntry(platform, { context, entry, idempotencyKey }),
+		confirm: (context, id) => confirmPending(platform, { context, confirmation: id }),
+		reject: (context, id) => {
+			rejectPending(platform, { context, confirmation: id });
+		},
 		delegation: (context, account) => readDelegationOf(platform, context, account),
 		log: () => readLog(platform),
 		close,
 		[Symbol.asyncDispose]: () => Promise.resolve(close()),
 	};
+}
+
+/**
+ * The id of the pending confirmation that `call` answers with: it must throw `CONFIRMATION_REQUIRED`, and
+ * anything else fails the test.
+ */
+export function pendingFrom(call: () => unknown): string {
+	try {
+		call();
+	} catch (error) {
+		const { code, data } = (error ?? {}) as {
+			code?: unknown;
+			data?: { confirmation?: unknown };
+		};
+		if (code === "CONFIRMATION_REQUIRED" && typeof data?.confirmation === "string")
+			return data.confirmation;
+		throw error;
+	}
+	throw new Error("expected CONFIRMATION_REQUIRED, but the call went through");
 }

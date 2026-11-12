@@ -98,6 +98,7 @@ export function readDelegation(
 	const allowed = isAllowed(authorizer, {
 		context,
 		action: READ_DELEGATION,
+		kind: "read",
 		permission: { area: PLATFORM_ID, level: "read" },
 		input: { account },
 		subject: account,

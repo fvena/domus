@@ -316,6 +316,7 @@ describe("a write", () => {
 		const request = {
 			context: ana,
 			action: "ledger.add",
+			kind: "write",
 			permission: { area: "ledger", level: "write" },
 			input: {},
 		};

@@ -17,6 +17,8 @@ import {
 const AREAS: Readonly<Record<string, AreaPolicy>> = {
 	notes: policy({}),
 	health: policy({ alwaysPrivate: true }),
+	vitals: policy({ alwaysPrivate: true, confirmOnSharedDevice: true }),
+	shared: policy({ confirmOnSharedDevice: true }),
 };
 
 /** An area's policy: the defaults of an area that declares nothing, with `fields` over them. */
@@ -63,6 +65,7 @@ function request(
 			identity: "password",
 		}),
 		action: `${area}.something`,
+		kind: level === "read" ? "read" : "write",
 		permission: { area, level },
 		input: undefined,
 	};
@@ -154,14 +157,30 @@ describe("decide via Kira", () => {
 		expect(reached(view, "ana", "notes", "kira")).toEqual([]);
 	});
 
-	it("denies confirm until confirmations exist", () => {
+	it("asks for confirmation on a level whose delegation is confirm, and allows once it is confirmed", () => {
 		const view = viewOf(
 			{ ana: "member" },
 			{},
 			{ "ana/notes/read": "yes", "ana/notes/write": "confirm" },
 		);
+		const writing = request("ana", "notes", "write", "kira");
 
 		expect(reached(view, "ana", "notes", "kira")).toEqual(["read"]);
+		expect(decide(writing, view)).toBe("confirm");
+		expect(decide({ ...writing, confirmed: true }, view)).toBe("allow");
+	});
+
+	it("still denies on confirm what the permission denies", () => {
+		const view = viewOf(
+			{ ana: "member" },
+			{ "ana/notes": "read" },
+			{ "ana/notes/write": "confirm" },
+		);
+
+		expect(decide(request("ana", "notes", "write", "kira"), view)).toBe("deny");
+		expect(decide({ ...request("ana", "notes", "write", "kira"), confirmed: true }, view)).toBe(
+			"deny",
+		);
 	});
 
 	it("takes an area or a level without a row as no", () => {
@@ -206,6 +225,71 @@ describe("decide via Kira", () => {
 		);
 
 		expect(reached(view, "ana", "notes")).toEqual(["read", "write"]);
+	});
+});
+
+describe("decide on an action that always asks for confirmation", () => {
+	const always = (account: string, via?: string): AuthorizationRequest => {
+		const base = request(account, "notes", "write", via);
+		return { ...base, permission: { ...base.permission, alwaysConfirm: true } };
+	};
+
+	it("asks once, with or without via, and one confirmation answers it", () => {
+		const view = viewOf({ ana: "member" }, {}, { "ana/notes/write": "yes" });
+
+		expect(decide(always("ana"), view)).toBe("confirm");
+		expect(decide(always("ana", "kira"), view)).toBe("confirm");
+		expect(decide({ ...always("ana"), confirmed: true }, view)).toBe("allow");
+	});
+
+	it("asks only once when the delegation says confirm too", () => {
+		const view = viewOf({ ana: "member" }, {}, { "ana/notes/write": "confirm" });
+
+		expect(decide(always("ana", "kira"), view)).toBe("confirm");
+		expect(decide({ ...always("ana", "kira"), confirmed: true }, view)).toBe("allow");
+	});
+
+	it("denies before asking when the delegation says no", () => {
+		const view = viewOf({ ana: "member" }, {}, { "ana/notes/write": "no" });
+
+		expect(decide(always("ana", "kira"), view)).toBe("deny");
+	});
+});
+
+describe("decide on a shared device", () => {
+	const view = viewOf({ ana: "member", kitchen: "device" }, { "kitchen/vitals": "read" });
+	/** A read on the kitchen screen: by the device account itself, or by a member recognized by voice. */
+	const onKitchen = (account: string, area: string, level: PermissionLevel = "read") => {
+		const base = request(account, area, level);
+		return {
+			...base,
+			context: sealContext({
+				...base.context,
+				deviceAccount: "kitchen",
+				identity: account === "kitchen" ? "device" : "voice",
+			}),
+		};
+	};
+
+	it("asks a recognized member for confirmation to read a confirmOnSharedDevice area", () => {
+		expect(decide(onKitchen("ana", "vitals"), view)).toBe("confirm");
+		expect(decide({ ...onKitchen("ana", "vitals"), confirmed: true }, view)).toBe("allow");
+	});
+
+	it("denies it without a recognized member, even with a row that grants reading", () => {
+		expect(decide(onKitchen("kitchen", "vitals"), view)).toBe("deny");
+		expect(decide(onKitchen("kitchen", "shared"), view)).toBe("deny");
+		expect(decide({ ...onKitchen("kitchen", "vitals"), confirmed: true }, view)).toBe("deny");
+	});
+
+	it("does not apply to an always private area without the rule, nor off a shared device", () => {
+		expect(decide(onKitchen("ana", "health"), view)).toBe("allow");
+		expect(decide(onKitchen("ana", "notes"), view)).toBe("allow");
+		expect(decide(request("ana", "vitals", "read"), view)).toBe("allow");
+	});
+
+	it("applies to reading, not to writing", () => {
+		expect(decide(onKitchen("ana", "vitals", "write"), view)).toBe("allow");
 	});
 });
 
@@ -258,5 +342,13 @@ describe("the production authorizer", () => {
 
 		expect(isAllowed(authorizer, request("ana", "notes", "write"))).toBe(true);
 		expect(isAllowed(authorizer, request("ana", "notes", "manage"))).toBe(false);
+	});
+
+	it("does not take asking for confirmation as allowing", () => {
+		const authorizer = createAuthorizer(
+			viewOf({ ana: "member" }, {}, { "ana/notes/write": "confirm" }),
+		);
+
+		expect(isAllowed(authorizer, request("ana", "notes", "write", "kira"))).toBe(false);
 	});
 });

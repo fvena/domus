@@ -5,7 +5,10 @@
 // change (ADR 0023), and its entry in the action log. Any failure inside rolls back both the change and the
 // entry. An undo takes the same path with the inverse its entry
 // stored: one transaction for the checks, the inverse, its one new entry and the undone-by link. Neither keeps
-// its result: repeating one under the same key answers an acknowledgement without content (ADR 0023).
+// its result: repeating one under the same key answers an acknowledgement without content (ADR 0023). When
+// authorization asks for confirmation, nothing runs: the operation waits as a pending confirmation, stored in a
+// transaction of its own, and the answer is `CONFIRMATION_REQUIRED` with its id. Confirming it evaluates it all
+// again and runs it on this same path, once (ADR 0023).
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
@@ -33,15 +36,22 @@ import {
 	type AreaPolicy,
 	type AuthorizationRequest,
 	type Authorizer,
-	isAllowed,
+	decisionOf,
 	isVerified,
 	newOwnership,
 	type RequiredPermission,
+	sealContext,
 	type VerifiedContext,
 	visibleTo,
 } from "../authorization";
 import { checkTransition } from "../authorization/writes";
 import type { Capture, CapturedTransition } from "./capture";
+import {
+	type ConfirmationTimes,
+	type Confirmations,
+	type NewPending,
+	type PendingConfirmation,
+} from "./confirmations";
 
 /** The platform clock: instants in milliseconds since the epoch (ADR 0021). */
 export type Clock = () => number;
@@ -88,6 +98,26 @@ export interface Actions {
 	 * like a write, or a conflict or a "cannot be undone" with its reason.
 	 */
 	undo(call: UndoCall): WriteOutcome;
+	/**
+	 * Confirms a pending confirmation of the account that asks and runs its operation once, evaluated again
+	 * with the account, via and delegation it was born with. Returns what the operation would have: a read's
+	 * result, which is never kept, or a write's {@link WriteOutcome}. Throws "not found" for another account's,
+	 * a conflict when its window closed, it expired or it was already consumed or rejected, or what the
+	 * operation throws.
+	 */
+	confirm(call: ConfirmationCall): unknown;
+	/** Rejects a pending confirmation, with the same rules of who may as {@link Actions.confirm}. */
+	reject(call: ConfirmationCall): void;
+}
+
+/**
+ * Confirming or rejecting a pending confirmation: who asks, through which channel, and its id. By the app, the
+ * same account without via, from any of its sessions; in context, the same account on the same device in the
+ * same conversation while the window is open.
+ */
+export interface ConfirmationCall {
+	readonly context: VerifiedContext;
+	readonly confirmation: string;
 }
 
 /** An undo: the verified context of who asks, the number of the entry to undo and the caller's own idempotency key. */
@@ -111,7 +141,11 @@ export interface ActionsOptions {
 	readonly actionLog: ActionLog;
 	/** How long the content of a new entry (input, inverse) stays usable, in milliseconds. */
 	readonly retention: number;
+	/** Where pending confirmations wait. */
+	readonly confirmations: Confirmations;
 }
+
+export type { ConfirmationTimes };
 
 /** One action as its contract declared it, read once at registration. */
 interface RegisteredAction {
@@ -144,6 +178,7 @@ export function createActions({
 	clock,
 	actionLog,
 	retention,
+	confirmations,
 }: ActionsOptions): Actions {
 	const registry = new Map<string, RegisteredAction>();
 	for (const module of modules) {
@@ -161,6 +196,7 @@ export function createActions({
 				permission: {
 					area: meta.permission.area ?? module.id,
 					level: meta.permission.level,
+					...(meta.permission.alwaysConfirm === true ? { alwaysConfirm: true } : {}),
 				},
 				inputSchema,
 				outputSchema,
@@ -175,6 +211,8 @@ export function createActions({
 	return {
 		invoke: (call) => guarded(() => invoke(call)),
 		undo: (call) => guarded(() => undo(call)),
+		confirm: (call) => guarded(() => confirm(call)),
+		reject: (call) => guarded(() => reject(call)),
 	};
 
 	function invoke({ context, action, input, idempotencyKey }: ActionCall): unknown {
@@ -195,9 +233,42 @@ export function createActions({
 			: read(found, context, action, validated.value);
 	}
 
-	/** Asks authorization, which fails closed: anything but an explicit "allow" ends forbidden. */
+	/**
+	 * Asks authorization, which fails closed: a denial, any other answer or a throw end forbidden. Asking for
+	 * confirmation throws {@link ConfirmationNeeded}, which the caller turns into a pending confirmation once
+	 * whatever it opened rolled back.
+	 */
 	function authorize(request: AuthorizationRequest): void {
-		if (!isAllowed(authorizer, request)) throw new ORPCError("FORBIDDEN");
+		const decision = decisionOf(authorizer, request);
+		if (decision === "confirm") throw new ConfirmationNeeded();
+		if (decision !== "allow") throw new ORPCError("FORBIDDEN");
+	}
+
+	/**
+	 * Runs `operation`; when authorization asked for confirmation, stores what waits in a transaction of its
+	 * own, or finds the one the same request left before, and answers `CONFIRMATION_REQUIRED` with its id.
+	 */
+	function orPending<T>(pending: NewPending, operation: () => T): T {
+		try {
+			return operation();
+		} catch (error) {
+			if (!(error instanceof ConfirmationNeeded)) throw error;
+		}
+		const id = connection.transaction(() => {
+			const { kind, origin, fingerprint, key } = pending;
+			const earlier =
+				kind === "read" || key === undefined
+					? confirmations.findRead(origin, fingerprint, clock())
+					: confirmations.findWrite(actorOf(origin), key);
+			if (!earlier) return confirmations.create(pending, clock());
+			if (earlier.fingerprint !== fingerprint) throw conflict("key-reused");
+			return earlier.id;
+		})();
+		throw new ORPCError("CONFIRMATION_REQUIRED", {
+			status: 428,
+			message: "the person must confirm this operation first",
+			data: { confirmation: id },
+		});
 	}
 
 	/** Runs a handler; only an error its contract declares leaves as it is. */
@@ -238,8 +309,25 @@ export function createActions({
 		context: VerifiedContext,
 		action: string,
 		input: unknown,
+		confirmed = false,
 	): unknown {
-		authorize({ context, action, permission: found.permission, input });
+		const request: AuthorizationRequest = {
+			context,
+			action,
+			kind: "read",
+			permission: found.permission,
+			input,
+			...(confirmed ? { confirmed } : {}),
+		};
+		orPending(
+			{
+				kind: "read",
+				operation: { action, input },
+				fingerprint: operationFingerprint(action, input),
+				origin: context,
+			},
+			() => authorize(request),
+		);
 
 		let result: unknown;
 		connection.pragma("query_only = ON");
@@ -260,30 +348,50 @@ export function createActions({
 		action: string,
 		input: unknown,
 		idempotencyKey: string | undefined,
+		confirmed = false,
 	): WriteOutcome {
 		const actor = actorOf(context);
-		const fingerprint = writeFingerprint(action, input);
+		const fingerprint = operationFingerprint(action, input);
 		const request: AuthorizationRequest = {
 			context,
 			action,
+			kind: "write",
 			permission: found.permission,
 			input,
+			...(confirmed ? { confirmed } : {}),
 		};
 
-		return once(
-			actor,
-			idempotencyKey,
-			fingerprint,
-			() => request,
-			(key) => {
-				authorize(request);
-				return perform(found, actor, input, { idempotencyKey: key, fingerprint });
+		return orPending(
+			{
+				kind: "write",
+				operation: { action, input },
+				fingerprint,
+				...(idempotencyKey === undefined ? {} : { key: idempotencyKey }),
+				origin: context,
 			},
+			() =>
+				once(
+					actor,
+					idempotencyKey,
+					fingerprint,
+					() => request,
+					(key) => {
+						authorize(request);
+						return perform(found, actor, input, { idempotencyKey: key, fingerprint });
+					},
+				),
 		);
 	}
 
-	function undo({ context, entry: number, idempotencyKey }: UndoCall): WriteOutcome {
-		if (!isVerified(context)) throw internalError();
+	function undo(call: UndoCall): WriteOutcome {
+		if (!isVerified(call.context)) throw internalError();
+		return undoEntry(call);
+	}
+
+	function undoEntry(
+		{ context, entry: number, idempotencyKey }: UndoCall,
+		confirmed = false,
+	): WriteOutcome {
 		const actor = actorOf(context);
 		const fingerprint = undoFingerprint(number);
 
@@ -294,49 +402,150 @@ export function createActions({
 			return {
 				context,
 				action: inverse.action,
+				kind: "write",
 				permission: target.permission,
 				input: inverse.input,
 				undoes: { entry: original.entry, action: original.action, actor: original.actor },
+				...(confirmed ? { confirmed } : {}),
 			};
 		};
 
-		return once(
-			actor,
-			idempotencyKey,
-			fingerprint,
-			// A repeated undo is authorized with the inverse its own entry ran, never with the content of the entry
-			// it undid, whose annotation gives only the context. The inverse's input is its own entry's content,
-			// so once that expired the request goes without it.
-			(own) => {
-				const original = actionLog.find(number);
-				if (!original) throw internalError();
-				return requestFor(original, {
-					action: own.action,
-					input: isExpired(own.expiresAt) ? undefined : own.input,
-				});
+		return orPending(
+			{
+				kind: "write",
+				operation: { undo: number },
+				fingerprint,
+				key: idempotencyKey,
+				origin: context,
 			},
-			(key) => {
-				const original = actionLog.find(number);
-				if (!original) throw new ORPCError("NOT_FOUND", { message: `no entry ${number}` });
-				if (original.undoneBy !== null) throw conflict("already-undone");
-				if (!original.inverse) throw notUndoable("irreversible");
-				if (isExpired(original.expiresAt)) throw notUndoable("expired");
-				if (actionLog.touchedLater(number)) throw conflict("changed-since");
-
-				// The stored inverse is validated once, against the current contract; the same validated input is
-				// authorized and runs inside this operation, with its module's rules, without another idempotent
-				// operation or another transaction.
-				const { stored, target, input } = checkInverse(original.module, original.inverse);
-				authorize(requestFor(original, { action: stored.action, input }));
-				const receipt = perform(target, actor, input, {
-					idempotencyKey: key,
+			() =>
+				once(
+					actor,
+					idempotencyKey,
 					fingerprint,
-					undoes: number,
-				});
-				actionLog.markUndone(number, receipt.entry);
-				return receipt;
-			},
+					// A repeated undo is authorized with the inverse its own entry ran, never with the content of the entry
+					// it undid, whose annotation gives only the context. The inverse's input is its own entry's content,
+					// so once that expired the request goes without it.
+					(own) => {
+						const original = actionLog.find(number);
+						if (!original) throw internalError();
+						return requestFor(original, {
+							action: own.action,
+							input: isExpired(own.expiresAt) ? undefined : own.input,
+						});
+					},
+					(key) => {
+						const original = actionLog.find(number);
+						if (!original)
+							throw new ORPCError("NOT_FOUND", { message: `no entry ${number}` });
+						if (original.undoneBy !== null) throw conflict("already-undone");
+						if (!original.inverse) throw notUndoable("irreversible");
+						if (isExpired(original.expiresAt)) throw notUndoable("expired");
+						if (actionLog.touchedLater(number)) throw conflict("changed-since");
+
+						// The stored inverse is validated once, against the current contract; the same validated input is
+						// authorized and runs inside this operation, with its module's rules, without another idempotent
+						// operation or another transaction.
+						const { stored, target, input } = checkInverse(
+							original.module,
+							original.inverse,
+						);
+						authorize(requestFor(original, { action: stored.action, input }));
+						const receipt = perform(target, actor, input, {
+							idempotencyKey: key,
+							fingerprint,
+							undoes: number,
+						});
+						actionLog.markUndone(number, receipt.entry);
+						return receipt;
+					},
+				),
 		);
+	}
+
+	/**
+	 * Confirms a pending confirmation and runs its operation on the path of the actions, in one transaction
+	 * with consuming it: a write logs its entry with the key it was asked with and the confirmation links to
+	 * it; a read runs with `query_only` and only then, outside that stretch, is the confirmation consumed. It is
+	 * evaluated again with the account, via and delegation of its origin and the rest of the context of now; the
+	 * requirement to confirm counts as met, and nothing else does.
+	 */
+	function confirm({ context, confirmation }: ConfirmationCall): unknown {
+		if (!isVerified(context)) throw internalError();
+		return connection.transaction(() => {
+			const pending = reachable(context, confirmation);
+			const asked = sealContext({
+				...context,
+				account: pending.origin.account,
+				...(pending.origin.via === undefined
+					? { via: undefined }
+					: { via: pending.origin.via }),
+			});
+			const { operation } = pending;
+			if ("undo" in operation) {
+				const outcome = undoEntry(
+					{ context: asked, entry: operation.undo, idempotencyKey: pending.key ?? "" },
+					true,
+				);
+				confirmations.consume(pending.id, outcome.entry);
+				return outcome;
+			}
+			const found = registry.get(operation.action);
+			if (!found || found.kind !== pending.kind) throw internalError();
+			if (found.kind === "read") {
+				const result = read(found, asked, operation.action, operation.input, true);
+				confirmations.consume(pending.id, undefined);
+				return result;
+			}
+			const outcome = write(
+				found,
+				asked,
+				operation.action,
+				operation.input,
+				pending.key,
+				true,
+			);
+			confirmations.consume(pending.id, outcome.entry);
+			return outcome;
+		})();
+	}
+
+	function reject({ context, confirmation }: ConfirmationCall): void {
+		if (!isVerified(context)) throw internalError();
+		connection.transaction(() => {
+			confirmations.reject(reachable(context, confirmation).id);
+		})();
+	}
+
+	/**
+	 * The pending confirmation `context` may answer, still waiting. Another account's, or one out of reach of
+	 * this channel, is not found: by the app, only the account itself without via; in context, only the same
+	 * device and the same, not empty, conversation.
+	 */
+	function reachable(context: VerifiedContext, id: string): PendingConfirmation {
+		const pending = confirmations.find(id);
+		const { origin } = pending ?? {};
+		const inReach =
+			pending !== undefined &&
+			origin !== undefined &&
+			pending.account === context.account &&
+			(context.channel === "app"
+				? context.via === undefined
+				: context.device === origin.device &&
+					context.conversation !== undefined &&
+					context.conversation !== "" &&
+					context.conversation === origin.conversation);
+		if (!inReach || pending === undefined)
+			throw new ORPCError("NOT_FOUND", { message: `no pending confirmation "${id}"` });
+
+		const now = clock();
+		if (pending.state === "consumed" || pending.state === "rejected")
+			throw conflict("confirmation-consumed");
+		if (pending.state === "ended" || now >= pending.expiresAt)
+			throw conflict("confirmation-expired");
+		if (context.channel === "contexto" && now >= pending.windowClosesAt)
+			throw conflict("window-closed");
+		return pending;
 	}
 
 	/**
@@ -359,12 +568,19 @@ export function createActions({
 
 		return connection.transaction((): WriteOutcome => {
 			const keyed = actionLog.findByKey(actor, idempotencyKey);
-			if (!keyed) return fresh(idempotencyKey);
+			if (!keyed) {
+				// A key a pending confirmation holds names that operation and no other.
+				const waiting = confirmations.findWrite(actor, idempotencyKey);
+				if (waiting && waiting.fingerprint !== fingerprint) throw conflict("key-reused");
+				return fresh(idempotencyKey);
+			}
 			if (keyed.fingerprint !== fingerprint) throw conflict("key-reused");
 
 			const earlier = actionLog.find(keyed.entry);
 			if (!earlier) throw internalError();
-			authorize(repeated(earlier));
+			// An acknowledgement runs nothing and shows nothing: being asked to confirm does not stop it.
+			if (decisionOf(authorizer, repeated(earlier)) === "deny")
+				throw new ORPCError("FORBIDDEN");
 			return { entry: earlier.entry, repeated: true };
 		})();
 	}
@@ -529,8 +745,17 @@ function guarded<T>(operation: () => T): T {
 	}
 }
 
-/** The reasons of a conflict the platform answers (ADR 0022). */
-type ConflictReason = "key-reused" | "already-undone" | "changed-since";
+/** The reasons of a conflict the platform answers (ADR 0022, ADR 0023). */
+type ConflictReason =
+	| "key-reused"
+	| "already-undone"
+	| "changed-since"
+	| "window-closed"
+	| "confirmation-expired"
+	| "confirmation-consumed";
+
+/** Authorization asked for confirmation: whatever was opened rolls back and the operation waits. */
+class ConfirmationNeeded extends Error {}
 
 /** A conflict, with its reason in `data.reason`. */
 function conflict(reason: ConflictReason) {
@@ -582,10 +807,10 @@ function undoFingerprint(entry: number): string {
 }
 
 /**
- * The fingerprint of a write: its full name and the SHA-256 of its validated input as canonical JSON (keys
- * sorted), so the order of the properties does not change it.
+ * The fingerprint of an action, a write or a read waiting for confirmation: its full name and the SHA-256 of
+ * its validated input as canonical JSON (keys sorted), so the order of the properties does not change it.
  */
-function writeFingerprint(action: string, input: unknown): string {
+function operationFingerprint(action: string, input: unknown): string {
 	const hash = createHash("sha256")
 		.update(JSON.stringify(canonical(input)) ?? "")
 		.digest("hex");

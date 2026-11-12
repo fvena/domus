@@ -184,6 +184,7 @@ describe("authorization", () => {
 			{
 				context: ana,
 				action: "notes.context",
+				kind: "read",
 				permission: { area: "notes", level: "read" },
 				input: { word: "pan" },
 			},

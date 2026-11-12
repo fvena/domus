@@ -1,4 +1,4 @@
-import { createTestPlatform } from "@domus/test-utils";
+import { createTestPlatform, pendingFrom } from "@domus/test-utils";
 import { describe, expect, it } from "vitest";
 
 import probe from "../server";
@@ -37,14 +37,41 @@ describe("probe via Kira, with the delegation table", () => {
 		]);
 	});
 
-	it("denies confirm for now: asking the person comes with pending confirmations", async () => {
+	it("asks for confirmation on confirm, reads at once on yes in the same area, and runs once confirmed from the app", async () => {
 		await using test = createTestPlatform({ modules: [probe] });
-		const ana = test.member("ana", { via: "kira" });
+		const kira = test.member("ana", { via: "kira" });
 		test.prepare.delegation("ana", "probe", "write", "confirm");
 
-		expect(() =>
-			test.invoke(ana, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" }),
-		).toThrow(forbidden);
+		const pending = pendingFrom(() =>
+			test.invoke(kira, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" }),
+		);
+		expect(test.invoke(kira, "probe.listNotes")).toEqual([]);
+		expect(test.log()).toEqual([]);
+
+		expect(test.confirm(test.context("ana"), pending)).toEqual({
+			result: { id: 1, body: "regar" },
+			entry: 1,
+		});
+		expect(test.invoke(kira, "probe.listNotes")).toEqual([{ id: 1, body: "regar" }]);
+		// Born via Kira, it is logged via Kira, under the key Kira gave.
+		expect(test.log()).toMatchObject([{ actor: { account: "ana", via: "kira" } }]);
+	});
+
+	it("applies the delegation of its origin when it is confirmed from the app: taking it away denies", async () => {
+		await using test = createTestPlatform({ modules: [probe] });
+		const kira = test.member("ana", { via: "kira" });
+		test.prepare.delegation("ana", "probe", "write", "confirm");
+		const pending = pendingFrom(() =>
+			test.invoke(kira, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" }),
+		);
+
+		test.prepare.delegation("ana", "probe", "write", "no");
+
+		expect(() => test.confirm(test.context("ana"), pending)).toThrow(forbidden);
+		expect(test.log()).toEqual([]);
+		// The denial leaves it waiting: giving the delegation back lets it run.
+		test.prepare.delegation("ana", "probe", "write", "confirm");
+		expect(test.confirm(test.context("ana"), pending)).toMatchObject({ entry: 1 });
 	});
 
 	it("never goes past the account's permission, whatever it delegates", async () => {

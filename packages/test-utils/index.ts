@@ -3,6 +3,7 @@ export { createTestBrowser, type TestBrowser } from "./browser";
 export {
 	type ContextOptions,
 	createTestPlatform,
+	pendingFrom,
 	type PreparedAccount,
 	TEST_ORIGIN,
 	TEST_START,

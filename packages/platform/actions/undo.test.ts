@@ -99,6 +99,7 @@ describe("an undo", () => {
 		const request = {
 			context: ana,
 			action: "shelf.remove",
+			kind: "write",
 			permission: { area: "shelf", level: "write" },
 			input: { id: 1 },
 			undoes: { entry: 1, action: "shelf.add", actor: { account: "ana", via: "kira" } },
@@ -138,6 +139,7 @@ describe("an undo", () => {
 			{
 				context: ana,
 				action: "shelf.remove",
+				kind: "write",
 				permission: { area: "shelf", level: "write" },
 				input: undefined,
 				undoes: { entry: 1, action: "shelf.add", actor: { account: "ana", via: "kira" } },

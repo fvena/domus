@@ -2,7 +2,7 @@
 // the predicate hides does not exist, on every query form probe offers: one record, a list, a count, a search
 // and a join of notes with comments, each table with its own predicate.
 import { eq } from "@domus/module-sdk/db";
-import { createTestPlatform } from "@domus/test-utils";
+import { createTestPlatform, pendingFrom } from "@domus/test-utils";
 import { describe, expect, it } from "vitest";
 
 import probe from "../server";
@@ -133,9 +133,12 @@ describe("probe visibility on reads", () => {
 		const { test, ana } = household();
 		await using _ = test;
 
-		expect(() =>
+		const pending = pendingFrom(() =>
 			test.invoke(ana, "probe.deleteComment", { id: 3 }, { idempotencyKey: "k1" }),
-		).toThrow(expect.objectContaining({ code: "COMMENT_NOT_FOUND" }));
+		);
+		expect(() => test.confirm(ana, pending)).toThrow(
+			expect.objectContaining({ code: "COMMENT_NOT_FOUND" }),
+		);
 	});
 });
 
@@ -217,9 +220,10 @@ describe("probe visibility on writes", () => {
 		expect(() =>
 			test.invoke(ana, "probe.editNote", { id: 4, body: "otro" }, { idempotencyKey: "k1" }),
 		).toThrow(forbidden);
-		expect(() =>
+		const pending = pendingFrom(() =>
 			test.invoke(ana, "probe.deleteComment", { id: 4 }, { idempotencyKey: "k2" }),
-		).toThrow(forbidden);
+		);
+		expect(() => test.confirm(ana, pending)).toThrow(forbidden);
 		expect(test.invoke(ana, "probe.getNote", { id: 4 })).toEqual({
 			id: 4,
 			body: "comprar leche",

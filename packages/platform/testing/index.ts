@@ -6,7 +6,7 @@
 // other importer out, production code of platform included; the main entry offers none of it.
 import { hashPassword } from "better-auth/crypto";
 
-import type { ActionCall, Clock, UndoCall, WriteOutcome } from "../actions";
+import type { ActionCall, Clock, ConfirmationCall, UndoCall, WriteOutcome } from "../actions";
 import type { LogEntry } from "../audit";
 import {
 	type Delegated,
@@ -63,6 +63,16 @@ export function invokeAction(platform: Platform, call: ActionCall): unknown {
 /** Undoes an entry through the platform's one path: its stored inverse, the checks and one new log entry. */
 export function undoEntry(platform: Platform, call: UndoCall): WriteOutcome {
 	return actionsOf(platform).undo(call);
+}
+
+/** Confirms a pending confirmation through the platform's real operation, and returns what its operation does. */
+export function confirmPending(platform: Platform, call: ConfirmationCall): unknown {
+	return actionsOf(platform).confirm(call);
+}
+
+/** Rejects a pending confirmation through the platform's real operation. */
+export function rejectPending(platform: Platform, call: ConfirmationCall): void {
+	actionsOf(platform).reject(call);
 }
 
 /** Every entry of the action log, in order, with its content even when expired. A copy: changing it changes nothing. */

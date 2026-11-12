@@ -1,4 +1,4 @@
-import { createTestPlatform } from "@domus/test-utils";
+import { createTestPlatform, pendingFrom } from "@domus/test-utils";
 import { describe, expect, it } from "vitest";
 
 import probe from "../server";
@@ -190,12 +190,12 @@ describe("probe undo", () => {
 			{ noteId: 1, body: "integral" },
 			{ idempotencyKey: "k2" },
 		);
-		const deleted = test.invoke(
-			ana,
-			"probe.deleteComment",
-			{ id: 1 },
-			{ idempotencyKey: "k3" },
-		);
+		const deleted = test.confirm(
+			test.context("ana"),
+			pendingFrom(() =>
+				test.invoke(ana, "probe.deleteComment", { id: 1 }, { idempotencyKey: "k3" }),
+			),
+		) as { entry: number };
 
 		expect(() => test.undo(ana, deleted.entry, { idempotencyKey: "u1" })).toThrow(irreversible);
 		expect(test.log()).toHaveLength(3);
@@ -268,7 +268,11 @@ describe("probe undo", () => {
 			{ noteId: 1, body: "integral" },
 			{ idempotencyKey: "k2" },
 		);
-		const undone = test.undo(ana, added.entry, { idempotencyKey: "u1" });
+		// Its inverse deletes the comment, which always asks for confirmation.
+		const undone = test.confirm(
+			test.context("ana"),
+			pendingFrom(() => test.undo(ana, added.entry, { idempotencyKey: "u1" })),
+		) as { entry: number };
 
 		expect(() => test.undo(ana, undone.entry, { idempotencyKey: "u2" })).toThrow(irreversible);
 	});

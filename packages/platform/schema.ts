@@ -220,3 +220,42 @@ export const delegation = sqliteTable(
 		check("platform_delegation_value", sql`${table.value} IN ('no', 'yes', 'confirm')`),
 	],
 );
+
+/**
+ * A pending confirmation (ADR 0023): an operation that waits for the person to confirm it. It keeps the exact
+ * operation (`operation`, with its fingerprint), whether it reads or writes, a write's idempotency key, the
+ * verified context it was born in and its two absolute deadlines: the voice window and its expiry. `session` is
+ * the session it was born in while that session lives: revoking it sets it to null, which ends a pending
+ * confirmation that was `bound` to one. `entry` links a confirmed write to its entry in the action log.
+ */
+export const confirmations = sqliteTable(
+	"platform_confirmations",
+	{
+		id: text().primaryKey(),
+		account: text()
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		via: text(),
+		kind: text({ enum: ["read", "write"] }).notNull(),
+		operation: text().notNull(),
+		fingerprint: text().notNull(),
+		key: text(),
+		origin: text().notNull(),
+		session: text().references(() => session.id, { onDelete: "set null" }),
+		bound: integer({ mode: "boolean" }).notNull(),
+		createdAt: integer("created_at").notNull(),
+		windowClosesAt: integer("window_closes_at").notNull(),
+		expiresAt: integer("expires_at").notNull(),
+		state: text({ enum: ["pending", "consumed", "rejected", "ended"] }).notNull(),
+		entry: integer().references(() => actionLog.entry),
+	},
+	(table) => [
+		index("platform_confirmations_account_key").on(table.account, table.key),
+		index("platform_confirmations_session").on(table.session),
+		check("platform_confirmations_kind", sql`${table.kind} IN ('read', 'write')`),
+		check(
+			"platform_confirmations_state",
+			sql`${table.state} IN ('pending', 'consumed', 'rejected', 'ended')`,
+		),
+	],
+);

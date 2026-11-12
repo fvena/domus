@@ -14,6 +14,11 @@ export type PermissionLevel = "read" | "write" | "manage";
 export interface ActionPermission<TLevel extends PermissionLevel = PermissionLevel> {
 	readonly area?: string;
 	readonly level: TLevel;
+	/**
+	 * The action asks the person to confirm it every time, whoever asks, before it runs: a pending
+	 * confirmation (ADR 0023). Only once, even when the delegation asks too.
+	 */
+	readonly alwaysConfirm?: boolean;
 }
 
 /** The metadata of a read: it changes nothing, is not logged and takes no idempotency key. */
@@ -45,8 +50,8 @@ export type ModuleContract = Readonly<Record<string, ActionContract>>;
  * Starts the contract of a read with the permission it asks for, such as `readAction({ level: "read" })`;
  * then chain `.input()`, `.output()` and `.errors()` as with oRPC's `oc`.
  */
-export function readAction({ area, level }: ActionPermission) {
-	return oc.$meta<ReadActionMeta>({ kind: "read", permission: permissionOf(area, level) });
+export function readAction(permission: ActionPermission) {
+	return oc.$meta<ReadActionMeta>({ kind: "read", permission: permissionOf(permission) });
 }
 
 /**
@@ -55,22 +60,29 @@ export function readAction({ area, level }: ActionPermission) {
  */
 export function writeAction<const TUndoable extends boolean>({
 	undoable,
-	area,
-	level,
+	...permission
 }: {
 	readonly undoable: TUndoable;
 } & ActionPermission<"write" | "manage">) {
 	return oc.$meta<WriteActionMeta<TUndoable>>({
 		kind: "write",
 		undoable,
-		permission: permissionOf(area, level),
+		permission: permissionOf(permission),
 	});
 }
 
-/** Leaves `area` out when the module's own is meant, so the metadata says only what was declared. */
-function permissionOf<TLevel extends PermissionLevel>(
-	area: string | undefined,
-	level: TLevel,
-): ActionPermission<TLevel> {
-	return area === undefined ? { level } : { area, level };
+/**
+ * Leaves `area` out when the module's own is meant, and `alwaysConfirm` when it is not asked, so the metadata
+ * says only what was declared.
+ */
+function permissionOf<TLevel extends PermissionLevel>({
+	area,
+	level,
+	alwaysConfirm,
+}: ActionPermission<TLevel>): ActionPermission<TLevel> {
+	return {
+		...(area === undefined ? {} : { area }),
+		level,
+		...(alwaysConfirm === true ? { alwaysConfirm } : {}),
+	};
 }

@@ -3,7 +3,8 @@
 // platform's procedures and the actions of the modules it receives, at `<module>/<action>`. Each action needs a
 // valid session: the door builds the verified context from it, ignores anything the client declares about who
 // it is, and hands it to the one path of the actions. So do the platform's own operations on one's password
-// (it asks for the current one and keeps only this session) and sessions (only one's own, with their device).
+// (it asks for the current one and keeps only this session), sessions (only one's own, with their device) and
+// pending confirmations (confirming or rejecting one's own, by the app).
 import type { ModuleDefinition } from "@domus/module-sdk";
 import { implement, ORPCError, os } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
@@ -57,12 +58,18 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	const actions = actionsOf(platform);
 
 	/** The verified context of a platform operation, which always needs a session. */
-	async function signedIn(
-		context: DoorContext,
-	): Promise<VerifiedContext & { readonly session: string }> {
+	async function verifiedSession(context: DoorContext): Promise<VerifiedContext> {
 		const verified = await context.verify();
 		if (!verified?.session) throw new ORPCError("UNAUTHORIZED");
-		return { ...verified, session: verified.session };
+		return verified;
+	}
+
+	/** The account and session of a platform operation on one's own password or sessions. */
+	async function signedIn(
+		context: DoorContext,
+	): Promise<{ readonly account: string; readonly session: string }> {
+		const { account, session = "" } = await verifiedSession(context);
+		return { account, session };
 	}
 
 	const moduleRouters: Record<string, Record<string, unknown>> = {};
@@ -118,6 +125,17 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 			list: platformProcedures.sessions.list.handler(async ({ context }) => {
 				const { account, session } = await signedIn(context);
 				return sessionsOf(connection, account, session);
+			}),
+		},
+		confirmations: {
+			confirm: platformProcedures.confirmations.confirm.handler(async ({ input, context }) =>
+				actions.confirm({
+					context: await verifiedSession(context),
+					confirmation: input.id,
+				}),
+			),
+			reject: platformProcedures.confirmations.reject.handler(async ({ input, context }) => {
+				actions.reject({ context: await verifiedSession(context), confirmation: input.id });
 			}),
 		},
 	});
