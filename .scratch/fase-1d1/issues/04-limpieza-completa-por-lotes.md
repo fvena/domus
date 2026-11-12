@@ -1,6 +1,6 @@
 # 04. Limpieza completa por lotes
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 03
 
 Spec: [`../spec.md`](../spec.md), sección «Las tareas de la 1d1». ADR 0025.
@@ -16,17 +16,22 @@ La limpieza diaria completa, sin cambiar nunca lo que responde Domus.
 
 ## Criterios de aceptación
 
-- [ ] Tras limpiar, la operación de una confirmación caducada está vacía y la de una vigente, intacta.
-- [ ] Antes y después de limpiar responden igual:
+- [x] Tras limpiar, la operación de una confirmación caducada está vacía y la de una vigente, intacta.
+- [x] Antes y después de limpiar responden igual:
     - confirmar otra vez una confirmación consumida;
     - rechazar una rechazada;
     - confirmar una caducada;
     - confirmar una terminada por revocar la sesión;
     - repetir con la misma clave una escritura que se confirmó;
     - repetir una escritura sensible con su comprobante usado, que devuelve el acuse.
-- [ ] Los comprobantes terminados y los caducados sin usar desaparecen, y presentarlos responde lo mismo que antes.
-- [ ] Los trabajos y las ejecuciones antiguos se purgan, y los recientes quedan.
-- [ ] Una limpieza cancelada entre lotes deja la base coherente, y la siguiente termina el trabajo.
-- [ ] Limpiar dos veces seguidas no cambia nada.
-- [ ] Las pruebas de la 1b y la 1c sobre confirmaciones, comprobantes y caducidad siguen pasando sin cambios.
-- [ ] `pnpm check` pasa.
+- [x] Los comprobantes terminados y los caducados sin usar desaparecen, y presentarlos responde lo mismo que antes.
+- [x] Los trabajos y las ejecuciones antiguos se purgan, y los recientes quedan.
+- [x] Una limpieza cancelada entre lotes deja la base coherente, y la siguiente termina el trabajo.
+- [x] Limpiar dos veces seguidas no cambia nada.
+- [x] Las pruebas de la 1b y la 1c sobre confirmaciones, comprobantes y caducidad siguen pasando sin cambios.
+- [x] `pnpm check` pasa.
+
+## Comments
+
+- Hecho en `0e1be0c`. Decisiones tomadas al implementar, también en la spec («Notas»): lotes de 500 filas, y tras un lote lleno la limpieza cede el turno al bucle de eventos (`setImmediate`, no espera tiempo) para que la API, el tiempo máximo y la parada lleguen entre lotes; la antigüedad de trabajos y ejecuciones se mide por `finished_at`, con el límite incluido; una ejecución sin resultado o a la que aún apunta un trabajo no se purga; «comprobantes terminados» son los de estado `ended`, y uno emitido de una sesión revocada se va al caducar; la purga no guarda la última ejecución de una tarea pausada más de 90 días.
+- Límites para las siguientes: la migración `platform/0008` deja `platform_confirmations.operation` admitiendo vacío; `PendingConfirmation.operation` es opcional, y `answering.ts` responde error interno si llega a una vacía (no pasa: `reachable` ya respondió «caducada»). `cleanupTask(connection, clock, { batchSize })` acepta el tamaño del lote solo para las pruebas internas (`background/cleanup.test.ts`). La lista de tareas (05) y `/health` (06) no deben suponer que existen ejecuciones de más de 90 días ni trabajos terminados de más de 30.
