@@ -182,6 +182,29 @@ describe("migrations at start", () => {
 		second.close();
 	});
 
+	it("does not reuse ids in a migration that inserts after its own rebuild", () => {
+		const first = createPlatform({ databaseFile, modules: [shop(shopV1)] });
+		connectionOf(first).exec(
+			"INSERT INTO shop_lists (name) VALUES ('market'), ('pharmacy'), ('hardware'); DELETE FROM shop_lists WHERE id = 3;",
+		);
+		first.close();
+
+		const rebuildAndInsert = migration(
+			1,
+			"0001_shop_archived_bakery",
+			...shopV2.statements,
+			"INSERT INTO `shop_lists` (`name`) VALUES ('bakery');",
+		);
+		const second = createPlatform({ databaseFile, modules: [shop(shopV1, rebuildAndInsert)] });
+		expect(
+			connectionOf(second)
+				.prepare("SELECT id FROM shop_lists WHERE name = 'bakery'")
+				.pluck()
+				.get(),
+		).toBe(4);
+		second.close();
+	});
+
 	describe("when a start fails", () => {
 		/** A database on shop 0000 and 0001, with a list and an item. */
 		beforeEach(() => {

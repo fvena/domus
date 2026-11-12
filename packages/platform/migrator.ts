@@ -32,10 +32,17 @@ export function migrate(db: Database.Database, sources: readonly MigrationSource
 	try {
 		db.exec("BEGIN");
 		try {
-			let sequences = readSequences(db);
 			for (const { module, migration } of pending) {
 				try {
-					for (const statement of migration.statements) db.exec(statement);
+					// The highest each sequence reached in this migration: a table rebuild drops the old table before
+					// it renames the new one, so a table may be missing between two of its statements.
+					let highest = readSequences(db);
+					for (const statement of migration.statements) {
+						db.exec(statement);
+						// After each statement, so a later one cannot take an id a rebuild lost.
+						restoreSequences(db, highest);
+						highest = new Map([...highest, ...readSequences(db)]);
+					}
 				} catch (error) {
 					throw new Error(
 						`module "${module}": migration "${migration.tag}" failed: ${messageOf(error)}`,
@@ -45,9 +52,6 @@ export function migrate(db: Database.Database, sources: readonly MigrationSource
 				db.prepare(
 					`INSERT INTO ${HISTORY_TABLE} (module, position, tag, hash, applied_at) VALUES (?, ?, ?, ?, ?)`,
 				).run(module, migration.position, migration.tag, migration.hash, Date.now());
-				// After each migration, so the next one cannot take an id a rebuild in this one lost.
-				restoreSequences(db, sequences);
-				sequences = readSequences(db);
 			}
 			checkForeignKeys(db);
 			db.exec("COMMIT");
@@ -129,7 +133,10 @@ function readSequences(db: Database.Database): Map<string, number> {
 	return new Map(rows);
 }
 
-/** After the migrations, no table that still uses AUTOINCREMENT counts below what it had before. */
+/**
+ * After a statement, no table that uses AUTOINCREMENT counts below `before`. It works between statements, as
+ * drizzle-kit splits them: a rebuild and an insert written in one statement are not covered.
+ */
 function restoreSequences(db: Database.Database, before: ReadonlyMap<string, number>): void {
 	for (const [name, seq] of before) {
 		const table = db
