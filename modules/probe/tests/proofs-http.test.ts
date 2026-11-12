@@ -4,6 +4,7 @@
 import { clientFor } from "@domus/api-client";
 import {
 	createTestPlatform,
+	pendingFrom,
 	platformContract,
 	TEST_ORIGIN,
 	type TestBrowser,
@@ -60,6 +61,25 @@ describe("step-up proofs over HTTP", () => {
 				{ context: { idempotencyKey: "c2", proof } },
 			),
 		).rejects.toMatchObject({ code: "STEP_UP_REQUIRED" });
+	});
+
+	it("confirms from the app, with its proof, a sensitive operation Kira asked for", async () => {
+		await using test = await household();
+		const client = clientOf(await signedIn(test));
+		test.prepare.delegation("paco", "probe", "manage", "confirm");
+		const pending = pendingFrom(() =>
+			test.invoke(test.context("paco", { via: "kira" }), "probe.configure", CONFIGURE.input, {
+				idempotencyKey: "c1",
+			}),
+		);
+
+		await expect(client.confirmations.confirm({ id: pending })).rejects.toMatchObject({
+			code: "STEP_UP_REQUIRED",
+		});
+		const { proof } = await client.proofs.request({ password: PASSWORD, operation: CONFIGURE });
+		expect(await client.confirmations.confirm({ id: pending }, { context: { proof } })).toEqual(
+			{ result: { notes: 1 }, entry: 2 },
+		);
 	});
 
 	it("does not take a proof asked for from another session", async () => {
