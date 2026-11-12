@@ -273,6 +273,12 @@ En la 1d1, todo trabajo es mantenimiento de la plataforma: no tiene actor ni pas
     - Mientras un trabajo está atascado, su ejecución sigue sin resultado; al terminar recibe el suyo. Si un reinicio lo recupera, vuelve a pendiente como uno en ejecución.
     - Si un trabajo cancelado por la parada termina después del margen, su final no se escribe: queda en ejecución en la base hasta el siguiente arranque.
 
+- Decisiones de la tarea 06, tomadas al implementar:
+    - `/health` responde `{ "status": "ok", "background": { "status": "ok" } }`, o `background` con `{ "status": "degraded", "reason": "scheduler-silent" | "lane-stuck" }`. El `status` de fuera sigue siendo el del proceso, y Docker solo mira el 200. Los motivos van en inglés, como códigos para herramientas de vigilancia. Si se dan los dos, se dice el del planificador.
+    - La señal de vida es el instante del último despertar. El umbral es de 5 minutos: degradado a partir de 5 min y 1 ms sin señal. La señal cuenta desde que se crea el segundo plano, así que uno que nunca arranca también acaba degradado.
+    - El carril atascado se lee del motor en memoria, no de `platform_jobs`: la respuesta no toca la base y deja de ser `degraded` en cuanto el trabajo termina.
+    - El mando simula un planificador callado moviendo el reloj sin despertar: `clock.advance(ms, { wake: false })` y `clock.set(instant, { wake: false })`. El siguiente movimiento que despierta trae la señal de vuelta.
+
 - La limpieza cambia lo que guarda la base, no lo que responde la API: las pruebas de la caducidad de la 1b y la 1c tienen que seguir pasando sin cambios después de limpiar.
 
 ## Tareas

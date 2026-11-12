@@ -20,7 +20,14 @@ import { AUTH_PREFIX, type AuthOptions, createAuth } from "../identity/auth";
 import { replacePassword, SessionGoneError, verifiedPasswordHash } from "../identity/passwords";
 import { requestProof, WrongPasswordError } from "../identity/proofs";
 import { sessionsOf } from "../identity/sessions";
-import { actionsOf, clockOf, connectionOf, type Platform, proofIssuerOf } from "../platform";
+import {
+	actionsOf,
+	backgroundOf,
+	clockOf,
+	connectionOf,
+	type Platform,
+	proofIssuerOf,
+} from "../platform";
 
 export interface HttpHandler {
 	/** A plain function, safe to pass around as `fetch`. */
@@ -222,7 +229,11 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	});
 	const app = new Hono();
 
-	app.get("/health", (c) => c.json({ status: "ok" }));
+	// 200 while the process answers, which is what Docker's health check watches; the background's field is the
+	// watcher's, public and without personal data (ADR 0025).
+	app.get("/health", (c) =>
+		c.json({ status: "ok", background: backgroundOf(platform).health() }),
+	);
 
 	app.post(`${AUTH_PREFIX}/*`, (c) =>
 		AUTH_ROUTES.includes(c.req.path.slice(AUTH_PREFIX.length))

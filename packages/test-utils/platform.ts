@@ -193,8 +193,17 @@ export interface TestBackground {
 /** The platform clock of a test: it moves only when the test moves it. */
 export interface TestClock {
 	now(): number;
-	set(instant: number): void;
-	advance(milliseconds: number): void;
+	set(instant: number, options?: ClockMove): void;
+	advance(milliseconds: number, options?: ClockMove): void;
+}
+
+/** How the test clock moves. */
+export interface ClockMove {
+	/**
+	 * False moves the clock without waking the background, as a scheduler that falls silent: the watcher's case.
+	 * The next move that wakes catches up. Default true.
+	 */
+	readonly wake?: boolean;
 }
 
 /** A new account of the privileged preparation. `id` doubles as its name and the start of its email. */
@@ -382,13 +391,13 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 	const timer = controlledTimer(() => now);
 	const clock: TestClock = {
 		now: () => now,
-		set: (instant) => {
+		set: (instant, { wake = true } = {}) => {
 			now = instant;
-			timer.fire();
+			if (wake) timer.fire();
 		},
-		advance: (milliseconds) => {
+		advance: (milliseconds, { wake = true } = {}) => {
 			now += milliseconds;
-			timer.fire();
+			if (wake) timer.fire();
 		},
 	};
 

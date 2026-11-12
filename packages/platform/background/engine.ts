@@ -114,6 +114,8 @@ export interface Engine {
 	nextDue(): number | undefined;
 	/** The jobs started and not yet recorded as ended, each settling once its end is recorded. */
 	inFlight(): readonly Promise<void>[];
+	/** True while a lane holds a stuck job: one that went on past the margin after its cancellation. */
+	stuck(): boolean;
 	/**
 	 * Stops claiming, aborts the signal of every running job and waits, at most {@link STOP_MARGIN}, until each
 	 * one ended. A job that did not end stays running in the database, and the next start recovers it.
@@ -307,6 +309,8 @@ export function createEngine({
 		},
 
 		inFlight: () => [...running.values()].map(({ done }) => done),
+
+		stuck: () => [...running.values()].some((job) => job.stuck),
 
 		async stop() {
 			stopped = true;

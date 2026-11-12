@@ -1,6 +1,7 @@
 // What tests use to stand in for real infrastructure. Only tests import it.
 export { createTestBrowser, type TestBrowser } from "./browser";
 export {
+	type ClockMove,
 	type ContextOptions,
 	createTestPlatform,
 	type DelegationChange,

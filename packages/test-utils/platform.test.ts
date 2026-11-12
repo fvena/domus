@@ -228,7 +228,7 @@ describe("createTestPlatform", () => {
 		await using test = createTestPlatform({ modules: [] });
 		expect(test.databaseFile).toBe(":memory:");
 		const response = await test.door.fetch(new Request("http://domus/health"));
-		expect(await response.json()).toEqual({ status: "ok" });
+		expect(await response.json()).toEqual({ status: "ok", background: { status: "ok" } });
 	});
 
 	it("applies the migrations of the platform and of the modules it receives", async () => {

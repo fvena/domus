@@ -45,7 +45,7 @@ describe("http handler", () => {
 
 	it("answers the health check", async () => {
 		const response = await handler.fetch(new Request("http://domus/health"));
-		expect(await response.json()).toEqual({ status: "ok" });
+		expect(await response.json()).toEqual({ status: "ok", background: { status: "ok" } });
 	});
 
 	it("answers status in process, without a session", async () => {
