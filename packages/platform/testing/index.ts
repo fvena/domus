@@ -87,6 +87,7 @@ export type {
 	TaskState,
 } from "../background";
 export { PermanentJobError } from "../background";
+export { STOP_MARGIN } from "../background/engine";
 
 /** What a test may give the background of its platform besides the clock. */
 export interface TestBackgroundRuntime {

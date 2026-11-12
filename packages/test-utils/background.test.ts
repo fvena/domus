@@ -121,6 +121,32 @@ describe("the background control of createTestPlatform", () => {
 		]);
 	});
 
+	it("disposes within the stop margin a platform whose test left a job held, so a failed assertion is what shows", async () => {
+		let started!: () => void;
+		const running = new Promise<void>((resolve) => (started = resolve));
+		const test = createTestPlatform({
+			modules: [],
+			tasks: [
+				{
+					id: "held",
+					frequency: { every: "day", at: "02:00" },
+					job: {
+						lane: "maintenance",
+						run: async () => {
+							started();
+							await new Promise<never>(() => {});
+						},
+					},
+				},
+			],
+		});
+		test.background.start();
+		test.clock.set(at("2026-01-01T01:00:00Z"));
+		await running;
+
+		await test[Symbol.asyncDispose]();
+	}, 1000);
+
 	it("stops with a job in progress: cancels it, waits until it ends, and only then lets the database close", async () => {
 		let started!: () => void;
 		const running = new Promise<void>((resolve) => (started = resolve));

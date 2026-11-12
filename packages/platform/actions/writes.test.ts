@@ -192,6 +192,11 @@ describe("a write", () => {
 			}),
 		],
 		[
+			"an undoable write that declares no touched records, so no later change could stop its undo",
+			"ledger.add",
+			(id: number) => ({ ...valid(id), touched: [] }),
+		],
+		[
 			"touched records without a type",
 			"ledger.add",
 			(id: number) => ({ ...valid(id), touched: [{ id }] }),
