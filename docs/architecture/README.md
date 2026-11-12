@@ -18,11 +18,11 @@ Ver [ADR 0001](adr/0001-domus-con-kira-dentro.md) y [ADR 0002](adr/0002-vue-spa-
 
 **Procesos** ([ADR 0003](adr/0003-procesos-y-contenedores.md)): tres programas además de la web, cada uno en su contenedor Docker y con reinicio independiente (P1, P28):
 
-| Programa        | Qué hace                                                                                                                           |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `api`           | La puerta: autentica, sirve la API y la web compilada, arranca `platform` y los módulos. Único contenedor con el volumen de datos. |
-| `assistant`     | Kira, la parte que piensa. Solo habla con `api`.                                                                                   |
-| `voice-gateway` | Satélites, palabra de activación, STT/TTS y quién habla. Solo habla con `api`.                                                     |
+| Programa        | Qué hace                                                                                                                                          |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api`           | La puerta: autentica, sirve la API y la web compilada, arranca `platform` y los módulos. Único contenedor con el volumen de datos y el de copias. |
+| `assistant`     | Kira, la parte que piensa. Solo habla con `api`.                                                                                                  |
+| `voice-gateway` | Satélites, palabra de activación, STT/TTS y quién habla. Solo habla con `api`.                                                                    |
 
 **Una sola puerta** ([ADR 0004](adr/0004-una-sola-puerta.md)):
 
@@ -59,7 +59,8 @@ Ver [ADR 0001](adr/0001-domus-con-kira-dentro.md) y [ADR 0002](adr/0002-vue-spa-
 - **Lo compartido llega a Kira** ([ADR 0012](adr/0012-lo-compartido-llega-a-kira.md), P52): una foto, un PDF, un correo reenviado o un mensaje de Telegram llegan a Kira como conversación con adjunto, y lo que propone se confirma por lote. Los trabajos largos van en segundo plano, con aviso al acabar.
 - **Fechas dichas con palabras** ([ADR 0013](adr/0013-fechas-dichas-con-palabras.md), P53): las interpreta el modelo y la API las valida. Las frases rápidas solo entienden «hoy», «mañana» y los días de la semana.
 - **Memoria** ([ADR 0014](adr/0014-memoria-en-domus.md), P3, P25): vive en Domus, privada de cada persona o pública de la casa, por área. Kira guarda sin pedir aprobación; se puede preguntar «¿qué sabes de mí?» y pedir «olvida…». Las sesiones de Claude Code no son la memoria.
-- **Tareas programadas generales** ([ADR 0015](adr/0015-tareas-programadas-generales.md), P29, P30): cualquier módulo declara una tarea con su frecuencia, a la hora de la familia; ajustes muestra la lista, la última ejecución y su resultado, y permite cambiar la hora, pausar o lanzar. Solo ejecutan código del repositorio. Siguen las invariantes de Hermes: la siguiente ejecución se marca antes de lanzar, hay registro de ejecuciones, se recupera lo perdido y hay un vigilante de inactividad. La revisión nocturna de la memoria es una tarea más.
+- **Tareas programadas generales** ([ADR 0015](adr/0015-tareas-programadas-generales.md), P29, P30): cualquier módulo declara una tarea con su frecuencia, a la hora de la familia; ajustes muestra la lista, la última ejecución y su resultado, y permite cambiar la hora, pausar o lanzar. Solo ejecutan código del repositorio. Siguen las invariantes de Hermes: la siguiente ejecución se marca antes de lanzar, hay registro de ejecuciones, se recupera lo perdido y hay un vigilante de inactividad. La revisión nocturna de la memoria es una tarea más. En la 1d el planificador solo programa mantenimiento de la plataforma; la tarea de un módulo y su actor llegan con la primera ([ADR 0025](adr/0025-segundo-plano.md)).
+- **Segundo plano** ([ADR 0025](adr/0025-segundo-plano.md)): la cola vive en `api`, con un carril corto y otro de mantenimiento. Un trabajo pedido se vuelve a autorizar con la sesión vigente; un aviso, contra su destinatario; el mantenimiento no tiene actor ni pasa por `module-sdk`. Lo que sale de SQLite lo deja la escritura en una bandeja de salida dentro de su transacción. Los eventos en directo son invalidaciones sin contenido, y la app no guarda datos protegidos en el aparato. Los avisos son Web Push a la PWA. Un archivo hereda el acceso de su registro. Las copias, con restic, son diarias y por ahora en el mismo NVMe; restaurar descarta los trabajos pendientes.
 - **Lo que un módulo aporta a Kira** ([ADR 0016](adr/0016-lo-que-un-modulo-aporta-a-kira.md), P31): una skill (`SKILL.md`), frases rápidas y avisos para la iniciativa. Solo texto y descripciones; Kira actúa llamando a acciones por la API.
 
 ## 5. Estructura del repositorio
@@ -120,7 +121,9 @@ El plan por fases, con lo que incluye cada una, cuándo se da por terminada y su
 ## 7. Abierto
 
 - **P49, el interruptor para apagar un módulo.** Se decide al revisar los módulos. Si existe, apaga el módulo entero: rutas, tools de Kira y tareas programadas.
-- **Llamadas entre acciones de módulos y acciones con efectos fuera de SQLite** ([ADR 0022](adr/0022-acciones.md)): se deciden con su primer caso real.
+- **Llamadas entre acciones de módulos** ([ADR 0022](adr/0022-acciones.md)): se deciden con su primer caso real.
+- **Efectos fuera de SQLite que no admiten duplicados** ([ADR 0025](adr/0025-segundo-plano.md)): la bandeja de salida ya existe; la entrega idempotente en destino o con resultado incierto se decide con Home Assistant o AimHarder.
+- **El actor `system` y las tareas por persona** ([ADR 0025](adr/0025-segundo-plano.md)): se deciden con la primera tarea de un módulo y con la revisión de la memoria (fase 7).
 - **Borrar datos privados** ([ADR 0022](adr/0022-acciones.md)): antes de admitir datos privados reales se define cómo afecta su borrado al registro de acciones, a las inversas y a las copias de seguridad.
 - **Se deciden en la fase 5:** la forma del agent, el vocabulario, los evals, los parámetros y el afinado de voz.
 
@@ -152,3 +155,4 @@ El plan por fases, con lo que incluye cada una, cuándo se da por terminada y su
 | [0022](adr/0022-acciones.md)                                            | Acciones                                            |
 | [0023](adr/0023-identidad-y-autorizacion.md)                            | Identidad y autorización                            |
 | [0024](adr/0024-bloqueo-referencial-al-borrar.md)                       | Bloqueo referencial al borrar                       |
+| [0025](adr/0025-segundo-plano.md)                                       | Segundo plano                                       |
