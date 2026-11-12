@@ -1,13 +1,14 @@
 // The fixed module lists of the programs (ADR 0021), written by `pnpm modules:generate` and kept in git. Each
 // list imports one entry of every module that is not testOnly, in the order of their ids. Only apps/api has
 // one today; the web's becomes a second `ModuleListOutput` with its first module screen.
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { checkModules, type ModuleDefinition } from "@domus/module-sdk";
 
 import { formatWithOxfmt } from "./format";
+import { moduleFolders } from "./generated";
 
 /** One list a program imports. */
 export interface ModuleListOutput {
@@ -38,13 +39,8 @@ export interface FoundModule {
 
 /** Every folder of `modules/` with a `server/index.ts`, testOnly ones included, by folder name. */
 export async function loadModules(root: string): Promise<FoundModule[]> {
-	const folders = readdirSync(join(root, "modules"), { withFileTypes: true })
-		.filter((entry) => entry.isDirectory())
-		.map((entry) => entry.name)
-		.filter((folder) => existsSync(join(root, "modules", folder, "server/index.ts")))
-		.sort();
 	return Promise.all(
-		folders.map(async (folder) => {
+		moduleFolders(root, "server/index.ts").map(async (folder) => {
 			const base = join(root, "modules", folder);
 			const { name } = JSON.parse(readFileSync(join(base, "package.json"), "utf8")) as {
 				name?: string;

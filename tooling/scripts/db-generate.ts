@@ -3,9 +3,9 @@
 // drizzle-kit may ask about a rename: run it locally, answer, and review what it wrote. CI runs it with
 // stdin closed, so a question there fails the job.
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { moduleFolders, writeIfChanged } from "./generated";
 import { migrationsSource } from "./module-migrations";
 
 const root = join(import.meta.dirname, "../..");
@@ -36,11 +36,7 @@ function drizzleKitGenerate(server: string): void {
 }
 
 function generate(): void {
-	const modules = readdirSync(join(root, "modules"), { withFileTypes: true })
-		.filter((entry) => entry.isDirectory())
-		.map((entry) => entry.name)
-		.filter((id) => existsSync(join(root, "modules", id, "server/schema.ts")))
-		.sort();
+	const modules = moduleFolders(root, "server/schema.ts");
 	if (modules.length === 0) console.log("db:generate: no module has a server/schema.ts");
 
 	for (const id of modules) {
@@ -48,11 +44,8 @@ function generate(): void {
 		try {
 			drizzleKitGenerate(server);
 			const source = migrationsSource(join(root, server, "migrations"));
-			const target = join(root, server, "migrations.ts");
-			if (!existsSync(target) || readFileSync(target, "utf8") !== source) {
-				writeFileSync(target, source);
+			if (writeIfChanged(join(root, server, "migrations.ts"), source))
 				console.log(`db:generate: wrote ${server}/migrations.ts`);
-			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			throw new Error(`db:generate: module "${id}": ${message}`);
