@@ -95,25 +95,44 @@ describe("createPlatform", () => {
 		expect(existsSync(databaseFile)).toBe(false);
 	});
 
-	// Until the write capture checks every write to them (ticket 06), production cannot write owned tables.
-	it("refuses a module with owned tables, before opening the file", () => {
+	// The capture's temporary triggers read owner and visibility, and SQLite refuses to drop a column a trigger
+	// reads: a migration that rebuilds one only runs because the triggers come after every migration.
+	it("opens a module with owned tables, running its migrations before the write capture", () => {
 		const databaseFile = join(dir, "domus.db");
-		const notes = defineModule({
-			id: "notes",
-			schema: {
-				items: moduleTables("notes").ownedTable(
-					"items",
-					{ type: "item", area: "notes" },
-					{},
-				),
-			},
-			migrations: [],
-		});
+		const create = {
+			tag: "0000_notes",
+			position: 0,
+			hash: "hash-of-0000_notes",
+			statements: [
+				"CREATE TABLE `notes_items` (`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL, `owner` text NOT NULL, `visibility` text NOT NULL);",
+			],
+		};
+		const notesWith = (migrations: (typeof create)[]) =>
+			defineModule({
+				id: "notes",
+				schema: {
+					items: moduleTables("notes").ownedTable(
+						"items",
+						{ type: "item", area: "notes" },
+						{},
+					),
+				},
+				migrations,
+			});
+		createPlatform({ databaseFile, modules: [notesWith([create])] }).close();
 
-		expect(() => createPlatform({ databaseFile, modules: [notes] })).toThrow(
-			'module "notes": owned tables are not open to production until their writes are checked',
-		);
-		expect(existsSync(databaseFile)).toBe(false);
+		const rebuild = {
+			tag: "0001_notes",
+			position: 1,
+			hash: "hash-of-0001_notes",
+			statements: [
+				"ALTER TABLE `notes_items` DROP COLUMN `visibility`;",
+				"ALTER TABLE `notes_items` ADD `visibility` text NOT NULL DEFAULT 'private';",
+			],
+		};
+		const platform = createPlatform({ databaseFile, modules: [notesWith([create, rebuild])] });
+		expect(platform.appliedMigrations).toBe(1);
+		platform.close();
 	});
 
 	it("opens in memory with foreign keys on", () => {

@@ -23,6 +23,8 @@ Visibility (ADR 0023): a table whose records belong to an account comes from `mo
 
 A record the predicate hides does not exist: the action answers "not found", never "forbidden".
 
+Writes (ADR 0023): the write capture checks every row a write changes in an owned table before it commits: a new record's owner is the represented account; owner and `id` never change; only the owner, or anyone with `write` on a public record where its area is `publicEditable`, edits or deletes; only the owner changes visibility; and every changed record, even one created and deleted in the same write, is in `touched` with its table's record type. A handler never changes the schema, turns off `recursive_triggers` or touches the capture: the write is rejected. Tables without an owner are not captured: there, `touched` is only what the handler declares.
+
 After changing `server/schema.ts`, run `pnpm db:generate`: it writes `server/migrations/` and `server/migrations.ts`. Commit both; never edit an applied migration.
 
 The module list of `apps/api` is written by `pnpm modules:generate` and kept in git; a test fails when it is stale, and CI regenerates both and expects no change. No runtime loading or installing. `testOnly: true` keeps a module out of that list: tests import it and pass it to `test-utils`.

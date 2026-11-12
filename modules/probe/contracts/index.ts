@@ -10,7 +10,10 @@ const comment = z.object({ id: z.number().int(), noteId: z.number().int(), body:
 /** A record of the always private areas: health and secret. */
 const entry = z.object({ id: z.number().int(), body: z.string() });
 
+const visibility = z.enum(["private", "public"]);
+
 const NOTE_NOT_FOUND = { message: "There is no note with this id." };
+const BOARD_NOTE_NOT_FOUND = { message: "There is no board note with this id." };
 
 export const probeContract = {
 	/** Every note, oldest first. */
@@ -51,10 +54,15 @@ export const probeContract = {
 			z.object({
 				id: recordId,
 				body: z.string().min(1),
-				visibility: z.enum(["private", "public"]),
+				visibility,
 			}),
 		)
 		.output(note),
+	/** Makes a note private or public: only its owner can. Undone by setting the previous visibility back. */
+	setNoteVisibility: writeAction({ undoable: true, level: "write" })
+		.input(z.object({ id: recordId, visibility }))
+		.output(z.object({ id: z.number().int(), visibility }))
+		.errors({ NOTE_NOT_FOUND }),
 	/** Adds a comment to a note. It touches only the comment. Undone by deleting it. */
 	addComment: writeAction({ undoable: true, level: "write" })
 		.input(z.object({ noteId: recordId, body: z.string().min(1) }))
@@ -65,6 +73,23 @@ export const probeContract = {
 		.input(z.object({ id: recordId }))
 		.output(comment)
 		.errors({ COMMENT_NOT_FOUND: { message: "There is no comment with this id." } }),
+
+	/** Every board note one sees, oldest first: public by default, so everyone's. */
+	listBoard: readAction({ area: "probe.board", level: "read" }).output(z.array(entry)),
+	/** Pins a note on the board, public by default. Undone by deleting it. */
+	addBoardNote: writeAction({ undoable: true, area: "probe.board", level: "write" })
+		.input(z.object({ body: z.string().min(1) }))
+		.output(entry),
+	/** Changes the text of a board note: anyone with write, as the area allows it. Undone by editing it back. */
+	editBoardNote: writeAction({ undoable: true, area: "probe.board", level: "write" })
+		.input(z.object({ id: recordId, body: z.string().min(1) }))
+		.output(entry)
+		.errors({ BOARD_NOTE_NOT_FOUND }),
+	/** Deletes a board note and returns it: anyone with write. It cannot be undone. */
+	deleteBoardNote: writeAction({ undoable: false, area: "probe.board", level: "write" })
+		.input(z.object({ id: recordId }))
+		.output(entry)
+		.errors({ BOARD_NOTE_NOT_FOUND }),
 
 	/** Every health record: only one's own, as the area is always private. */
 	readHealth: readAction({ area: "probe.health", level: "read" }).output(z.array(entry)),

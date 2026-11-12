@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createPlatformWithClock } from "@domus/platform/testing";
+import { createPlatform } from "@domus/platform";
 import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -22,8 +22,7 @@ beforeAll(async () => {
 	ids = definitions.map((definition) => definition.id);
 	directory = mkdtempSync(join(tmpdir(), "domus-real-modules-"));
 	const databaseFile = join(directory, "domus.db");
-	// The testing entry's platform: probe's owned tables keep createPlatform closed until ticket 06.
-	createPlatformWithClock({ databaseFile, modules: definitions }, Date.now).close();
+	createPlatform({ databaseFile, modules: definitions }).close();
 	db = new Database(databaseFile, { readonly: true, fileMustExist: true });
 });
 

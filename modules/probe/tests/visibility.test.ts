@@ -204,3 +204,72 @@ describe("probe always private areas", () => {
 		expect(test.invoke(bea, "probe.readSecret")).toEqual([]);
 	});
 });
+
+// Writes on owned records, checked by the write capture (ADR 0023): another's public record is edited only where
+// its area allows it, and only the owner changes a record's visibility.
+describe("probe visibility on writes", () => {
+	const forbidden = expect.objectContaining({ code: "FORBIDDEN" });
+
+	it("keeps another's public note and comment from being edited or deleted in probe", async () => {
+		const { test, ana } = household();
+		await using _ = test;
+
+		expect(() =>
+			test.invoke(ana, "probe.editNote", { id: 4, body: "otro" }, { idempotencyKey: "k1" }),
+		).toThrow(forbidden);
+		expect(() =>
+			test.invoke(ana, "probe.deleteComment", { id: 4 }, { idempotencyKey: "k2" }),
+		).toThrow(forbidden);
+		expect(test.invoke(ana, "probe.getNote", { id: 4 })).toEqual({
+			id: 4,
+			body: "comprar leche",
+		});
+		expect(test.log()).toEqual([]);
+	});
+
+	it("lets anyone with write edit and delete another's public board note in probe.board", async () => {
+		await using test = createTestPlatform({ modules: [probe] });
+		const ana = test.member("ana");
+		const bea = test.member("bea");
+
+		expect(
+			test.invoke(ana, "probe.addBoardNote", { body: "turnos" }, { idempotencyKey: "k1" }),
+		).toEqual(expect.objectContaining({ result: { id: 1, body: "turnos" } }));
+		test.invoke(
+			bea,
+			"probe.editBoardNote",
+			{ id: 1, body: "turnos de cocina" },
+			{ idempotencyKey: "k2" },
+		);
+		expect(test.invoke(ana, "probe.listBoard")).toEqual([{ id: 1, body: "turnos de cocina" }]);
+
+		test.invoke(bea, "probe.deleteBoardNote", { id: 1 }, { idempotencyKey: "k3" });
+		expect(test.invoke(ana, "probe.listBoard")).toEqual([]);
+	});
+
+	it("lets only the owner change the visibility of a note", async () => {
+		const { test, ana, bea } = household();
+		await using _ = test;
+
+		test.invoke(
+			ana,
+			"probe.setNoteVisibility",
+			{ id: 1, visibility: "public" },
+			{ idempotencyKey: "k1" },
+		);
+		expect(test.invoke(bea, "probe.getNote", { id: 1 })).toEqual({
+			id: 1,
+			body: "regalo para Bea",
+		});
+
+		expect(() =>
+			test.invoke(
+				bea,
+				"probe.setNoteVisibility",
+				{ id: 1, visibility: "private" },
+				{ idempotencyKey: "k2" },
+			),
+		).toThrow(forbidden);
+		expect(test.invoke(bea, "probe.getNote", { id: 1 })).not.toBeNull();
+	});
+});

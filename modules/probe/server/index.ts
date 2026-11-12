@@ -13,6 +13,7 @@ import * as schema from "./schema";
 type Context = Pick<ActionContext<unknown, typeof schema>, "db" | "visible">;
 
 const note = { id: schema.notes.id, body: schema.notes.body };
+const boardNote = { id: schema.board.id, body: schema.board.body };
 const comment = {
 	id: schema.comments.id,
 	noteId: schema.comments.noteId,
@@ -28,11 +29,11 @@ function findNote({ db, visible }: Context, id: number) {
 		.get();
 }
 
-/** The records the account sees of an always private table, oldest first. */
+/** The records the account sees of a table with only a body, oldest first. */
 function entriesOf(
 	db: ModuleDatabase<typeof schema>,
 	visible: Context["visible"],
-	table: typeof schema.health | typeof schema.secret,
+	table: typeof schema.board | typeof schema.health | typeof schema.secret,
 ) {
 	return db
 		.select({ id: table.id, body: table.body })
@@ -139,6 +140,23 @@ export default defineModule({
 				inverse: { action: "probe.deleteNote", input: { id: restored.id } },
 			};
 		},
+		setNoteVisibility: (context) => {
+			const { db, input, errors } = context;
+			const before = findNote(context, input.id);
+			if (!before) throw errors.NOTE_NOT_FOUND();
+			db.update(schema.notes)
+				.set({ visibility: input.visibility })
+				.where(eq(schema.notes.id, input.id))
+				.run();
+			return {
+				result: { id: before.id, visibility: input.visibility },
+				touched: [{ type: "note", id: before.id }],
+				inverse: {
+					action: "probe.setNoteVisibility",
+					input: { id: before.id, visibility: before.visibility },
+				},
+			};
+		},
 		addComment: (context) => {
 			const { db, input, errors, ownership } = context;
 			if (!findNote(context, input.noteId)) throw errors.NOTE_NOT_FOUND();
@@ -161,6 +179,46 @@ export default defineModule({
 				.get();
 			if (!deleted) throw errors.COMMENT_NOT_FOUND();
 			return { result: deleted, touched: [{ type: "comment", id: deleted.id }] };
+		},
+
+		listBoard: ({ db, visible }) => entriesOf(db, visible, schema.board),
+		addBoardNote: ({ db, input, ownership }) => {
+			const added = db
+				.insert(schema.board)
+				.values({ ...ownership(schema.board), body: input.body })
+				.returning(boardNote)
+				.get();
+			return {
+				result: added,
+				touched: [{ type: "board", id: added.id }],
+				inverse: { action: "probe.deleteBoardNote", input: { id: added.id } },
+			};
+		},
+		editBoardNote: ({ db, input, errors, visible }) => {
+			const before = db
+				.select(boardNote)
+				.from(schema.board)
+				.where(and(eq(schema.board.id, input.id), visible(schema.board)))
+				.get();
+			if (!before) throw errors.BOARD_NOTE_NOT_FOUND();
+			db.update(schema.board)
+				.set({ body: input.body })
+				.where(eq(schema.board.id, input.id))
+				.run();
+			return {
+				result: { id: before.id, body: input.body },
+				touched: [{ type: "board", id: before.id }],
+				inverse: { action: "probe.editBoardNote", input: before },
+			};
+		},
+		deleteBoardNote: ({ db, input, errors, visible }) => {
+			const deleted = db
+				.delete(schema.board)
+				.where(and(eq(schema.board.id, input.id), visible(schema.board)))
+				.returning(boardNote)
+				.get();
+			if (!deleted) throw errors.BOARD_NOTE_NOT_FOUND();
+			return { result: deleted, touched: [{ type: "board", id: deleted.id }] };
 		},
 
 		readHealth: ({ db, visible }) => entriesOf(db, visible, schema.health),

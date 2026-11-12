@@ -1,12 +1,14 @@
 // The platform as a whole (ADR 0021, ADR 0022, ADR 0023): what createPlatform opens at start and close releases
 // at stop. It checks the module definitions, opens SQLite and brings its schema up to date before anything uses
-// it, makes sure the one device account exists, and runs the modules' actions with the production authorizer.
+// it, makes sure the one device account exists, installs the write capture of the modules' owned tables, and
+// runs the modules' actions with the production authorizer.
 import { isAbsolute } from "node:path";
 
-import { checkModules, type ModuleDefinition, ownedTableOf, PLATFORM_ID } from "@domus/module-sdk";
+import { checkModules, type ModuleDefinition, PLATFORM_ID } from "@domus/module-sdk";
 import Database from "better-sqlite3";
 
 import { type Actions, type Clock, createActions } from "./actions";
+import { type Capture, installCapture } from "./actions/capture";
 import { type ActionLog, createActionLog } from "./audit";
 import { type AreaPolicy, type Authorizer, createAuthorizer } from "./authorization";
 import { accessView, registeredAreas } from "./identity/access";
@@ -65,13 +67,6 @@ const internals = new WeakMap<
 
 /** Opens SQLite and applies the pending migrations. On any failure it closes the connection and throws. */
 export function createPlatform(options: PlatformOptions): Platform {
-	// Until the write capture checks every write to an owned table (ticket 06), production opens none: a
-	// handler could otherwise write another account's records. Tests open them through the testing entry.
-	for (const module of options.modules)
-		if (Object.values(module.schema).some((value) => ownedTableOf(value) !== undefined))
-			throw new Error(
-				`module "${module.id}": owned tables are not open to production until their writes are checked`,
-			);
 	return openPlatform(options, { clock: Date.now });
 }
 
@@ -95,6 +90,7 @@ export function openPlatform(
 	const areas = registeredAreas(modules);
 	const db = new Database(databaseFile);
 	let appliedMigrations: number;
+	let capture: Capture;
 	try {
 		if (databaseFile !== IN_MEMORY) {
 			const mode = db.pragma("journal_mode = WAL", { simple: true });
@@ -107,6 +103,8 @@ export function openPlatform(
 			...modules.map((module) => ({ module: module.id, migrations: module.migrations })),
 		]);
 		ensureDeviceAccount(db, areas, clock());
+		// After the migrations, which its triggers would stop from dropping a column, and before any action.
+		capture = installCapture(db, modules, areas);
 	} catch (error) {
 		db.close();
 		throw error;
@@ -119,12 +117,15 @@ export function openPlatform(
 		},
 	};
 	const actionLog = createActionLog(db);
-	const decider = authorizer ?? createAuthorizer(accessView(db, areas));
+	const view = accessView(db, areas);
+	const decider = authorizer ?? createAuthorizer(view);
 	const actions = createActions({
 		connection: db,
 		modules,
 		areas,
 		authorizer: decider,
+		view,
+		capture,
 		clock,
 		actionLog,
 		retention,

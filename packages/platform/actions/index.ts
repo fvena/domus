@@ -1,8 +1,9 @@
 // The one path every action takes, whoever asks (ADR 0022): find it, validate its input, ask authorization,
 // run its handler and validate its result. A read runs with `PRAGMA query_only` on, takes no idempotency key
 // and logs nothing. A write needs a key and runs in one better-sqlite3 transaction that this path opens and
-// commits: its handler, the checks of its result and inverse, and its entry in the action log. Any failure
-// inside rolls back both the change and the entry. An undo takes the same path with the inverse its entry
+// commits: its handler, the checks of its result and inverse and of every owned row the write capture saw
+// change (ADR 0023), and its entry in the action log. Any failure inside rolls back both the change and the
+// entry. An undo takes the same path with the inverse its entry
 // stored: one transaction for the checks, the inverse, its one new entry and the undone-by link. Neither keeps
 // its result: repeating one under the same key answers an acknowledgement without content (ADR 0023).
 import { createHash } from "node:crypto";
@@ -27,6 +28,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 
 import type { ActionLog, NumberedEntry } from "../audit";
 import {
+	type AccessView,
 	actorOf,
 	type AreaPolicy,
 	type AuthorizationRequest,
@@ -38,6 +40,8 @@ import {
 	type VerifiedContext,
 	visibleTo,
 } from "../authorization";
+import { checkTransition } from "../authorization/writes";
+import type { Capture, CapturedTransition } from "./capture";
 
 /** The platform clock: instants in milliseconds since the epoch (ADR 0021). */
 export type Clock = () => number;
@@ -99,6 +103,10 @@ export interface ActionsOptions {
 	/** Every registered area, with what it declares: owned records take their visibility from it. */
 	readonly areas: ReadonlyMap<string, AreaPolicy>;
 	readonly authorizer: Authorizer;
+	/** What the checks of the write capture read: the grant of an account in a record's area. */
+	readonly view: AccessView;
+	/** The write capture of the connection, installed once its migrations ran. */
+	readonly capture: Capture;
 	readonly clock: Clock;
 	readonly actionLog: ActionLog;
 	/** How long the content of a new entry (input, inverse) stays usable, in milliseconds. */
@@ -131,6 +139,8 @@ export function createActions({
 	modules,
 	areas,
 	authorizer,
+	view,
+	capture,
 	clock,
 	actionLog,
 	retention,
@@ -399,7 +409,9 @@ export function createActions({
 		},
 	): WriteReceipt {
 		const now = clock();
-		const outcome = checkOutcome(found, run(found, actor, input, now));
+		const { value, transitions } = capture.watch(() => run(found, actor, input, now));
+		const outcome = checkOutcome(found, value);
+		checkTransitions(found, actor.account, transitions, outcome.touched);
 		const entry = actionLog.record({
 			module: found.module,
 			action: found.name,
@@ -413,7 +425,33 @@ export function createActions({
 			touched: outcome.touched,
 			undoes: logged.undoes,
 		});
+		capture.clear();
 		return { result: outcome.result, entry };
+	}
+
+	/**
+	 * Checks, in order, each transition of an owned record the write made (ADR 0023): the rules of what a write
+	 * may do to it, then that the handler declared it among its touched records, which only its own module's
+	 * records can be. Editing what authorization does not allow is forbidden; any other break, internal.
+	 */
+	function checkTransitions(
+		found: RegisteredAction,
+		account: string,
+		transitions: readonly CapturedTransition[],
+		touched: readonly TouchedRecord[],
+	): void {
+		for (const transition of transitions) {
+			const { table } = transition;
+			const check = checkTransition(transition, account, table.area, view);
+			if (check === "forbidden") throw new ORPCError("FORBIDDEN");
+			if (check !== "allow") throw internalError();
+			const id = transition.operation === "insert" ? transition.newId : transition.oldId;
+			if (
+				table.module !== found.module ||
+				!touched.some((record) => record.type === table.type && record.id === id)
+			)
+				throw internalError();
+		}
 	}
 
 	/** A write's outcome as its contract and the log need it, or an internal error that rolls it back. */

@@ -56,6 +56,10 @@ _Evitar_: tabla privada, tabla protegida.
 Si un registro con dueño lo ve solo su dueño (privado) o toda la casa (público). Ser público deja verlo, no editarlo.
 _Evitar_: compartido, nivel de acceso.
 
+**Captura de escrituras** (`write capture`):
+Lo que anota, durante una escritura, cada cambio de fila de las tablas con dueño (crear, editar, borrar), para comprobar antes de confirmarla que respeta el dueño y la visibilidad y que el manejador declaró todo lo que tocó. Si algo falla, la escritura entera se revierte. Las tablas sin dueño no se capturan.
+_Evitar_: auditoría, triggers (para el conjunto).
+
 **Confirmación pendiente** (`pending confirmation`):
 Una operación exacta que la autorización ha detenido hasta que su persona diga que sí. Caduca, se usa como mucho una vez y no la confirma otra persona ni otra conversación.
 _Evitar_: aprobación, propuesta.
