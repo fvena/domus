@@ -15,7 +15,12 @@ describe("probe writes", () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
 
-		const added = test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { key: "k1" });
+		const added = test.invoke(
+			ana,
+			"probe.addNote",
+			{ body: "comprar pan" },
+			{ idempotencyKey: "k1" },
+		);
 
 		expect(added).toEqual({ result: { id: 1, body: "comprar pan" }, entry: 1 });
 		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
@@ -24,7 +29,7 @@ describe("probe writes", () => {
 				entry: 1,
 				action: "probe.addNote",
 				actor: { account: "ana", via: "kira" },
-				key: "k1",
+				idempotencyKey: "k1",
 				at: TEST_START,
 				input: { body: "comprar pan" },
 				result: { id: 1, body: "comprar pan" },
@@ -39,13 +44,13 @@ describe("probe writes", () => {
 	it("edits a note, with the previous text in its inverse", async () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
-		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { key: "k1" });
+		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
 
 		const edited = test.invoke(
 			ana,
 			"probe.editNote",
 			{ id: 1, body: "comprar leche" },
-			{ key: "k2" },
+			{ idempotencyKey: "k2" },
 		);
 
 		expect(edited).toEqual({ result: { id: 1, body: "comprar leche" }, entry: 2 });
@@ -55,7 +60,7 @@ describe("probe writes", () => {
 		});
 		expect(test.log()[1]).toMatchObject({
 			action: "probe.editNote",
-			key: "k2",
+			idempotencyKey: "k2",
 			touched: [{ module: "probe", type: "note", id: "1" }],
 			inverse: { action: "probe.editNote", input: { id: 1, body: "comprar pan" } },
 		});
@@ -64,16 +69,21 @@ describe("probe writes", () => {
 	it("deletes a note, with its restore as the inverse, and restores it with its id", async () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
-		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { key: "k1" });
+		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
 
-		expect(test.invoke(ana, "probe.deleteNote", { id: 1 }, { key: "k2" })).toEqual({
+		expect(test.invoke(ana, "probe.deleteNote", { id: 1 }, { idempotencyKey: "k2" })).toEqual({
 			result: { id: 1, body: "comprar pan" },
 			entry: 2,
 		});
 		expect(test.invoke(ana, "probe.listNotes")).toEqual([]);
 
 		expect(
-			test.invoke(ana, "probe.restoreNote", { id: 1, body: "comprar pan" }, { key: "k3" }),
+			test.invoke(
+				ana,
+				"probe.restoreNote",
+				{ id: 1, body: "comprar pan" },
+				{ idempotencyKey: "k3" },
+			),
 		).toEqual({ result: { id: 1, body: "comprar pan" }, entry: 3 });
 		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
 
@@ -97,12 +107,19 @@ describe("probe writes", () => {
 	it("adds a comment touching only the comment, and deletes it with no inverse", async () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
-		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { key: "k1" });
+		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
 
 		expect(
-			test.invoke(ana, "probe.addComment", { noteId: 1, body: "integral" }, { key: "k2" }),
+			test.invoke(
+				ana,
+				"probe.addComment",
+				{ noteId: 1, body: "integral" },
+				{ idempotencyKey: "k2" },
+			),
 		).toEqual({ result: { id: 1, noteId: 1, body: "integral" }, entry: 2 });
-		expect(test.invoke(ana, "probe.deleteComment", { id: 1 }, { key: "k3" })).toEqual({
+		expect(
+			test.invoke(ana, "probe.deleteComment", { id: 1 }, { idempotencyKey: "k3" }),
+		).toEqual({
 			result: { id: 1, noteId: 1, body: "integral" },
 			entry: 3,
 		});
@@ -124,12 +141,17 @@ describe("probe writes", () => {
 		const { test } = probePlatform();
 		await using _ = test;
 
-		test.invoke(test.actor("ana"), "probe.addNote", { body: "regar" }, { key: "k1" });
+		test.invoke(
+			test.actor("ana"),
+			"probe.addNote",
+			{ body: "regar" },
+			{ idempotencyKey: "k1" },
+		);
 		test.invoke(
 			test.actor("ana", { via: "kira" }),
 			"probe.addNote",
 			{ body: "regar" },
-			{ key: "k2" },
+			{ idempotencyKey: "k2" },
 		);
 
 		expect(test.log().map((entry) => entry.actor)).toEqual([
@@ -140,7 +162,7 @@ describe("probe writes", () => {
 
 	it.each([
 		["without a key", undefined],
-		["with an empty key", { key: "" }],
+		["with an empty key", { idempotencyKey: "" }],
 	])("rejects a write %s, without change or entry", async (_, options) => {
 		const { test, ana } = probePlatform();
 		await using __ = test;
@@ -159,9 +181,9 @@ describe("probe writes", () => {
 		test.dbFor(probe).insert(notes).values({ body: "comprar pan" }).run();
 		test.dbFor(probe).insert(comments).values({ noteId: 1, body: "integral" }).run();
 
-		expect(() => test.invoke(ana, "probe.deleteNote", { id: 1 }, { key: "k1" })).toThrow(
-			expect.objectContaining({ code: "NOTE_HAS_COMMENTS", defined: true }),
-		);
+		expect(() =>
+			test.invoke(ana, "probe.deleteNote", { id: 1 }, { idempotencyKey: "k1" }),
+		).toThrow(expect.objectContaining({ code: "NOTE_HAS_COMMENTS", defined: true }));
 		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
 		expect(test.log()).toEqual([]);
 	});

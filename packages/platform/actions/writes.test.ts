@@ -39,6 +39,12 @@ const ledger = defineModule({
 		/** A write whose input schema lets anything through. */
 		removeLoose: writeAction({ undoable: true }).input(z.any()),
 		list: readAction(),
+		/** Its input schema throws while validating, carrying a secret in its message. */
+		addThrowing: writeAction({ undoable: false }).input(
+			z.any().refine(() => {
+				throw new Error("secret: the pin is 1234");
+			}),
+		),
 	},
 	actions: {
 		add: ({ db }) =>
@@ -48,6 +54,7 @@ const ledger = defineModule({
 		remove: () => ({ result: undefined, touched: [], inverse: { action: "", input: {} } }),
 		removeLoose: () => ({ result: undefined, touched: [], inverse: { action: "", input: {} } }),
 		list: () => [],
+		addThrowing: () => ({ result: undefined, touched: [] }),
 	},
 });
 
@@ -94,7 +101,12 @@ describe("a write", () => {
 		outcomeOf = valid;
 
 		expect(
-			allowing().invoke({ actor: ana, action: "ledger.add", input: {}, key: "k1" }),
+			allowing().invoke({
+				actor: ana,
+				action: "ledger.add",
+				input: {},
+				idempotencyKey: "k1",
+			}),
 		).toEqual({
 			result: { id: 1 },
 			entry: 1,
@@ -113,7 +125,7 @@ describe("a write", () => {
 				actor: ana,
 				action: "ledger.add",
 				input: { body: undefined },
-				key: "k1",
+				idempotencyKey: "k1",
 			}),
 		).toThrow(expect.objectContaining({ code: "BAD_REQUEST" }));
 		expectNothingLeft();
@@ -185,6 +197,17 @@ describe("a write", () => {
 			},
 		],
 		[
+			"a thenable, which an async handler returns",
+			"ledger.add",
+			(id: number) => Object.assign(Promise.resolve(), valid(id)),
+		],
+		[
+			"a rejected promise, which an async handler returns",
+			"ledger.add",
+			(id: number) =>
+				Object.assign(Promise.reject(new Error("secret: the pin is 1234")), valid(id)),
+		],
+		[
 			"an error its contract does not declare",
 			"ledger.add",
 			() => {
@@ -196,13 +219,34 @@ describe("a write", () => {
 
 		let thrown: unknown;
 		try {
-			allowing().invoke({ actor: ana, action, input: {}, key: "k1" });
+			allowing().invoke({ actor: ana, action, input: {}, idempotencyKey: "k1" });
 		} catch (error) {
 			thrown = error;
 		}
 
 		expect(thrown).toHaveProperty("code", "INTERNAL_SERVER_ERROR");
 		expect((thrown as Error).message).not.toContain("1234");
+		expectNothingLeft();
+	});
+
+	it("fails as an internal error, without detail and without running, when validating its input throws", () => {
+		outcomeOf = valid;
+
+		let thrown: unknown;
+		try {
+			allowing().invoke({
+				actor: ana,
+				action: "ledger.addThrowing",
+				input: {},
+				idempotencyKey: "k1",
+			});
+		} catch (error) {
+			thrown = error;
+		}
+
+		expect(thrown).toHaveProperty("code", "INTERNAL_SERVER_ERROR");
+		expect((thrown as Error).message).not.toContain("1234");
+		expect((thrown as Error).stack).not.toContain("1234");
 		expectNothingLeft();
 	});
 
@@ -216,7 +260,7 @@ describe("a write", () => {
 
 		let thrown: unknown;
 		try {
-			actions.invoke({ actor: ana, action: "ledger.add", input: {}, key: "k1" });
+			actions.invoke({ actor: ana, action: "ledger.add", input: {}, idempotencyKey: "k1" });
 		} catch (error) {
 			thrown = error;
 		}
@@ -234,7 +278,12 @@ describe("a write", () => {
 		);
 
 		expect(() =>
-			actionsOf(platform!).invoke({ actor: ana, action: "ledger.add", input: {}, key: "k1" }),
+			actionsOf(platform!).invoke({
+				actor: ana,
+				action: "ledger.add",
+				input: {},
+				idempotencyKey: "k1",
+			}),
 		).toThrow(expect.objectContaining({ code: "FORBIDDEN" }));
 		expectNothingLeft();
 	});

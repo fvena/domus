@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createAudit, type NewEntry } from ".";
+import { createActionLog, type NewEntry } from ".";
 import { migrations } from "../migrations";
 import { migrate } from "../migrator";
 
@@ -12,7 +12,7 @@ function entry(overrides: Partial<NewEntry> = {}): NewEntry {
 		module: "probe",
 		action: "addNote",
 		actor: { account: "ana", via: "kira" },
-		key: "k1",
+		idempotencyKey: "k1",
 		fingerprint: "probe.addNote:abc",
 		at: AT,
 		expiresAt: AT + 1000,
@@ -32,15 +32,15 @@ function upgradedBase() {
 	db = new Database(":memory:");
 	expect(migrate(db, [{ module: "platform", migrations: migrations.slice(0, 1) }])).toBe(1);
 	expect(migrate(db, [{ module: "platform", migrations }])).toBe(1);
-	return createAudit(db);
+	return createActionLog(db);
 }
 
 describe("the action log", () => {
 	it("is created by platform/0001 over a base that has only 0000, and its queries work on its tables", () => {
-		const audit = upgradedBase();
+		const actionLog = upgradedBase();
 
 		const number = db.transaction(() =>
-			audit.record(
+			actionLog.record(
 				entry({
 					touched: [
 						{ type: "note", id: 1 },
@@ -52,12 +52,12 @@ describe("the action log", () => {
 		)();
 
 		expect(number).toBe(1);
-		expect(audit.entries()).toEqual([
+		expect(actionLog.entries()).toEqual([
 			{
 				entry: 1,
 				action: "probe.addNote",
 				actor: { account: "ana", via: "kira" },
-				key: "k1",
+				idempotencyKey: "k1",
 				fingerprint: "probe.addNote:abc",
 				at: AT,
 				expiresAt: AT + 1000,
@@ -72,44 +72,47 @@ describe("the action log", () => {
 				],
 			},
 		]);
-		expect(audit.findByKey({ account: "ana", via: "kira" }, "k1")).toEqual({
+		expect(actionLog.findByKey({ account: "ana", via: "kira" }, "k1")).toEqual({
 			entry: 1,
 			fingerprint: "probe.addNote:abc",
 			expiresAt: AT + 1000,
-			result: { id: 1, body: "pan" },
 		});
 	});
 
 	it("finds an entry by its key only for the same account and via, no via being a value of its own", () => {
-		const audit = upgradedBase();
+		const actionLog = upgradedBase();
 		db.transaction(() => {
-			audit.record(entry({ actor: { account: "ana" }, result: null }));
-			audit.record(entry({ actor: { account: "ana", via: "" }, result: undefined }));
+			actionLog.record(entry({ actor: { account: "ana" } }));
+			actionLog.record(entry({ actor: { account: "ana", via: "" } }));
 		})();
 
-		expect(audit.findByKey({ account: "ana" }, "k1")).toMatchObject({ entry: 1, result: null });
-		expect(audit.findByKey({ account: "ana", via: "" }, "k1")).toEqual({
+		expect(actionLog.findByKey({ account: "ana" }, "k1")).toHaveProperty("entry", 1);
+		expect(actionLog.findByKey({ account: "ana", via: "" }, "k1")).toEqual({
 			entry: 2,
 			fingerprint: "probe.addNote:abc",
 			expiresAt: AT + 1000,
-			result: undefined,
 		});
-		expect(audit.findByKey({ account: "ana", via: "kira" }, "k1")).toBeUndefined();
-		expect(audit.findByKey({ account: "luis" }, "k1")).toBeUndefined();
-		expect(audit.findByKey({ account: "ana" }, "k2")).toBeUndefined();
+		expect(actionLog.findByKey({ account: "ana", via: "kira" }, "k1")).toBeUndefined();
+		expect(actionLog.findByKey({ account: "luis" }, "k1")).toBeUndefined();
+		expect(actionLog.findByKey({ account: "ana" }, "k2")).toBeUndefined();
 	});
 
 	it("keeps an entry without input, result or inverse apart from one whose values are null", () => {
-		const audit = upgradedBase();
+		const actionLog = upgradedBase();
 		db.transaction(() => {
-			audit.record(
-				entry({ key: "k1", input: undefined, result: undefined, inverse: undefined }),
+			actionLog.record(
+				entry({
+					idempotencyKey: "k1",
+					input: undefined,
+					result: undefined,
+					inverse: undefined,
+				}),
 			);
-			audit.record(entry({ key: "k2", input: null, result: null }));
+			actionLog.record(entry({ idempotencyKey: "k2", input: null, result: null }));
 		})();
 
 		expect(
-			audit.entries().map(({ input, result, inverse }) => ({ input, result, inverse })),
+			actionLog.entries().map(({ input, result, inverse }) => ({ input, result, inverse })),
 		).toEqual([
 			{ input: undefined, result: undefined, inverse: null },
 			{
@@ -121,29 +124,45 @@ describe("the action log", () => {
 	});
 
 	it("finds an entry by its number, and tells whether a later one touched the same record of its module", () => {
-		const audit = upgradedBase();
+		const actionLog = upgradedBase();
 		db.transaction(() => {
-			audit.record(entry({ key: "k1", touched: [{ type: "note", id: 1 }] }));
+			actionLog.record(entry({ idempotencyKey: "k1", touched: [{ type: "note", id: 1 }] }));
 			// The same type and id in another module, and another note: neither is the same record.
-			audit.record(entry({ key: "k2", module: "other", touched: [{ type: "note", id: 1 }] }));
-			audit.record(entry({ key: "k3", touched: [{ type: "note", id: 2 }] }));
-			audit.record(
-				entry({ key: "k4", inverse: undefined, touched: [{ type: "note", id: 2 }] }),
+			actionLog.record(
+				entry({
+					idempotencyKey: "k2",
+					module: "other",
+					touched: [{ type: "note", id: 1 }],
+				}),
+			);
+			actionLog.record(entry({ idempotencyKey: "k3", touched: [{ type: "note", id: 2 }] }));
+			actionLog.record(
+				entry({
+					idempotencyKey: "k4",
+					inverse: undefined,
+					touched: [{ type: "note", id: 2 }],
+				}),
 			);
 		})();
 
-		expect(audit.find(1)).toEqual({
+		expect(actionLog.find(1)).toEqual({
 			entry: 1,
 			module: "probe",
 			action: "probe.addNote",
 			actor: { account: "ana", via: "kira" },
-			undoneBy: null,
+			idempotencyKey: "k1",
+			fingerprint: "probe.addNote:abc",
+			at: AT,
 			expiresAt: AT + 1000,
+			undoes: null,
+			undoneBy: null,
+			input: { body: "pan" },
+			result: { id: 1, body: "pan" },
 			inverse: { action: "probe.deleteNote", input: { id: 1 } },
 		});
-		expect(audit.find(4)).toHaveProperty("inverse", undefined);
-		expect(audit.find(5)).toBeUndefined();
-		expect([1, 2, 3, 4].map((number) => audit.touchedLater(number))).toEqual([
+		expect(actionLog.find(4)).toHaveProperty("inverse", null);
+		expect(actionLog.find(5)).toBeUndefined();
+		expect([1, 2, 3, 4].map((number) => actionLog.touchedLater(number))).toEqual([
 			false,
 			false,
 			true,
@@ -152,84 +171,90 @@ describe("the action log", () => {
 	});
 
 	it("links an undo with the entry it undoes, once, inside a transaction", () => {
-		const audit = upgradedBase();
+		const actionLog = upgradedBase();
 		db.transaction(() => {
-			audit.record(entry({ key: "k1" }));
-			audit.record(entry({ key: "u1", undoes: 1 }));
-			audit.markUndone(1, 2);
+			actionLog.record(entry({ idempotencyKey: "k1" }));
+			actionLog.record(entry({ idempotencyKey: "u1", undoes: 1 }));
+			actionLog.markUndone(1, 2);
 		})();
 
-		expect(audit.entries().map(({ undoes, undoneBy }) => ({ undoes, undoneBy }))).toEqual([
+		expect(actionLog.entries().map(({ undoes, undoneBy }) => ({ undoes, undoneBy }))).toEqual([
 			{ undoes: null, undoneBy: 2 },
 			{ undoes: 1, undoneBy: null },
 		]);
-		expect(audit.find(1)).toHaveProperty("undoneBy", 2);
-		expect(() => audit.markUndone(1, 2)).toThrow("only inside the action's transaction");
-		expect(() => db.transaction(() => audit.markUndone(1, 2))()).toThrow("already undone");
-		expect(() => db.transaction(() => audit.markUndone(9, 2))()).toThrow("missing");
+		expect(actionLog.find(1)).toHaveProperty("undoneBy", 2);
+		expect(() => actionLog.markUndone(1, 2)).toThrow("only inside the action's transaction");
+		expect(() => db.transaction(() => actionLog.markUndone(1, 2))()).toThrow("already undone");
+		expect(() => db.transaction(() => actionLog.markUndone(9, 2))()).toThrow("missing");
 	});
 
 	it("numbers entries in a sequence that never reuses a number", () => {
-		const audit = upgradedBase();
-		db.transaction(() => audit.record(entry({ key: "k1" })))();
+		const actionLog = upgradedBase();
+		db.transaction(() => actionLog.record(entry({ idempotencyKey: "k1" })))();
 		// A rolled-back entry, and then one more.
 		expect(() =>
 			db.transaction(() => {
-				audit.record(entry({ key: "k2" }));
+				actionLog.record(entry({ idempotencyKey: "k2" }));
 				throw new Error("rolled back");
 			})(),
 		).toThrow("rolled back");
-		db.transaction(() => audit.record(entry({ key: "k3" })))();
+		db.transaction(() => actionLog.record(entry({ idempotencyKey: "k3" })))();
 
-		const numbers = audit.entries().map((logged) => logged.entry);
+		const numbers = actionLog.entries().map((logged) => logged.entry);
 		expect(numbers).toHaveLength(2);
 		expect(numbers[1]).toBeGreaterThan(numbers[0]!);
 	});
 
 	it("writes only inside a transaction, which it never commits itself", () => {
-		const audit = upgradedBase();
+		const actionLog = upgradedBase();
 
-		expect(() => audit.record(entry())).toThrow("only inside the action's transaction");
+		expect(() => actionLog.record(entry())).toThrow("only inside the action's transaction");
 		expect(() =>
 			db.transaction(() => {
-				audit.record(entry());
+				actionLog.record(entry());
 				throw new Error("the action failed");
 			})(),
 		).toThrow("the action failed");
-		expect(audit.entries()).toEqual([]);
+		expect(actionLog.entries()).toEqual([]);
 	});
 
 	describe("the key", () => {
-		const record = (audit: ReturnType<typeof createAudit>, account: string, via?: string) =>
+		const record = (
+			actionLog: ReturnType<typeof createActionLog>,
+			account: string,
+			via?: string,
+		) =>
 			db.transaction(() =>
-				audit.record(entry({ actor: via === undefined ? { account } : { account, via } })),
+				actionLog.record(
+					entry({ actor: via === undefined ? { account } : { account, via } }),
+				),
 			)();
 
 		it("is unique per account and via", () => {
-			const audit = upgradedBase();
-			record(audit, "ana", "kira");
+			const actionLog = upgradedBase();
+			record(actionLog, "ana", "kira");
 
-			expect(() => record(audit, "ana", "kira")).toThrow(/UNIQUE/);
+			expect(() => record(actionLog, "ana", "kira")).toThrow(/UNIQUE/);
 		});
 
 		it("is unique without via too: no via counts as a value of its own", () => {
-			const audit = upgradedBase();
-			record(audit, "ana");
+			const actionLog = upgradedBase();
+			record(actionLog, "ana");
 
-			expect(() => record(audit, "ana")).toThrow(/UNIQUE/);
+			expect(() => record(actionLog, "ana")).toThrow(/UNIQUE/);
 		});
 
 		it("may repeat in another account, with another via, without via or with an empty via", () => {
-			const audit = upgradedBase();
-			record(audit, "ana", "kira");
+			const actionLog = upgradedBase();
+			record(actionLog, "ana", "kira");
 
 			expect(() => {
-				record(audit, "luis", "kira");
-				record(audit, "ana", "panel");
-				record(audit, "ana");
-				record(audit, "ana", "");
+				record(actionLog, "luis", "kira");
+				record(actionLog, "ana", "panel");
+				record(actionLog, "ana");
+				record(actionLog, "ana", "");
 			}).not.toThrow();
-			expect(audit.entries()).toHaveLength(5);
+			expect(actionLog.entries()).toHaveLength(5);
 		});
 	});
 });

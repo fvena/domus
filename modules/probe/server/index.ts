@@ -1,11 +1,16 @@
 // probe, the test module of phase 1 (ADR 0021, ADR 0022). testOnly keeps it out of the module list of
 // apps/api: tests import it and hand it to test-utils. It stores notes and comments and offers actions on them.
-import { defineModule } from "@domus/module-sdk";
+import { defineModule, type ModuleDatabase } from "@domus/module-sdk";
 import { eq } from "@domus/module-sdk/db";
 
 import { probeContract } from "../contracts";
 import { migrations } from "./migrations";
 import * as schema from "./schema";
+
+/** The note with this id, if there is one. */
+function findNote(db: ModuleDatabase<typeof schema>, id: number) {
+	return db.select().from(schema.notes).where(eq(schema.notes.id, id)).get();
+}
 
 export default defineModule({
 	id: "probe",
@@ -15,8 +20,7 @@ export default defineModule({
 	contract: probeContract,
 	actions: {
 		listNotes: ({ db }) => db.select().from(schema.notes).orderBy(schema.notes.id).all(),
-		getNote: ({ db, input }) =>
-			db.select().from(schema.notes).where(eq(schema.notes.id, input.id)).get() ?? null,
+		getNote: ({ db, input }) => findNote(db, input.id) ?? null,
 
 		addNote: ({ db, input }) => {
 			const added = db.insert(schema.notes).values({ body: input.body }).returning().get();
@@ -27,19 +31,13 @@ export default defineModule({
 			};
 		},
 		editNote: ({ db, input, errors }) => {
-			const before = db
-				.select()
-				.from(schema.notes)
-				.where(eq(schema.notes.id, input.id))
-				.get();
+			const before = findNote(db, input.id);
 			if (!before) throw errors.NOTE_NOT_FOUND();
-			const edited = db
-				.update(schema.notes)
+			db.update(schema.notes)
 				.set({ body: input.body })
 				.where(eq(schema.notes.id, input.id))
-				.returning()
-				.get();
-			if (!edited) throw errors.NOTE_NOT_FOUND();
+				.run();
+			const edited = { ...before, body: input.body };
 			return {
 				result: edited,
 				touched: [{ type: "note", id: edited.id }],
@@ -47,7 +45,7 @@ export default defineModule({
 			};
 		},
 		deleteNote: ({ db, input, errors }) => {
-			const found = db.select().from(schema.notes).where(eq(schema.notes.id, input.id)).get();
+			const found = findNote(db, input.id);
 			if (!found) throw errors.NOTE_NOT_FOUND();
 			const comment = db
 				.select({ id: schema.comments.id })
@@ -71,12 +69,7 @@ export default defineModule({
 			};
 		},
 		addComment: ({ db, input, errors }) => {
-			const note = db
-				.select()
-				.from(schema.notes)
-				.where(eq(schema.notes.id, input.noteId))
-				.get();
-			if (!note) throw errors.NOTE_NOT_FOUND();
+			if (!findNote(db, input.noteId)) throw errors.NOTE_NOT_FOUND();
 			const added = db.insert(schema.comments).values(input).returning().get();
 			return {
 				result: added,

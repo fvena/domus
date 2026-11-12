@@ -17,12 +17,12 @@ import type {
 	TouchedRecord,
 } from "@domus/module-sdk";
 import type { ActionContract } from "@domus/module-sdk/contracts";
-import type { AnySchema } from "@orpc/contract";
+import type { AnySchema, ErrorMap } from "@orpc/contract";
 import { createORPCErrorConstructorMap, ORPCError } from "@orpc/server";
 import type Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 
-import type { Audit, NumberedEntry } from "../audit";
+import type { ActionLog, NumberedEntry } from "../audit";
 import { type AuthorizationRequest, type Authorizer, isAllowed } from "../authorization";
 
 /** The platform clock: instants in milliseconds since the epoch (ADR 0021). */
@@ -34,7 +34,7 @@ export interface ActionCall {
 	readonly action: string;
 	readonly input?: unknown;
 	/** The idempotency key the caller gives a write. A read takes none. */
-	readonly key?: string;
+	readonly idempotencyKey?: string;
 }
 
 /** What a write returns: its result and the number of its entry in the action log. Never its inverse. */
@@ -61,7 +61,7 @@ export interface Actions {
 export interface UndoCall {
 	readonly actor: Actor;
 	readonly entry: number;
-	readonly key: string;
+	readonly idempotencyKey: string;
 }
 
 export interface ActionsOptions {
@@ -69,15 +69,23 @@ export interface ActionsOptions {
 	readonly modules: readonly ModuleDefinition[];
 	readonly authorizer: Authorizer;
 	readonly clock: Clock;
-	readonly audit: Audit;
+	readonly actionLog: ActionLog;
 	/** How long the content of a new entry (input, result, inverse) stays usable, in milliseconds. */
 	readonly retention: number;
 }
 
+/** One action as its contract declared it, read once at registration. */
 interface RegisteredAction {
 	readonly module: string;
+	/** Its name inside its module. */
 	readonly name: string;
-	readonly contract: ActionContract;
+	readonly kind: "read" | "write";
+	/** Only a write can be undoable. */
+	readonly undoable: boolean;
+	readonly inputSchema: AnySchema | undefined;
+	readonly outputSchema: AnySchema | undefined;
+	/** The errors its contract declares: the only ones its handler's throws leave with. */
+	readonly errorMap: ErrorMap;
 	readonly handler: ActionHandler<ActionContract, ModuleSchema>;
 	readonly db: ModuleDatabase<ModuleSchema>;
 }
@@ -88,7 +96,7 @@ export function createActions({
 	modules,
 	authorizer,
 	clock,
-	audit,
+	actionLog,
 	retention,
 }: ActionsOptions): Actions {
 	const registry = new Map<string, RegisteredAction>();
@@ -96,37 +104,78 @@ export function createActions({
 		const db = drizzle({ client: connection, schema: module.schema });
 		for (const [name, contract] of Object.entries(module.contract ?? {})) {
 			const handler = module.actions?.[name];
-			if (handler)
-				registry.set(`${module.id}.${name}`, {
-					module: module.id,
-					name,
-					contract,
-					handler,
-					db,
-				});
+			if (!handler) continue;
+			const { meta, inputSchema, outputSchema, errorMap } = contract["~orpc"];
+			registry.set(`${module.id}.${name}`, {
+				module: module.id,
+				name,
+				kind: meta.kind,
+				undoable: meta.kind === "write" && meta.undoable,
+				inputSchema,
+				outputSchema,
+				errorMap,
+				handler,
+				db,
+			});
 		}
+	}
+
+	return {
+		invoke: (call) => guarded(() => invoke(call)),
+		undo: (call) => guarded(() => undo(call)),
+	};
+
+	function invoke({ actor, action, input, idempotencyKey }: ActionCall): unknown {
+		const found = registry.get(action);
+		if (!found) throw new ORPCError("NOT_FOUND", { message: `no action "${action}"` });
+
+		const validated = validate(found.inputSchema, input);
+		if (!validated.ok || !isLosslessJson(validated.value))
+			throw new ORPCError("BAD_REQUEST", {
+				message: "invalid input",
+				data: { issues: validated.ok ? [] : validated.issues },
+			});
+
+		return found.kind === "write"
+			? write(found, actor, action, validated.value, idempotencyKey)
+			: read(found, actor, action, validated.value);
+	}
+
+	/** Asks authorization, which fails closed: anything but an explicit "allow" ends forbidden. */
+	function authorize(request: AuthorizationRequest): void {
+		if (!isAllowed(authorizer, request)) throw new ORPCError("FORBIDDEN");
 	}
 
 	/** Runs a handler; only an error its contract declares leaves as it is. */
 	function run(found: RegisteredAction, actor: Actor, input: unknown, now: number): unknown {
-		const { errorMap } = found.contract["~orpc"];
+		let outcome: unknown;
 		try {
-			return found.handler({
+			outcome = found.handler({
 				input,
 				db: found.db,
 				actor,
 				now,
-				errors: createORPCErrorConstructorMap(errorMap),
+				errors: createORPCErrorConstructorMap(found.errorMap),
 			});
 		} catch (error) {
-			if (error instanceof ORPCError && error.defined && errorMap[error.code] !== undefined)
+			if (
+				error instanceof ORPCError &&
+				error.defined &&
+				found.errorMap[error.code] !== undefined
+			)
 				throw error;
 			throw internalError();
 		}
+		// An async handler, which its type forbids: what it would do later falls outside the transaction.
+		if (isThenable(outcome)) {
+			settleQuietly(outcome);
+			throw internalError();
+		}
+		return outcome;
 	}
 
 	function read(found: RegisteredAction, actor: Actor, action: string, input: unknown): unknown {
-		if (!isAllowed(authorizer, { actor, action, input })) throw new ORPCError("FORBIDDEN");
+		authorize({ actor, action, input });
 
 		let result: unknown;
 		connection.pragma("query_only = ON");
@@ -136,7 +185,7 @@ export function createActions({
 			connection.pragma("query_only = OFF");
 		}
 
-		const output = validate(found.contract["~orpc"].outputSchema, result);
+		const output = validate(found.outputSchema, result);
 		if (!output.ok) throw internalError();
 		return output.value;
 	}
@@ -146,21 +195,27 @@ export function createActions({
 		actor: Actor,
 		action: string,
 		input: unknown,
-		key: string | undefined,
+		idempotencyKey: string | undefined,
 	): WriteReceipt {
-		const print = fingerprint(action, input);
+		const fingerprint = writeFingerprint(action, input);
 		const request: AuthorizationRequest = { actor, action, input };
 
-		return once(actor, key, print, request, (fresh) => {
-			if (!isAllowed(authorizer, request)) throw new ORPCError("FORBIDDEN");
-			return perform(found, actor, input, { key: fresh, fingerprint: print });
-		});
+		return once(
+			actor,
+			idempotencyKey,
+			fingerprint,
+			() => request,
+			(key) => {
+				authorize(request);
+				return perform(found, actor, input, { idempotencyKey: key, fingerprint });
+			},
+		);
 	}
 
-	function undo({ actor, entry: number, key }: UndoCall): WriteReceipt {
-		const print = undoFingerprint(number);
+	function undo({ actor, entry: number, idempotencyKey }: UndoCall): WriteReceipt {
+		const fingerprint = undoFingerprint(number);
 
-		/** The inverse's request to authorization, with the context of the entry it undoes. */
+		/** The request to authorization for an inverse, with the context of the entry it undoes. */
 		const requestFor = (original: NumberedEntry, inverse: Inverse): AuthorizationRequest => ({
 			actor,
 			action: inverse.action,
@@ -170,24 +225,23 @@ export function createActions({
 
 		return once(
 			actor,
-			key,
-			print,
-			() => {
-				// A repeated undo: the entry it undid and that entry's inverse are in the log. The inverse only
-				// builds the request to authorize anew, even when expired: it is neither returned nor run.
-				const original = audit.find(number);
-				if (!original?.inverse) throw internalError();
-				return requestFor(original, original.inverse);
+			idempotencyKey,
+			fingerprint,
+			// A repeated undo is authorized with the inverse its own entry ran, which is still current: the
+			// entry it undid may have expired. Only that entry's annotation gives the context.
+			(own) => {
+				const original = actionLog.find(number);
+				if (!original) throw internalError();
+				return requestFor(original, { action: own.action, input: own.input });
 			},
-			(fresh) => {
-				const original = audit.find(number);
+			(key) => {
+				const original = actionLog.find(number);
 				if (!original) throw new ORPCError("NOT_FOUND", { message: `no entry ${number}` });
 				if (original.undoneBy !== null) throw conflict("already-undone");
 				if (!original.inverse) throw notUndoable("irreversible");
 				if (isExpired(original.expiresAt)) throw notUndoable("expired");
-				if (audit.touchedLater(number)) throw conflict("changed-since");
-				if (!isAllowed(authorizer, requestFor(original, original.inverse)))
-					throw new ORPCError("FORBIDDEN");
+				if (actionLog.touchedLater(number)) throw conflict("changed-since");
+				authorize(requestFor(original, original.inverse));
 
 				// The inverse runs inside this operation, with its checks and its module's rules, without another
 				// idempotent operation or another transaction.
@@ -195,52 +249,46 @@ export function createActions({
 				const target = registry.get(inverse.action);
 				if (!target) throw internalError();
 				const receipt = perform(target, actor, inverse.input, {
-					key: fresh,
-					fingerprint: print,
+					idempotencyKey: key,
+					fingerprint,
 					undoes: number,
 				});
-				audit.markUndone(number, receipt.entry);
+				actionLog.markUndone(number, receipt.entry);
 				return receipt;
 			},
 		);
 	}
 
 	/**
-	 * One idempotent operation under `key`, a write or an undo. Looking the key up, running and logging stay in
-	 * one synchronous section of one transaction, so no other operation with the same key can slip in between.
-	 * The same key under another fingerprint is a conflict. Under the same one, `repeated` is authorized anew
-	 * and the stored result and entry come back without running anything. A new key goes to `fresh`, which
-	 * authorizes, runs and logs.
+	 * One idempotent operation under `idempotencyKey`, a write or an undo. Looking the key up, running and
+	 * logging stay in one synchronous section of one transaction, so no other operation with the same key can
+	 * slip in between. The same key under another fingerprint is a conflict. Under the same one, an expired
+	 * entry answers result-expired without being read or authorized, since nothing is delivered; a current one
+	 * is authorized anew with the request `repeated` builds from it, and its stored result and number come
+	 * back without running anything. A new key goes to `fresh`, which authorizes, runs and logs.
 	 */
 	function once(
 		actor: Actor,
-		key: string | undefined,
-		print: string,
-		repeated: AuthorizationRequest | (() => AuthorizationRequest),
-		fresh: (key: string) => WriteReceipt,
+		idempotencyKey: string | undefined,
+		fingerprint: string,
+		repeated: (earlier: NumberedEntry) => AuthorizationRequest,
+		fresh: (idempotencyKey: string) => WriteReceipt,
 	): WriteReceipt {
-		if (typeof key !== "string" || key === "")
+		if (typeof idempotencyKey !== "string" || idempotencyKey === "")
 			throw new ORPCError("BAD_REQUEST", { message: "a write needs an idempotency key" });
 
-		const transaction = connection.transaction((): WriteReceipt => {
-			const earlier = audit.findByKey(actor, key);
-			if (!earlier) return fresh(key);
-			if (earlier.fingerprint !== print) throw conflict("key-reused");
-			const request = typeof repeated === "function" ? repeated() : repeated;
-			if (!isAllowed(authorizer, request)) throw new ORPCError("FORBIDDEN");
-			// An expired result is never returned, and the operation never runs again under the same key.
-			if (isExpired(earlier.expiresAt)) throw conflict("result-expired");
-			return { result: earlier.result, entry: earlier.entry };
-		});
+		return connection.transaction((): WriteReceipt => {
+			const keyed = actionLog.findByKey(actor, idempotencyKey);
+			if (!keyed) return fresh(idempotencyKey);
+			if (keyed.fingerprint !== fingerprint) throw conflict("key-reused");
+			// Expired content is never used, and the operation never runs again under the same key.
+			if (isExpired(keyed.expiresAt)) throw conflict("result-expired");
 
-		try {
-			return transaction();
-		} catch (error) {
-			// The platform's errors and those a contract declares, already sorted by run; anything else, such as
-			// a failure writing the log, leaves without detail.
-			if (error instanceof ORPCError) throw error;
-			throw internalError();
-		}
+			const earlier = actionLog.find(keyed.entry);
+			if (!earlier) throw internalError();
+			authorize(repeated(earlier));
+			return { result: earlier.result, entry: earlier.entry };
+		})();
 	}
 
 	/** True from `expiresAt` on, by the platform clock: the content of that entry is no longer used. */
@@ -253,23 +301,27 @@ export function createActions({
 		found: RegisteredAction,
 		actor: Actor,
 		input: unknown,
-		log: { readonly key: string; readonly fingerprint: string; readonly undoes?: number },
+		logged: {
+			readonly idempotencyKey: string;
+			readonly fingerprint: string;
+			readonly undoes?: number;
+		},
 	): WriteReceipt {
 		const now = clock();
 		const outcome = checkOutcome(found, run(found, actor, input, now));
-		const entry = audit.record({
+		const entry = actionLog.record({
 			module: found.module,
 			action: found.name,
 			actor,
-			key: log.key,
-			fingerprint: log.fingerprint,
+			idempotencyKey: logged.idempotencyKey,
+			fingerprint: logged.fingerprint,
 			at: now,
 			expiresAt: now + retention,
 			input,
 			result: outcome.result,
 			inverse: outcome.inverse,
 			touched: outcome.touched,
-			undoes: log.undoes,
+			undoes: logged.undoes,
 		});
 		return { result: outcome.result, entry };
 	}
@@ -284,15 +336,13 @@ export function createActions({
 
 		if (!Array.isArray(touched) || !touched.every(isTouchedRecord)) throw internalError();
 
-		const output = validate(found.contract["~orpc"].outputSchema, result);
+		const output = validate(found.outputSchema, result);
 		if (!output.ok || !isLosslessJson(output.value)) throw internalError();
 
-		const meta = found.contract["~orpc"].meta;
-		const undoable = meta.kind === "write" && meta.undoable;
 		return {
 			result: output.value,
 			touched,
-			inverse: undoable ? checkInverse(found.module, inverse) : undefined,
+			inverse: found.undoable ? checkInverse(found.module, inverse) : undefined,
 		};
 	}
 
@@ -305,33 +355,28 @@ export function createActions({
 			typeof action !== "string" ||
 			!target ||
 			target.module !== module ||
-			target.contract["~orpc"].meta.kind !== "write"
+			target.kind !== "write"
 		)
 			throw internalError();
 
-		const validated = validate(target.contract["~orpc"].inputSchema, input);
+		const validated = validate(target.inputSchema, input);
 		if (!validated.ok || !isLosslessJson(validated.value)) throw internalError();
 		return { action, input: validated.value };
 	}
+}
 
-	return {
-		invoke({ actor, action, input, key }) {
-			const found = registry.get(action);
-			if (!found) throw new ORPCError("NOT_FOUND", { message: `no action "${action}"` });
-
-			const validated = validate(found.contract["~orpc"].inputSchema, input);
-			if (!validated.ok || !isLosslessJson(validated.value))
-				throw new ORPCError("BAD_REQUEST", {
-					message: "invalid input",
-					data: { issues: validated.ok ? [] : validated.issues },
-				});
-
-			return found.contract["~orpc"].meta.kind === "write"
-				? write(found, actor, action, validated.value, key)
-				: read(found, actor, action, validated.value);
-		},
-		undo,
-	};
+/**
+ * Runs one operation at the edge of this path. The platform's errors and those a contract declares, already
+ * sorted by run, leave as they are; anything else, such as a failure writing the log or a schema that throws,
+ * leaves without detail.
+ */
+function guarded<T>(operation: () => T): T {
+	try {
+		return operation();
+	} catch (error) {
+		if (error instanceof ORPCError) throw error;
+		throw internalError();
+	}
 }
 
 /** The reasons of a conflict the platform answers (ADR 0022). */
@@ -353,6 +398,19 @@ function notUndoable(reason: NotUndoableReason) {
 /** Any unexpected failure: nothing of the original error, neither its message nor its stack, leaves. */
 function internalError() {
 	return new ORPCError("INTERNAL_SERVER_ERROR");
+}
+
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+	return (
+		(typeof value === "object" || typeof value === "function") &&
+		value !== null &&
+		typeof (value as { then?: unknown }).then === "function"
+	);
+}
+
+/** Lets a promise this path will not wait for settle without an unhandled rejection. */
+function settleQuietly(value: PromiseLike<unknown>): void {
+	Promise.resolve(value).catch(() => undefined);
 }
 
 function isTouchedRecord(value: unknown): value is TouchedRecord {
@@ -377,7 +435,7 @@ function undoFingerprint(entry: number): string {
  * The fingerprint of a write: its full name and the SHA-256 of its validated input as canonical JSON (keys
  * sorted), so the order of the properties does not change it.
  */
-function fingerprint(action: string, input: unknown): string {
+function writeFingerprint(action: string, input: unknown): string {
 	const hash = createHash("sha256")
 		.update(JSON.stringify(canonical(input)) ?? "")
 		.digest("hex");
@@ -406,8 +464,17 @@ interface Issue {
 /** Validates synchronously with a contract's schema; no schema lets the value through. */
 function validate(schema: AnySchema | undefined, value: unknown): Validation {
 	if (!schema) return { ok: true, value };
-	const result = schema["~standard"].validate(value);
-	if (result instanceof Promise) throw internalError();
+	let result: ReturnType<AnySchema["~standard"]["validate"]>;
+	try {
+		result = schema["~standard"].validate(value);
+	} catch {
+		throw internalError();
+	}
+	// Validation is synchronous here: a schema that answers later, as zod does when a check throws, fails.
+	if (isThenable(result)) {
+		settleQuietly(result);
+		throw internalError();
+	}
 	if (!result.issues) return { ok: true, value: result.value };
 	return {
 		ok: false,

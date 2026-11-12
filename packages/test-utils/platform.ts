@@ -58,8 +58,8 @@ type InputArguments<TInput> = unknown extends TInput
 
 /** What a write takes besides its input. */
 export interface WriteOptions {
-	/** The idempotency key: the caller's name for this operation. */
-	readonly key: string;
+	/** The caller's name for this operation. */
+	readonly idempotencyKey: string;
 }
 
 /** A read takes its input; a write takes its input, even when it has none, and its key. */
@@ -198,8 +198,14 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		actor: (account, options) =>
 			options?.via === undefined ? { account } : { account, via: options.via },
 		invoke: (actor, action, ...[input, options]) =>
-			invokeAction(platform, { actor, action, input, key: options?.key }) as never,
-		undo: (actor, entry, { key }) => undoEntry(platform, { actor, entry, key }),
+			invokeAction(platform, {
+				actor,
+				action,
+				input,
+				idempotencyKey: options?.idempotencyKey,
+			}) as never,
+		undo: (actor, entry, { idempotencyKey }) =>
+			undoEntry(platform, { actor, entry, idempotencyKey }),
 		log: () => readLog(platform),
 		close,
 		[Symbol.asyncDispose]: () => Promise.resolve(close()),

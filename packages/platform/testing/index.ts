@@ -4,25 +4,15 @@
 // main entry offers none of it.
 import type { ActionCall, UndoCall, WriteReceipt } from "../actions";
 import type { LogEntry } from "../audit";
-import {
-	actionsOf,
-	auditOf,
-	openPlatform,
-	type Platform,
-	type PlatformOptions,
-	type PlatformRuntime,
-} from "../platform";
+import { actionLogOf, actionsOf, type Platform } from "../platform";
 
-export type { ActionCall, Clock, UndoCall, WriteReceipt } from "../actions";
-export type { LogEntry, LoggedRecord } from "../audit";
-export type { AuthorizationRequest, Authorizer, Decision, UndoContext } from "../authorization";
-export type { PlatformRuntime } from "../platform";
+export type { WriteReceipt } from "../actions";
+export type { LogEntry } from "../audit";
+export type { Authorizer, Decision } from "../authorization";
 export { type ModuleDatabase, moduleDatabase } from "./module-database";
 
-/** A platform like createPlatform's, but with the authorizer and clock of `runtime`. */
-export function createPlatformWith(options: PlatformOptions, runtime: PlatformRuntime): Platform {
-	return openPlatform(options, runtime);
-}
+/** A platform like createPlatform's, but with the authorizer and clock of its runtime. */
+export { openPlatform as createPlatformWith } from "../platform";
 
 /** Runs an action through the platform's one path: validation, authorization, handler, result and, for a write, its log entry. */
 export function invokeAction(platform: Platform, call: ActionCall): unknown {
@@ -36,5 +26,5 @@ export function undoEntry(platform: Platform, call: UndoCall): WriteReceipt {
 
 /** Every entry of the action log, in order, with its content even when expired. A copy: changing it changes nothing. */
 export function readLog(platform: Platform): readonly LogEntry[] {
-	return auditOf(platform).entries();
+	return actionLogOf(platform).entries();
 }

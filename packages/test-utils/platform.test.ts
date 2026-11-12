@@ -73,14 +73,14 @@ describe("createTestPlatform with actions", () => {
 		// @ts-expect-error: an action with input needs it.
 		expect(() => test.invoke(ana, "clockwork.double")).toThrow();
 		// @ts-expect-error: a read takes no key.
-		test.invoke(ana, "clockwork.double", { value: 2 }, { key: "k1" });
+		test.invoke(ana, "clockwork.double", { value: 2 }, { idempotencyKey: "k1" });
 	});
 
 	it("types a write: it takes its key and returns its result and entry number", async () => {
 		await using test = createTestPlatform({ modules: [clockwork] });
 		const ana = test.actor("ana");
 
-		const written = test.invoke(ana, "clockwork.tick", { value: 7 }, { key: "k1" });
+		const written = test.invoke(ana, "clockwork.tick", { value: 7 }, { idempotencyKey: "k1" });
 
 		expectTypeOf(written).toEqualTypeOf<{ readonly result: number; readonly entry: number }>();
 		expect(written).toEqual({ result: 7, entry: 1 });
@@ -90,13 +90,15 @@ describe("createTestPlatform with actions", () => {
 
 	it("gives a read-only snapshot of the action log that the test cannot change", async () => {
 		await using test = createTestPlatform({ modules: [clockwork] });
-		test.invoke(test.actor("ana"), "clockwork.tick", { value: 7 }, { key: "k1" });
+		test.invoke(test.actor("ana"), "clockwork.tick", { value: 7 }, { idempotencyKey: "k1" });
 
 		const snapshot = test.log();
 		// @ts-expect-error: the snapshot is read-only.
-		snapshot[0]!.key = "changed";
+		snapshot[0]!.idempotencyKey = "changed";
 
-		expect(test.log()).toEqual([expect.objectContaining({ entry: 1, key: "k1", result: 7 })]);
+		expect(test.log()).toEqual([
+			expect.objectContaining({ entry: 1, idempotencyKey: "k1", result: 7 }),
+		]);
 	});
 });
 

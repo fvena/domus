@@ -20,6 +20,17 @@ const migrations = [
 	},
 ];
 
+/** A Standard Schema whose validation throws synchronously, carrying a secret in its message. */
+const throwing = {
+	"~standard": {
+		version: 1,
+		vendor: "test",
+		validate: (): never => {
+			throw new Error("secret: the pin is 1234");
+		},
+	},
+} as const;
+
 const contract = {
 	list: readAction().output(z.array(z.object({ id: z.number(), body: z.string() }))),
 	/** Echoes what its handler receives, with an input the schema transforms. */
@@ -32,6 +43,24 @@ const contract = {
 	badResult: readAction().output(z.object({ ok: z.literal(true) })),
 	/** Accepts anything its schema lets through. */
 	anything: readAction().input(z.any()),
+	/** Its input schema throws while validating; zod turns that into a rejected promise. */
+	rejectingInput: readAction().input(
+		z.string().refine(() => {
+			throw new Error("secret: the pin is 1234");
+		}),
+	),
+	/** Its output schema throws while validating; zod turns that into a rejected promise. */
+	rejectingOutput: readAction().output(
+		z.string().transform(() => {
+			throw new Error("secret: the pin is 1234");
+		}),
+	),
+	/** Its input schema throws synchronously while validating. */
+	throwingInput: readAction().input(throwing),
+	/** Its output schema throws synchronously while validating. */
+	throwingOutput: readAction().output(throwing),
+	/** An async handler, which the types forbid. */
+	async: readAction(),
 };
 
 const list = vi.fn((db: ReturnType<typeof moduleDatabase<{ items: typeof items }>>) =>
@@ -52,6 +81,11 @@ const notes = defineModule({
 		},
 		badResult: () => ({ ok: false }) as never,
 		anything: () => "ran",
+		rejectingInput: () => "ran",
+		rejectingOutput: () => "ran",
+		throwingInput: () => "ran",
+		throwingOutput: () => "ran",
+		async: (() => Promise.resolve("ran")) as never,
 	},
 });
 
@@ -170,19 +204,34 @@ describe("a read", () => {
 		]);
 	});
 
-	it("turns an unexpected exception into an internal error, with no message, stack or cause of it", () => {
-		let thrown: unknown;
-		try {
-			allowing().invoke({ actor: ana, action: "notes.crash" });
-		} catch (error) {
-			thrown = error;
-		}
+	it.each([
+		["its handler", "notes.crash", undefined],
+		["validating its input", "notes.throwingInput", "pan"],
+		["validating its result", "notes.throwingOutput", undefined],
+		["validating its input, as a rejected promise", "notes.rejectingInput", "pan"],
+		["validating its result, as a rejected promise", "notes.rejectingOutput", undefined],
+	])(
+		"turns an unexpected exception in %s into an internal error, with no message, stack or cause of it",
+		(_, action, input) => {
+			let thrown: unknown;
+			try {
+				allowing().invoke({ actor: ana, action, input });
+			} catch (error) {
+				thrown = error;
+			}
 
-		expect(thrown).toHaveProperty("code", "INTERNAL_SERVER_ERROR");
-		expect(thrown).not.toHaveProperty("cause");
-		expect(JSON.stringify(thrown)).not.toContain("1234");
-		expect((thrown as Error).message).not.toContain("1234");
-		expect((thrown as Error).stack).not.toContain("1234");
+			expect(thrown).toHaveProperty("code", "INTERNAL_SERVER_ERROR");
+			expect(thrown).not.toHaveProperty("cause");
+			expect(JSON.stringify(thrown)).not.toContain("1234");
+			expect((thrown as Error).message).not.toContain("1234");
+			expect((thrown as Error).stack).not.toContain("1234");
+		},
+	);
+
+	it("fails as an internal error when its handler returns a thenable", () => {
+		expect(() => allowing().invoke({ actor: ana, action: "notes.async" })).toThrow(
+			expect.objectContaining({ code: "INTERNAL_SERVER_ERROR" }),
+		);
 	});
 
 	it("fails as an internal error when its result breaks the contract", () => {

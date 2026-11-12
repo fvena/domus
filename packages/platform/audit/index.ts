@@ -10,7 +10,7 @@ export interface NewEntry {
 	/** The action's name inside its module. */
 	readonly action: string;
 	readonly actor: Actor;
-	readonly key: string;
+	readonly idempotencyKey: string;
 	readonly fingerprint: string;
 	/** The platform clock's instant of the write, in milliseconds since the epoch. */
 	readonly at: number;
@@ -32,16 +32,18 @@ export interface LoggedRecord {
 	readonly id: string;
 }
 
-/** One entry as the log holds it: its annotation and its content, expired or not. */
-export interface LogEntry {
+/** One entry found by its number: its annotation and its content, expired or not. */
+export interface NumberedEntry {
 	/** Its number in the log's own sequence, which defines "later". */
 	readonly entry: number;
+	readonly module: string;
 	/** The full name, `<module>.<action>`. */
 	readonly action: string;
 	readonly actor: Actor;
-	readonly key: string;
+	readonly idempotencyKey: string;
 	readonly fingerprint: string;
 	readonly at: number;
+	/** From this instant on, its content (input, result, inverse) is expired. */
 	readonly expiresAt: number;
 	/** The entry this one undid, when it is an undo. */
 	readonly undoes: number | null;
@@ -49,38 +51,28 @@ export interface LogEntry {
 	readonly undoneBy: number | null;
 	readonly input: unknown;
 	readonly result: unknown;
+	/** Null when its write cannot be undone. */
 	readonly inverse: Inverse | null;
+}
+
+/** One entry as the testing entry reads the log: a numbered entry and the records it touched. */
+export interface LogEntry extends Omit<NumberedEntry, "module"> {
 	readonly touched: readonly LoggedRecord[];
 }
 
-/** An entry found by its key: what a repeated write needs to answer without running again. */
+/** The annotation of an entry found by its key: what tells a repeated request from another one. */
 export interface KeyedEntry {
 	readonly entry: number;
 	readonly fingerprint: string;
-	/** From this instant on, its result is expired. */
+	/** From this instant on, its content is expired. */
 	readonly expiresAt: number;
-	readonly result: unknown;
 }
 
-/** An entry found by its number: what undo needs to decide whether it can undo it, and how. */
-export interface NumberedEntry {
-	readonly entry: number;
-	readonly module: string;
-	/** The full name, `<module>.<action>`. */
-	readonly action: string;
-	readonly actor: Actor;
-	readonly undoneBy: number | null;
-	/** From this instant on, its content (input, result, inverse) is expired. */
-	readonly expiresAt: number;
-	/** Absent when its write cannot be undone. */
-	readonly inverse: Inverse | undefined;
-}
-
-export interface Audit {
+export interface ActionLog {
 	/** Writes an entry and its touched records; returns its number. Only inside an open transaction. */
 	record(entry: NewEntry): number;
-	/** The entry of `actor` (its account and `via`) under `key`, if there is one. */
-	findByKey(actor: Actor, key: string): KeyedEntry | undefined;
+	/** The entry of `actor` (its account and `via`) under `idempotencyKey`, if there is one. */
+	findByKey(actor: Actor, idempotencyKey: string): KeyedEntry | undefined;
 	/** The entry numbered `entry`, if there is one. */
 	find(entry: number): NumberedEntry | undefined;
 	/** True when an entry after `entry` touched any record `entry` touched, even if that later one was undone. */
@@ -113,7 +105,7 @@ interface TouchedRow extends LoggedRecord {
 }
 
 /** The log on `connection`, whose schema already has platform/0001. */
-export function createAudit(connection: Database.Database): Audit {
+export function createActionLog(connection: Database.Database): ActionLog {
 	const insertEntry = connection.prepare(
 		`INSERT INTO platform_action_log
 			(module, action, account, via, key, fingerprint, at, expires_at, undoes, input, result, inverse)
@@ -123,11 +115,9 @@ export function createAudit(connection: Database.Database): Audit {
 		"INSERT INTO platform_action_log_touched (entry, module, type, id) VALUES (?, ?, ?, ?)",
 	);
 	const selectByKey = connection.prepare(
-		"SELECT entry, fingerprint, expires_at, result FROM platform_action_log WHERE account = ? AND via IS ? AND key = ?",
+		"SELECT entry, fingerprint, expires_at FROM platform_action_log WHERE account = ? AND via IS ? AND key = ?",
 	);
-	const selectByNumber = connection.prepare(
-		"SELECT entry, module, action, account, via, undone_by, expires_at, inverse FROM platform_action_log WHERE entry = ?",
-	);
+	const selectByNumber = connection.prepare("SELECT * FROM platform_action_log WHERE entry = ?");
 	const selectTouchedLater = connection.prepare(
 		`SELECT 1 FROM platform_action_log_touched AS mine
 			JOIN platform_action_log_touched AS later
@@ -142,17 +132,22 @@ export function createAudit(connection: Database.Database): Audit {
 		"SELECT entry, module, type, id FROM platform_action_log_touched ORDER BY entry, rowid",
 	);
 
+	/** The log never opens or commits a transaction: it writes only inside the action's. */
+	function requireTransaction(): void {
+		if (!connection.inTransaction)
+			throw new Error("the action log is written only inside the action's transaction");
+	}
+
 	return {
 		record(entry) {
-			if (!connection.inTransaction)
-				throw new Error("the action log is written only inside the action's transaction");
+			requireTransaction();
 			const number = Number(
 				insertEntry.run({
 					module: entry.module,
 					action: entry.action,
 					account: entry.actor.account,
 					via: entry.actor.via ?? null,
-					key: entry.key,
+					key: entry.idempotencyKey,
 					fingerprint: entry.fingerprint,
 					at: entry.at,
 					expiresAt: entry.expiresAt,
@@ -172,45 +167,18 @@ export function createAudit(connection: Database.Database): Audit {
 			return number;
 		},
 
-		findByKey(actor, key) {
-			const row = selectByKey.get(actor.account, actor.via ?? null, key) as
-				| Pick<EntryRow, "entry" | "fingerprint" | "expires_at" | "result">
+		findByKey(actor, idempotencyKey) {
+			const row = selectByKey.get(actor.account, actor.via ?? null, idempotencyKey) as
+				| Pick<EntryRow, "entry" | "fingerprint" | "expires_at">
 				| undefined;
 			return (
-				row && {
-					entry: row.entry,
-					fingerprint: row.fingerprint,
-					expiresAt: row.expires_at,
-					result: fromJson(row.result),
-				}
+				row && { entry: row.entry, fingerprint: row.fingerprint, expiresAt: row.expires_at }
 			);
 		},
 
 		find(entry) {
-			const row = selectByNumber.get(entry) as
-				| Pick<
-						EntryRow,
-						| "entry"
-						| "module"
-						| "action"
-						| "account"
-						| "via"
-						| "undone_by"
-						| "expires_at"
-						| "inverse"
-				  >
-				| undefined;
-			return (
-				row && {
-					entry: row.entry,
-					module: row.module,
-					action: `${row.module}.${row.action}`,
-					actor: actorOf(row),
-					undoneBy: row.undone_by,
-					expiresAt: row.expires_at,
-					inverse: fromJson(row.inverse) as Inverse | undefined,
-				}
-			);
+			const row = selectByNumber.get(entry) as EntryRow | undefined;
+			return row && entryOf(row);
 		},
 
 		touchedLater(entry) {
@@ -218,37 +186,43 @@ export function createAudit(connection: Database.Database): Audit {
 		},
 
 		markUndone(entry, by) {
-			if (!connection.inTransaction)
-				throw new Error("the action log is written only inside the action's transaction");
+			requireTransaction();
 			if (updateUndoneBy.run(by, entry).changes !== 1)
 				throw new Error(`entry ${entry} is missing or already undone`);
 		},
 
 		entries() {
 			const touched = selectTouched.all() as TouchedRow[];
-			return (selectEntries.all() as EntryRow[]).map((row) => ({
-				entry: row.entry,
-				action: `${row.module}.${row.action}`,
-				actor: actorOf(row),
-				key: row.key,
-				fingerprint: row.fingerprint,
-				at: row.at,
-				expiresAt: row.expires_at,
-				undoes: row.undoes,
-				undoneBy: row.undone_by,
-				input: fromJson(row.input),
-				result: fromJson(row.result),
-				inverse: (fromJson(row.inverse) as Inverse | undefined) ?? null,
-				touched: touched
-					.filter((record) => record.entry === row.entry)
-					.map(({ module, type, id }) => ({ module, type, id })),
-			}));
+			return (selectEntries.all() as EntryRow[]).map((row) => {
+				const { module: _module, ...entry } = entryOf(row);
+				return {
+					...entry,
+					touched: touched
+						.filter((record) => record.entry === row.entry)
+						.map(({ module, type, id }) => ({ module, type, id })),
+				};
+			});
 		},
 	};
 }
 
-function actorOf(row: Pick<EntryRow, "account" | "via">): Actor {
-	return row.via === null ? { account: row.account } : { account: row.account, via: row.via };
+/** One row of `platform_action_log` as an entry: its content back from JSON, SQL `NULL` as `undefined`. */
+function entryOf(row: EntryRow): NumberedEntry {
+	return {
+		entry: row.entry,
+		module: row.module,
+		action: `${row.module}.${row.action}`,
+		actor: row.via === null ? { account: row.account } : { account: row.account, via: row.via },
+		idempotencyKey: row.key,
+		fingerprint: row.fingerprint,
+		at: row.at,
+		expiresAt: row.expires_at,
+		undoes: row.undoes,
+		undoneBy: row.undone_by,
+		input: fromJson(row.input),
+		result: fromJson(row.result),
+		inverse: (fromJson(row.inverse) as Inverse | undefined) ?? null,
+	};
 }
 
 /** SQL `NULL` stands for `undefined`, so a JSON `null` survives as itself. */

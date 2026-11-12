@@ -7,7 +7,7 @@ import { checkModules, type ModuleDefinition, PLATFORM_ID } from "@domus/module-
 import Database from "better-sqlite3";
 
 import { type Actions, type Clock, createActions } from "./actions";
-import { type Audit, createAudit } from "./audit";
+import { type ActionLog, createActionLog } from "./audit";
 import { type Authorizer, denyEverything } from "./authorization";
 import { migrations } from "./migrations";
 import { migrate } from "./migrator";
@@ -50,7 +50,7 @@ const internals = new WeakMap<
 		readonly db: Database.Database;
 		readonly modules: readonly ModuleDefinition[];
 		readonly actions: Actions;
-		readonly audit: Audit;
+		readonly actionLog: ActionLog;
 	}
 >();
 
@@ -103,16 +103,16 @@ export function openPlatform(
 			if (db.open) db.close();
 		},
 	};
-	const audit = createAudit(db);
+	const actionLog = createActionLog(db);
 	const actions = createActions({
 		connection: db,
 		modules,
 		authorizer,
 		clock,
-		audit,
+		actionLog,
 		retention,
 	});
-	internals.set(platform, { db, modules, actions, audit });
+	internals.set(platform, { db, modules, actions, actionLog });
 	return platform;
 }
 
@@ -138,6 +138,6 @@ export function actionsOf(platform: Platform): Actions {
 }
 
 /** The action log of a platform. Inside platform only: who reads it is decided in phase 1c. */
-export function auditOf(platform: Platform): Audit {
-	return internalsOf(platform).audit;
+export function actionLogOf(platform: Platform): ActionLog {
+	return internalsOf(platform).actionLog;
 }

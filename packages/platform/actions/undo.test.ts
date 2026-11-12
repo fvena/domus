@@ -4,6 +4,7 @@ import { eq, id, moduleTables, text } from "@domus/module-sdk/db";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
+import type { AuthorizationRequest } from "../authorization";
 import { actionsOf, connectionOf, openPlatform, type Platform } from "../platform";
 import { moduleDatabase, readLog } from "../testing";
 
@@ -54,13 +55,55 @@ afterEach(() => {
 });
 
 describe("an undo", () => {
+	it("reauthorizes a retry with the inverse its own entry ran, not with the content of the entry it undid", () => {
+		const requests: AuthorizationRequest[] = [];
+		platform = openPlatform(
+			{ databaseFile: ":memory:", modules: [shelf] },
+			{
+				authorizer: (request) => {
+					requests.push(request);
+					return "allow";
+				},
+				clock: () => Date.UTC(2026, 10, 12),
+			},
+		);
+		const actions = actionsOf(platform);
+		actions.invoke({
+			actor: ana,
+			action: "shelf.add",
+			input: { title: "Niebla" },
+			idempotencyKey: "k1",
+		});
+		const undone = actions.undo({ actor: ana, entry: 1, idempotencyKey: "u1" });
+		// The content of the undone entry is gone, as phase 1d leaves expired content.
+		connectionOf(platform).exec(
+			"UPDATE platform_action_log SET input = NULL, result = NULL, inverse = NULL WHERE entry = 1",
+		);
+		requests.length = 0;
+
+		expect(actions.undo({ actor: ana, entry: 1, idempotencyKey: "u1" })).toStrictEqual(undone);
+		expect(requests).toEqual([
+			{
+				actor: ana,
+				action: "shelf.remove",
+				input: { id: 1 },
+				undoes: { entry: 1, action: "shelf.add", actor: ana },
+			},
+		]);
+	});
+
 	it("rolls back the inverse, its entry and the undone-by link together when something fails", () => {
 		platform = openPlatform(
 			{ databaseFile: ":memory:", modules: [shelf] },
 			{ authorizer: () => "allow", clock: () => Date.UTC(2026, 10, 12) },
 		);
 		const actions = actionsOf(platform);
-		actions.invoke({ actor: ana, action: "shelf.add", input: { title: "Niebla" }, key: "k1" });
+		actions.invoke({
+			actor: ana,
+			action: "shelf.add",
+			input: { title: "Niebla" },
+			idempotencyKey: "k1",
+		});
 		const before = readLog(platform);
 		// Linking the undone entry is the last step: this fails after the inverse ran and was logged.
 		connectionOf(platform).exec(
@@ -69,7 +112,7 @@ describe("an undo", () => {
 
 		let thrown: unknown;
 		try {
-			actions.undo({ actor: ana, entry: 1, key: "u1" });
+			actions.undo({ actor: ana, entry: 1, idempotencyKey: "u1" });
 		} catch (error) {
 			thrown = error;
 		}

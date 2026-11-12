@@ -21,8 +21,18 @@ describe("probe idempotency", () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
 
-		const first = test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { key: "k1" });
-		const retry = test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { key: "k1" });
+		const first = test.invoke(
+			ana,
+			"probe.addNote",
+			{ body: "comprar pan" },
+			{ idempotencyKey: "k1" },
+		);
+		const retry = test.invoke(
+			ana,
+			"probe.addNote",
+			{ body: "comprar pan" },
+			{ idempotencyKey: "k1" },
+		);
 
 		expect(retry).toEqual({ result: { id: 1, body: "comprar pan" }, entry: 1 });
 		expect(retry).toStrictEqual(first);
@@ -33,11 +43,11 @@ describe("probe idempotency", () => {
 	it("answers key-reused when the same key comes with another action, without change or entry", async () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
-		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { key: "k1" });
+		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
 
-		expect(() => test.invoke(ana, "probe.deleteNote", { id: 1 }, { key: "k1" })).toThrow(
-			keyReused,
-		);
+		expect(() =>
+			test.invoke(ana, "probe.deleteNote", { id: 1 }, { idempotencyKey: "k1" }),
+		).toThrow(keyReused);
 		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
 		expect(test.log()).toHaveLength(1);
 	});
@@ -45,10 +55,10 @@ describe("probe idempotency", () => {
 	it("answers key-reused when the same key comes with another input, without change or entry", async () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
-		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { key: "k1" });
+		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
 
 		expect(() =>
-			test.invoke(ana, "probe.addNote", { body: "comprar leche" }, { key: "k1" }),
+			test.invoke(ana, "probe.addNote", { body: "comprar leche" }, { idempotencyKey: "k1" }),
 		).toThrow(keyReused);
 		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
 		expect(test.log()).toHaveLength(1);
@@ -57,16 +67,21 @@ describe("probe idempotency", () => {
 	it("takes the same input with its properties in another order as the same request", async () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
-		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { key: "k1" });
+		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
 		const edited = test.invoke(
 			ana,
 			"probe.editNote",
 			{ id: 1, body: "comprar leche" },
-			{ key: "k2" },
+			{ idempotencyKey: "k2" },
 		);
 
 		expect(
-			test.invoke(ana, "probe.editNote", { body: "comprar leche", id: 1 }, { key: "k2" }),
+			test.invoke(
+				ana,
+				"probe.editNote",
+				{ body: "comprar leche", id: 1 },
+				{ idempotencyKey: "k2" },
+			),
 		).toStrictEqual(edited);
 		expect(test.log()).toHaveLength(2);
 	});
@@ -82,7 +97,9 @@ describe("probe idempotency", () => {
 		];
 
 		const entries = actors.map(
-			(actor) => test.invoke(actor, "probe.addNote", { body: "regar" }, { key: "k1" }).entry,
+			(actor) =>
+				test.invoke(actor, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" })
+					.entry,
 		);
 
 		expect(entries).toEqual([1, 2, 3, 4]);
@@ -94,12 +111,12 @@ describe("probe idempotency", () => {
 		await using _ = test;
 		test.dbFor(probe).insert(notes).values({ body: "comprar pan" }).run();
 		test.dbFor(probe).insert(comments).values({ noteId: 1, body: "integral" }).run();
-		expect(() => test.invoke(ana, "probe.deleteNote", { id: 1 }, { key: "k1" })).toThrow(
-			expect.objectContaining({ code: "NOTE_HAS_COMMENTS" }),
-		);
+		expect(() =>
+			test.invoke(ana, "probe.deleteNote", { id: 1 }, { idempotencyKey: "k1" }),
+		).toThrow(expect.objectContaining({ code: "NOTE_HAS_COMMENTS" }));
 		test.dbFor(probe).delete(comments).run();
 
-		expect(test.invoke(ana, "probe.deleteNote", { id: 1 }, { key: "k1" })).toEqual({
+		expect(test.invoke(ana, "probe.deleteNote", { id: 1 }, { idempotencyKey: "k1" })).toEqual({
 			result: { id: 1, body: "comprar pan" },
 			entry: 1,
 		});
@@ -117,12 +134,12 @@ describe("probe idempotency", () => {
 	])("delivers nothing on a retry when the authorizer now %s", async (_, authorizer) => {
 		const { test, ana } = probePlatform();
 		await using __ = test;
-		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { key: "k1" });
+		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
 
 		test.authorize(authorizer);
 
 		expect(() =>
-			test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { key: "k1" }),
+			test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" }),
 		).toThrow(expect.objectContaining({ code: "FORBIDDEN" }));
 		expect(test.log()).toHaveLength(1);
 	});
@@ -130,14 +147,14 @@ describe("probe idempotency", () => {
 	it("asks the authorizer again on a retry, with the request as it came", async () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
-		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { key: "k1" });
+		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
 		const requests: unknown[] = [];
 		test.authorize((request) => {
 			requests.push(request);
 			return "allow";
 		});
 
-		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { key: "k1" });
+		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
 
 		expect(requests).toEqual([
 			{ actor: ana, action: "probe.addNote", input: { body: "comprar pan" } },
@@ -158,7 +175,7 @@ describe("probe idempotency", () => {
 				before.ana,
 				"probe.addNote",
 				{ body: "comprar pan" },
-				{ key: "k1" },
+				{ idempotencyKey: "k1" },
 			);
 			before.test.close();
 
@@ -166,7 +183,12 @@ describe("probe idempotency", () => {
 			await using _ = test;
 
 			expect(
-				test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { key: "k1" }),
+				test.invoke(
+					ana,
+					"probe.addNote",
+					{ body: "comprar pan" },
+					{ idempotencyKey: "k1" },
+				),
 			).toStrictEqual(first);
 			expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
 			expect(test.log()).toHaveLength(1);

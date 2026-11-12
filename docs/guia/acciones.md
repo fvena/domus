@@ -4,7 +4,7 @@
 
 Una acción es una operación con nombre que lee o cambia los datos de un módulo, como «ver las notas» o «añadir una nota». Es la única forma que tiene un módulo de tocar sus datos, y el camino es el mismo para cualquiera que la pida.
 
-Hoy solo tiene acciones probe, el módulo de prueba. En la Pi la autorización dice que no a todo y la puerta no ofrece ninguna acción, así que solo las ejecutan las pruebas.
+Hoy solo tiene acciones probe, el módulo de prueba. La puerta es la entrada por la que la web y los demás programas le piden cosas a Domus. En la Pi la autorización dice que no a todo y la puerta no ofrece ninguna acción, así que solo las ejecutan las pruebas.
 
 ## Cómo funciona
 
