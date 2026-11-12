@@ -11,7 +11,7 @@ How a feature goes from idea to merged code in Domus, with the mattpocock skills
 3. **Build.** `/implement` takes one ticket at a time, with fresh context between tickets; `/implement-spec` hands the unblocked tickets to subagents and gathers them on one integration branch. Both work test-first with `/tdd`. A ticket is done when `pnpm format:check`, `pnpm lint`, `pnpm type-check` and `pnpm test` pass, `pnpm db:generate && pnpm modules:generate` leave `git status --porcelain` empty, and its file says `Status: resolved` with the commit under `## Comments`.
 4. **Review.** `/code-review` against `main`: Standards and Spec, side by side. Each finding is fixed, or its reason for staying is recorded in the ticket.
 5. **Ship.** `/pr` writes the body: summary, before and after evidence, merge danger. The person merges; then switch to `main`, pull and delete the branch.
-6. **Close.** When the subphase's done-criteria hold, update its state in `docs/plan.md` and bring `docs/guia/` up to date (`docs/AGENTS.md`, «The guide»).
+6. **Close.** After the merge, deploy `main` to the Pi and run its checks yourself over `ssh kira` (`docs/despliegue.md`); a ticket hands the Pi to a person only when that fails. When the subphase's done-criteria hold, update its state in `docs/plan.md` and bring `docs/guia/` up to date (`docs/AGENTS.md`, «The guide»).
 7. **Learn.** `/retro` on the session, before its context is lost.
 
 ## Context
