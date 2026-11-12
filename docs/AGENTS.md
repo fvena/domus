@@ -3,7 +3,7 @@
 Written in Spanish, except `agents/`.
 
 - `guia/`: the guide for people, including readers who do not program. It is updated when a phase or subphase closes. See «The guide» below.
-- `agents/`: instructions for the agent skills (issue tracker, triage labels, domain docs). In English, like the `AGENTS.md` files.
+- `agents/`: instructions for the agent skills (workflow, issue tracker, triage labels, domain docs). In English, like the `AGENTS.md` files.
 - `plan.md`: the plan by phases, the only place it is written: what each includes, when it is done, its state. Update a phase's state there when it changes.
 - `despliegue.md`: how the Raspberry Pi runs Domus, and how to update and check it. Keep it in step with what is really on the Pi.
 - `architecture/README.md`: the architecture in one document, with the index of ADRs.

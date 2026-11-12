@@ -55,6 +55,10 @@ Apps only wire programs together; business logic lands in a module or in platfor
 
 ## Agent skills
 
+### Workflow
+
+From idea to merge with the mattpocock skills, step by step and inside the current phase: `docs/agents/workflow.md`.
+
 ### Issue tracker
 
 Issues and specs live as local markdown files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
