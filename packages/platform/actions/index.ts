@@ -138,8 +138,15 @@ export function createActions({
 			throw new ORPCError("BAD_REQUEST", { message: "a write needs an idempotency key" });
 		const print = fingerprint(action, input);
 
+		// Looking the key up, running and logging stay in one synchronous section of one transaction, so no other
+		// write with the same key can slip in between.
 		const transaction = connection.transaction((): WriteReceipt => {
+			const earlier = audit.findByKey(actor, key);
+			if (earlier && earlier.fingerprint !== print) throw conflict("key-reused");
 			if (!isAllowed(authorizer, { actor, action, input })) throw new ORPCError("FORBIDDEN");
+			// The same request again: its stored result and entry, without running the handler. Until expiry
+			// arrives, the stored content counts as always current.
+			if (earlier) return { result: earlier.result, entry: earlier.entry };
 
 			const now = clock();
 			const outcome = checkOutcome(found, run(found, actor, input, now));
@@ -226,6 +233,14 @@ export function createActions({
 				: read(found, actor, action, validated.value);
 		},
 	};
+}
+
+/** The reasons of a conflict the platform answers (ADR 0022). */
+type ConflictReason = "key-reused";
+
+/** A conflict, with its reason in `data.reason`. */
+function conflict(reason: ConflictReason) {
+	return new ORPCError("CONFLICT", { data: { reason } });
 }
 
 /** Any unexpected failure: nothing of the original error, neither its message nor its stack, leaves. */

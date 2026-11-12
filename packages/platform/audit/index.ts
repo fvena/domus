@@ -51,9 +51,18 @@ export interface LogEntry {
 	readonly touched: readonly LoggedRecord[];
 }
 
+/** An entry found by its key: what a repeated write needs to answer without running again. */
+export interface KeyedEntry {
+	readonly entry: number;
+	readonly fingerprint: string;
+	readonly result: unknown;
+}
+
 export interface Audit {
 	/** Writes an entry and its touched records; returns its number. Only inside an open transaction. */
 	record(entry: NewEntry): number;
+	/** The entry of `actor` (its account and `via`) under `key`, if there is one. */
+	findByKey(actor: Actor, key: string): KeyedEntry | undefined;
 	/** Every entry, in order, with its content even when expired. For the testing entry only. */
 	entries(): readonly LogEntry[];
 }
@@ -89,6 +98,9 @@ export function createAudit(connection: Database.Database): Audit {
 	const insertTouched = connection.prepare(
 		"INSERT INTO platform_action_log_touched (entry, module, type, id) VALUES (?, ?, ?, ?)",
 	);
+	const selectByKey = connection.prepare(
+		"SELECT entry, fingerprint, result FROM platform_action_log WHERE account = ? AND via IS ? AND key = ?",
+	);
 	const selectEntries = connection.prepare("SELECT * FROM platform_action_log ORDER BY entry");
 	const selectTouched = connection.prepare(
 		"SELECT entry, module, type, id FROM platform_action_log_touched ORDER BY entry, rowid",
@@ -121,6 +133,19 @@ export function createAudit(connection: Database.Database): Audit {
 				insertTouched.run(number, entry.module, type, String(id));
 			}
 			return number;
+		},
+
+		findByKey(actor, key) {
+			const row = selectByKey.get(actor.account, actor.via ?? null, key) as
+				| Pick<EntryRow, "entry" | "fingerprint" | "result">
+				| undefined;
+			return (
+				row && {
+					entry: row.entry,
+					fingerprint: row.fingerprint,
+					result: fromJson(row.result),
+				}
+			);
 		},
 
 		entries() {

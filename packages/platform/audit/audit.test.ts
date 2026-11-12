@@ -72,6 +72,29 @@ describe("the action log", () => {
 				],
 			},
 		]);
+		expect(audit.findByKey({ account: "ana", via: "kira" }, "k1")).toEqual({
+			entry: 1,
+			fingerprint: "probe.addNote:abc",
+			result: { id: 1, body: "pan" },
+		});
+	});
+
+	it("finds an entry by its key only for the same account and via, no via being a value of its own", () => {
+		const audit = upgradedBase();
+		db.transaction(() => {
+			audit.record(entry({ actor: { account: "ana" }, result: null }));
+			audit.record(entry({ actor: { account: "ana", via: "" }, result: undefined }));
+		})();
+
+		expect(audit.findByKey({ account: "ana" }, "k1")).toMatchObject({ entry: 1, result: null });
+		expect(audit.findByKey({ account: "ana", via: "" }, "k1")).toEqual({
+			entry: 2,
+			fingerprint: "probe.addNote:abc",
+			result: undefined,
+		});
+		expect(audit.findByKey({ account: "ana", via: "kira" }, "k1")).toBeUndefined();
+		expect(audit.findByKey({ account: "luis" }, "k1")).toBeUndefined();
+		expect(audit.findByKey({ account: "ana" }, "k2")).toBeUndefined();
 	});
 
 	it("keeps an entry without input, result or inverse apart from one whose values are null", () => {
