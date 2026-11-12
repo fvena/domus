@@ -7,6 +7,7 @@ import { checkModules, type ModuleDefinition, PLATFORM_ID } from "@domus/module-
 import Database from "better-sqlite3";
 
 import { type Actions, type Clock, createActions } from "./actions";
+import { type Audit, createAudit } from "./audit";
 import { type Authorizer, denyEverything } from "./authorization";
 import { migrations } from "./migrations";
 import { migrate } from "./migrator";
@@ -33,13 +34,14 @@ export interface PlatformRuntime {
 
 const IN_MEMORY = ":memory:";
 
-/** The connection, modules and actions behind each platform, kept out of its public shape: only platform reaches them. */
+/** The connection, modules, actions and action log behind each platform, kept out of its public shape: only platform reaches them. */
 const internals = new WeakMap<
 	Platform,
 	{
 		readonly db: Database.Database;
 		readonly modules: readonly ModuleDefinition[];
 		readonly actions: Actions;
+		readonly audit: Audit;
 	}
 >();
 
@@ -87,8 +89,9 @@ export function openPlatform(
 			if (db.open) db.close();
 		},
 	};
-	const actions = createActions({ connection: db, modules, authorizer, clock });
-	internals.set(platform, { db, modules, actions });
+	const audit = createAudit(db);
+	const actions = createActions({ connection: db, modules, authorizer, clock, audit });
+	internals.set(platform, { db, modules, actions, audit });
 	return platform;
 }
 
@@ -111,4 +114,9 @@ export function modulesOf(platform: Platform): readonly ModuleDefinition[] {
 /** The actions of a platform's modules. Inside platform only: no door serves them until phase 1c. */
 export function actionsOf(platform: Platform): Actions {
 	return internalsOf(platform).actions;
+}
+
+/** The action log of a platform. Inside platform only: who reads it is decided in phase 1c. */
+export function auditOf(platform: Platform): Audit {
+	return internalsOf(platform).audit;
 }

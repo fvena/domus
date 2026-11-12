@@ -1,10 +1,16 @@
 // What a module's `server/` writes to implement its contract (ADR 0022): one synchronous handler per action.
 // The context is the only place where a module's production code gets its database: the SDK offers no
 // other way to obtain it.
-import type { ContractProcedure, InferSchemaInput, InferSchemaOutput } from "@orpc/contract";
+import type {
+	ContractProcedure,
+	ErrorMap,
+	InferSchemaInput,
+	InferSchemaOutput,
+	ORPCError,
+} from "@orpc/contract";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 
-import type { ActionContract, ModuleContract } from "./contracts";
+import type { ActionContract, ModuleContract, ReadActionMeta, WriteActionMeta } from "./contracts";
 
 /** What a module's exports may hold: its tables, made with `moduleTables`, and anything else Drizzle reads. */
 export type ModuleSchema = Readonly<Record<string, unknown>>;
@@ -21,8 +27,22 @@ export interface Actor {
 	readonly via?: string;
 }
 
+/**
+ * One constructor per error the action's contract declares. A handler throws what it builds, and the error
+ * leaves the platform as it is; any other exception leaves as an internal error.
+ */
+export type ActionErrors<TErrorMap extends ErrorMap> = {
+	readonly [TCode in keyof TErrorMap & string]: (options?: {
+		readonly message?: string;
+	}) => ORPCError<TCode, unknown>;
+};
+
 /** What a handler receives. A handler never keeps it to use after it returns. */
-export interface ActionContext<TInput, TSchema extends ModuleSchema> {
+export interface ActionContext<
+	TInput,
+	TSchema extends ModuleSchema,
+	TErrorMap extends ErrorMap = ErrorMap,
+> {
 	/** The input, already validated by the contract. */
 	readonly input: TInput;
 	/** The module's own database. */
@@ -30,6 +50,29 @@ export interface ActionContext<TInput, TSchema extends ModuleSchema> {
 	readonly actor: Actor;
 	/** The platform clock's instant, in milliseconds since the epoch (ADR 0021). */
 	readonly now: number;
+	/** The errors its contract declares. */
+	readonly errors: ActionErrors<TErrorMap>;
+}
+
+/** A record of its own module that a write changed, by type and id, so undo can see later changes. */
+export interface TouchedRecord {
+	readonly type: string;
+	readonly id: string | number;
+}
+
+/**
+ * The action that undoes a write: a write of the same module, by its full name (`<module>.<action>`), and its
+ * input. The platform checks both before it commits the write.
+ */
+export interface Inverse {
+	readonly action: string;
+	readonly input: unknown;
+}
+
+/** What a write's handler returns: its result and the records it touched. */
+export interface WriteOutcome<TResult> {
+	readonly result: TResult;
+	readonly touched: readonly TouchedRecord[];
 }
 
 /** What a caller passes to an action: its contract's input before validation. */
@@ -54,6 +97,30 @@ export type ActionOutput<TAction> =
 		? InferSchemaOutput<TOutputSchema>
 		: never;
 
+/** The metadata of an action: whether it reads or writes, and whether a write can be undone. */
+export type ActionMetaOf<TAction> =
+	TAction extends ContractProcedure<infer _I, infer _O, infer _E, infer TMeta> ? TMeta : never;
+
+/** What a handler returns before the platform validates it, as its contract's output schema takes it. */
+type HandlerResult<TAction> =
+	TAction extends ContractProcedure<infer _I, infer TOutputSchema, infer _E, infer _M>
+		? InferSchemaInput<TOutputSchema>
+		: never;
+
+/**
+ * A read returns its result. A write returns a {@link WriteOutcome} and, only when its contract declares
+ * it undoable, its {@link Inverse}. An action whose kind is not known here (the plain `ModuleDefinition`
+ * the platform takes) may return anything: the platform checks it.
+ */
+type HandlerReturn<TAction> =
+	ActionMetaOf<TAction> extends ReadActionMeta
+		? HandlerResult<TAction>
+		: ActionMetaOf<TAction> extends WriteActionMeta<true>
+			? WriteOutcome<HandlerResult<TAction>> & { readonly inverse: Inverse }
+			: ActionMetaOf<TAction> extends WriteActionMeta<false>
+				? WriteOutcome<HandlerResult<TAction>> & { readonly inverse?: undefined }
+				: unknown;
+
 /**
  * The handler of one action. Written as a method so a module with typed handlers still fits the plain
  * `ModuleDefinition` that the platform takes.
@@ -64,11 +131,12 @@ export type ActionHandler<TAction extends ActionContract, TSchema extends Module
 			TAction extends ContractProcedure<infer TInputSchema, infer _O, infer _E, infer _M>
 				? InferSchemaOutput<TInputSchema>
 				: never,
-			TSchema
+			TSchema,
+			TAction extends ContractProcedure<infer _I, infer _O, infer TErrorMap, infer _M>
+				? TErrorMap
+				: never
 		>,
-	): TAction extends ContractProcedure<infer _I, infer TOutputSchema, infer _E, infer _M>
-		? InferSchemaInput<TOutputSchema>
-		: never;
+	): HandlerReturn<TAction>;
 }["handle"];
 
 /** The implementation of a contract: one handler per action, by the same names. */

@@ -4,13 +4,18 @@
 // its database: nothing here hands one out. Each later subphase adds its piece.
 export type {
 	ActionContext,
+	ActionErrors,
 	ActionHandler,
 	ActionInput,
+	ActionMetaOf,
 	ActionOutput,
 	Actor,
+	Inverse,
 	ModuleActions,
 	ModuleDatabase,
 	ModuleSchema,
+	TouchedRecord,
+	WriteOutcome,
 } from "./actions";
 export {
 	checkModules,

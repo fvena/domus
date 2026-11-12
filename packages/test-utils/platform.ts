@@ -4,19 +4,23 @@ import { join } from "node:path";
 
 import type {
 	ActionInput,
+	ActionMetaOf,
 	ActionOutput,
 	Actor,
 	ModuleDefinition,
 	ModuleSchema,
 } from "@domus/module-sdk";
+import type { WriteActionMeta } from "@domus/module-sdk/contracts";
 import { createHttpHandler, type HttpHandler, type Platform } from "@domus/platform";
 import {
 	type Authorizer,
 	createPlatformWith,
 	type Decision,
 	invokeAction,
+	type LogEntry,
 	type ModuleDatabase,
 	moduleDatabase,
+	readLog,
 } from "@domus/platform/testing";
 
 type AnyModule = ModuleDefinition;
@@ -49,6 +53,24 @@ type InputArguments<TInput> = unknown extends TInput
 	: undefined extends TInput
 		? [input?: TInput]
 		: [input: TInput];
+
+/** What a write takes besides its input. */
+export interface WriteOptions {
+	/** The idempotency key: the caller's name for this operation. */
+	readonly key: string;
+}
+
+/** A read takes its input; a write takes its input, even when it has none, and its key. */
+type InvokeArguments<TAction> =
+	ActionMetaOf<TAction> extends WriteActionMeta
+		? [input: ActionInput<TAction>, options: WriteOptions]
+		: InputArguments<ActionInput<TAction>>;
+
+/** A read returns its result; a write, its result and the number of its entry in the action log. */
+export type InvokeResult<TAction> =
+	ActionMetaOf<TAction> extends WriteActionMeta
+		? { readonly result: ActionOutput<TAction>; readonly entry: number }
+		: ActionOutput<TAction>;
 
 export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	/** The modules under test: tests import them and pass them here; test-utils imports none. */
@@ -91,13 +113,19 @@ export interface TestPlatform<
 	actor(account: string, options?: { readonly via?: string }): Actor;
 	/**
 	 * Runs an action of `modules` through the platform's real path. A read takes no key and returns its
-	 * result. Platform errors are thrown, with their oRPC `code`.
+	 * result. A write takes its key and returns its result and entry number. Platform errors, and those a
+	 * contract declares, are thrown with their oRPC `code`.
 	 */
 	invoke<TName extends ActionName<TModules>>(
 		actor: Actor,
 		action: TName,
-		...input: InputArguments<ActionInput<ActionContractOf<TModules, TName>>>
-	): ActionOutput<ActionContractOf<TModules, TName>>;
+		...args: InvokeArguments<ActionContractOf<TModules, TName>>
+	): InvokeResult<ActionContractOf<TModules, TName>>;
+	/**
+	 * A read-only snapshot of the action log: every entry, in order, with its content even when expired. That
+	 * exception is only for tests.
+	 */
+	log(): readonly LogEntry[];
 	/** Closes the platform and removes the temporary folder it created. Safe to call more than once. */
 	close(): void;
 }
@@ -159,8 +187,9 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		},
 		actor: (account, options) =>
 			options?.via === undefined ? { account } : { account, via: options.via },
-		invoke: (actor, action, ...[input]) =>
-			invokeAction(platform, { actor, action, input }) as never,
+		invoke: (actor, action, ...[input, options]) =>
+			invokeAction(platform, { actor, action, input, key: options?.key }) as never,
+		log: () => readLog(platform),
 		close,
 		[Symbol.asyncDispose]: () => Promise.resolve(close()),
 	};

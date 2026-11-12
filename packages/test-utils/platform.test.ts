@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { defineModule } from "@domus/module-sdk";
-import { readAction } from "@domus/module-sdk/contracts";
+import { readAction, writeAction } from "@domus/module-sdk/contracts";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
 
@@ -24,10 +24,15 @@ const clockwork = defineModule({
 		double: readAction()
 			.input(z.object({ value: z.number() }))
 			.output(z.number()),
+		/** A write that changes nothing but is logged. */
+		tick: writeAction({ undoable: false })
+			.input(z.object({ value: z.number() }))
+			.output(z.number()),
 	},
 	actions: {
 		whoAndWhen: ({ actor, now }) => ({ actor, now }),
 		double: ({ input }) => input.value * 2,
+		tick: ({ input }) => ({ result: input.value, touched: [] }),
 	},
 });
 
@@ -67,6 +72,31 @@ describe("createTestPlatform with actions", () => {
 		expect(() => test.invoke(ana, "clockwork.double", { value: "2" })).toThrow();
 		// @ts-expect-error: an action with input needs it.
 		expect(() => test.invoke(ana, "clockwork.double")).toThrow();
+		// @ts-expect-error: a read takes no key.
+		test.invoke(ana, "clockwork.double", { value: 2 }, { key: "k1" });
+	});
+
+	it("types a write: it takes its key and returns its result and entry number", async () => {
+		await using test = createTestPlatform({ modules: [clockwork] });
+		const ana = test.actor("ana");
+
+		const written = test.invoke(ana, "clockwork.tick", { value: 7 }, { key: "k1" });
+
+		expectTypeOf(written).toEqualTypeOf<{ readonly result: number; readonly entry: number }>();
+		expect(written).toEqual({ result: 7, entry: 1 });
+		// @ts-expect-error: a write needs its key.
+		expect(() => test.invoke(ana, "clockwork.tick", { value: 7 })).toThrow();
+	});
+
+	it("gives a read-only snapshot of the action log that the test cannot change", async () => {
+		await using test = createTestPlatform({ modules: [clockwork] });
+		test.invoke(test.actor("ana"), "clockwork.tick", { value: 7 }, { key: "k1" });
+
+		const snapshot = test.log();
+		// @ts-expect-error: the snapshot is read-only.
+		snapshot[0]!.key = "changed";
+
+		expect(test.log()).toEqual([expect.objectContaining({ entry: 1, key: "k1", result: 7 })]);
 	});
 });
 
@@ -92,7 +122,8 @@ describe("createTestPlatform", () => {
 			],
 		});
 		await using test = createTestPlatform({ modules: [notes] });
-		expect(test.platform.appliedMigrations).toBe(2);
+		// platform/0000, platform/0001 and the module's.
+		expect(test.platform.appliedMigrations).toBe(3);
 	});
 
 	it("puts the file in a temporary folder it removes on close", () => {

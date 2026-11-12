@@ -17,5 +17,81 @@ export default defineModule({
 		listNotes: ({ db }) => db.select().from(schema.notes).orderBy(schema.notes.id).all(),
 		getNote: ({ db, input }) =>
 			db.select().from(schema.notes).where(eq(schema.notes.id, input.id)).get() ?? null,
+
+		addNote: ({ db, input }) => {
+			const added = db.insert(schema.notes).values({ body: input.body }).returning().get();
+			return {
+				result: added,
+				touched: [{ type: "note", id: added.id }],
+				inverse: { action: "probe.deleteNote", input: { id: added.id } },
+			};
+		},
+		editNote: ({ db, input, errors }) => {
+			const before = db
+				.select()
+				.from(schema.notes)
+				.where(eq(schema.notes.id, input.id))
+				.get();
+			if (!before) throw errors.NOTE_NOT_FOUND();
+			const edited = db
+				.update(schema.notes)
+				.set({ body: input.body })
+				.where(eq(schema.notes.id, input.id))
+				.returning()
+				.get();
+			if (!edited) throw errors.NOTE_NOT_FOUND();
+			return {
+				result: edited,
+				touched: [{ type: "note", id: edited.id }],
+				inverse: { action: "probe.editNote", input: before },
+			};
+		},
+		deleteNote: ({ db, input, errors }) => {
+			const found = db.select().from(schema.notes).where(eq(schema.notes.id, input.id)).get();
+			if (!found) throw errors.NOTE_NOT_FOUND();
+			const comment = db
+				.select({ id: schema.comments.id })
+				.from(schema.comments)
+				.where(eq(schema.comments.noteId, input.id))
+				.get();
+			if (comment) throw errors.NOTE_HAS_COMMENTS();
+			db.delete(schema.notes).where(eq(schema.notes.id, input.id)).run();
+			return {
+				result: found,
+				touched: [{ type: "note", id: found.id }],
+				inverse: { action: "probe.restoreNote", input: found },
+			};
+		},
+		restoreNote: ({ db, input }) => {
+			const restored = db.insert(schema.notes).values(input).returning().get();
+			return {
+				result: restored,
+				touched: [{ type: "note", id: restored.id }],
+				inverse: { action: "probe.deleteNote", input: { id: restored.id } },
+			};
+		},
+		addComment: ({ db, input, errors }) => {
+			const note = db
+				.select()
+				.from(schema.notes)
+				.where(eq(schema.notes.id, input.noteId))
+				.get();
+			if (!note) throw errors.NOTE_NOT_FOUND();
+			const added = db.insert(schema.comments).values(input).returning().get();
+			return {
+				result: added,
+				touched: [{ type: "comment", id: added.id }],
+				inverse: { action: "probe.deleteComment", input: { id: added.id } },
+			};
+		},
+		deleteComment: ({ db, input, errors }) => {
+			const deleted = db
+				.delete(schema.comments)
+				.where(eq(schema.comments.id, input.id))
+				.returning()
+				.get();
+			if (!deleted) throw errors.COMMENT_NOT_FOUND();
+			return { result: deleted, touched: [{ type: "comment", id: deleted.id }] };
+		},
 	},
 });

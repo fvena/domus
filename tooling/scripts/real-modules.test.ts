@@ -53,6 +53,7 @@ describe("the real modules", () => {
 			)
 			.all();
 		expect(applied).toContainEqual({ module: "platform", tag: "0000_migration_history" });
+		expect(applied).toContainEqual({ module: "platform", tag: "0001_action_log" });
 		expect(new Set(applied.map((row) => row.module))).toEqual(new Set(["platform", ...ids]));
 	});
 

@@ -125,7 +125,7 @@ describe("module-sdk", () => {
 			Object.keys(await import(pathToFileURL(join(sdk, entry)).href)).sort();
 
 		expect(await names("index.ts")).toEqual(["PLATFORM_ID", "checkModules", "defineModule"]);
-		expect(await names("contracts/index.ts")).toEqual(["readAction"]);
+		expect(await names("contracts/index.ts")).toEqual(["readAction", "writeAction"]);
 		// Table declarations and query helpers; no drizzle() and no connection.
 		expect(await names("db/index.ts")).toEqual([
 			"blob",
