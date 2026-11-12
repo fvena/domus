@@ -42,6 +42,7 @@ jobs:
     generated:
         name: Generated files are up to date
         runs-on: ubuntu-latest
+        timeout-minutes: 15
         steps:
             - uses: actions/checkout@v4
             - uses: actions/setup-node@v4
@@ -50,12 +51,13 @@ jobs:
             - uses: pnpm/action-setup@v4
             - name: Install dependencies
               run: pnpm install
-            # stdin closed: if drizzle-kit has a question, the job fails. Generate locally and review.
+            # stdin closed: if a generator has a question, the job fails. Generate locally and review.
             - name: Regenerate migrations
               timeout-minutes: 5
               run: pnpm db:generate < /dev/null
             - name: Regenerate the module lists
-              run: pnpm modules:generate
+              timeout-minutes: 5
+              run: pnpm modules:generate < /dev/null
             # New untracked files count too: a migration nobody committed is a change.
             - name: Nothing changed
               run: |

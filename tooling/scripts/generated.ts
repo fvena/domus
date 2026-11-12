@@ -11,6 +11,11 @@ export function moduleFolders(root: string, file: string): string[] {
 		.sort();
 }
 
+/** The message of something a generator caught, for its one-line report. */
+export function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
 /** Writes `source` to `target` unless it already holds exactly that. Returns whether it wrote. */
 export function writeIfChanged(target: string, source: string): boolean {
 	if (existsSync(target) && readFileSync(target, "utf8") === source) return false;

@@ -2,9 +2,6 @@
 // before every module's. platform/0000 creates the history and is the first row written into it.
 import type { ModuleMigration } from "@domus/module-sdk";
 
-/** The name the platform's rows carry in `platform_migrations.module`; no module may take it. */
-export const PLATFORM_MODULE = "platform";
-
 export const migrations: readonly ModuleMigration[] = [
 	{
 		tag: "0000_migration_history",

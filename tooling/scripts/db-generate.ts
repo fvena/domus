@@ -5,7 +5,7 @@
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
-import { moduleFolders, writeIfChanged } from "./generated";
+import { errorMessage, moduleFolders, writeIfChanged } from "./generated";
 import { migrationsSource } from "./module-migrations";
 
 const root = join(import.meta.dirname, "../..");
@@ -47,8 +47,7 @@ function generate(): void {
 			if (writeIfChanged(join(root, server, "migrations.ts"), source))
 				console.log(`db:generate: wrote ${server}/migrations.ts`);
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			throw new Error(`db:generate: module "${id}": ${message}`);
+			throw new Error(`db:generate: module "${id}": ${errorMessage(error)}`);
 		}
 	}
 }
@@ -56,6 +55,6 @@ function generate(): void {
 try {
 	generate();
 } catch (error) {
-	console.error(error instanceof Error ? error.message : String(error));
+	console.error(errorMessage(error));
 	process.exitCode = 1;
 }

@@ -33,8 +33,8 @@ export function defineModule<TSchema extends ModuleSchema>(
 }
 
 const MODULE_ID = /^[a-z][a-z0-9]*$/;
-/** The prefix of the platform's tables (`platform_migrations`): no module may take it. */
-const RESERVED_ID = "platform";
+/** The platform's own id: the prefix of its tables and the owner of its rows in `platform_migrations`. No module may take it. */
+export const PLATFORM_ID = "platform";
 
 /**
  * Checks a list of module definitions before they are registered: by createPlatform and by the module list
@@ -47,7 +47,7 @@ export function checkModules(modules: readonly ModuleDefinition[]): void {
 		seen.add(module.id);
 		if (!MODULE_ID.test(module.id))
 			throw new Error(`module "${module.id}": the id must match [a-z][a-z0-9]*`);
-		if (module.id === RESERVED_ID)
+		if (module.id === PLATFORM_ID)
 			throw new Error(
 				`module "${module.id}": the id is reserved for the platform's own tables`,
 			);

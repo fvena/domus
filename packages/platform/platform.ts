@@ -2,10 +2,10 @@
 // It checks the module definitions, opens SQLite and brings its schema up to date before anything uses it.
 import { isAbsolute } from "node:path";
 
-import { checkModules, type ModuleDefinition } from "@domus/module-sdk";
+import { checkModules, type ModuleDefinition, PLATFORM_ID } from "@domus/module-sdk";
 import Database from "better-sqlite3";
 
-import { migrations, PLATFORM_MODULE } from "./migrations";
+import { migrations } from "./migrations";
 import { migrate } from "./migrator";
 
 export interface PlatformOptions {
@@ -49,7 +49,7 @@ export function createPlatform({ databaseFile, modules }: PlatformOptions): Plat
 		}
 		db.pragma("foreign_keys = ON");
 		appliedMigrations = migrate(db, [
-			{ module: PLATFORM_MODULE, migrations },
+			{ module: PLATFORM_ID, migrations },
 			...modules.map((module) => ({ module: module.id, migrations: module.migrations })),
 		]);
 	} catch (error) {

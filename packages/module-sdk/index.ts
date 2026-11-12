@@ -6,4 +6,5 @@ export {
 	type ModuleDefinition,
 	type ModuleMigration,
 	type ModuleSchema,
+	PLATFORM_ID,
 } from "./module";

@@ -46,9 +46,8 @@ export function migrate(db: Database.Database, sources: readonly MigrationSource
 					`INSERT INTO ${HISTORY_TABLE} (module, position, tag, hash, applied_at) VALUES (?, ?, ?, ?, ?)`,
 				).run(module, migration.position, migration.tag, migration.hash, Date.now());
 				// After each migration, so the next one cannot take an id a rebuild in this one lost.
-				// A table dropped here keeps its last value, for a later migration that creates it again.
 				restoreSequences(db, sequences);
-				sequences = new Map([...sequences, ...readSequences(db)]);
+				sequences = readSequences(db);
 			}
 			checkForeignKeys(db);
 			db.exec("COMMIT");

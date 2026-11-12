@@ -2,7 +2,7 @@
 // leaving out the testOnly ones. CI regenerates it and fails if anything changed.
 import { join } from "node:path";
 
-import { writeIfChanged } from "./generated";
+import { errorMessage, writeIfChanged } from "./generated";
 import { loadModules, moduleListOutputs, moduleListSource } from "./module-list";
 
 const root = join(import.meta.dirname, "../..");
@@ -16,6 +16,6 @@ async function generate(): Promise<void> {
 }
 
 generate().catch((error: unknown) => {
-	console.error(`modules:generate: ${error instanceof Error ? error.message : String(error)}`);
+	console.error(`modules:generate: ${errorMessage(error)}`);
 	process.exitCode = 1;
 });
