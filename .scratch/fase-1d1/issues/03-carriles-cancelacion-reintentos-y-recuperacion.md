@@ -40,3 +40,4 @@ El motor completo sobre lo que dejó la 01: dos carriles que no se estorban, tra
     - El planificador (02) debe ver como «en curso» un trabajo `pending` que reintenta, `running` o `stuck`.
     - `engine.nextDue()` incluye ya los tiempos máximos y márgenes de los trabajos en curso, así el despertar llega a tiempo.
     - Mando: opción `jobs` de `createTestPlatform` (tipos sintéticos de cualquier carril), `background.enqueue(kind)`, `background.flush()` (deja terminar lo que la prueba ya soltó sin esperar a lo retenido) y `background.jobs()`. `PermanentJobError` se exporta desde `@domus/test-utils`.
+- Revisión en `e8bbf67`: el resultado `stuck` de las ejecuciones se quita (migración `platform/0009`); atascado es solo un estado del trabajo. `JobSnapshot.state` se deriva de la columna de `platform_jobs` en `schema.ts`.
