@@ -1,6 +1,6 @@
 # 01. Una lectura de `probe` de punta a punta
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: ninguna (puede empezar ya)
 
 Spec: [`../spec.md`](../spec.md), secciones «Contratos», «Implementación y definición del módulo», «El recorrido» (la parte de lectura), «Autorización hasta la 1c», «Actor» y «`test-utils` y la entrada de pruebas de `platform`». ADR 0022.
@@ -22,8 +22,13 @@ Piezas que llegan con esta tarea:
 
 ## Aceptación
 
-- [ ] Pruebas de `probe`: las dos lecturas devuelven lo que se preparó con `dbFor`; una entrada no válida se rechaza; una denegación y una excepción del autorizador terminan sin ejecutar el manejador.
-- [ ] Pruebas de `platform` con definiciones escritas en la prueba: `createPlatform` deniega toda acción; nombre repetido, acción sin implementación e implementación sin contrato fallan al arrancar nombrando módulo y acción; una lectura que intenta escribir falla y una escritura legítima posterior por la construcción de pruebas funciona (`query_only` restaurado); una excepción inesperada sale como error interno sin mensaje ni pila.
-- [ ] `architecture.test.ts` y sus fixtures: la entrada de contratos de `module-sdk` no alcanza Drizzle, Node ni el resto del SDK; solo `test-utils` importa la entrada de pruebas de `platform`. Una comprobación de las exportaciones del SDK demuestra que no ofrece otra forma de obtener la base de datos de un módulo.
-- [ ] La puerta sigue sin montar acciones: `status` es la única RPC.
-- [ ] Pasan `pnpm format:check`, `pnpm lint`, `pnpm type-check` y `pnpm test`, y `pnpm db:generate && pnpm modules:generate` dejan `git status --porcelain` vacío.
+- [x] Pruebas de `probe`: las dos lecturas devuelven lo que se preparó con `dbFor`; una entrada no válida se rechaza; una denegación y una excepción del autorizador terminan sin ejecutar el manejador.
+- [x] Pruebas de `platform` con definiciones escritas en la prueba: `createPlatform` deniega toda acción; nombre repetido, acción sin implementación e implementación sin contrato fallan al arrancar nombrando módulo y acción; una lectura que intenta escribir falla y una escritura legítima posterior por la construcción de pruebas funciona (`query_only` restaurado); una excepción inesperada sale como error interno sin mensaje ni pila.
+- [x] `architecture.test.ts` y sus fixtures: la entrada de contratos de `module-sdk` no alcanza Drizzle, Node ni el resto del SDK; solo `test-utils` importa la entrada de pruebas de `platform`. Una comprobación de las exportaciones del SDK demuestra que no ofrece otra forma de obtener la base de datos de un módulo.
+- [x] La puerta sigue sin montar acciones: `status` es la única RPC.
+- [x] Pasan `pnpm format:check`, `pnpm lint`, `pnpm type-check` y `pnpm test`, y `pnpm db:generate && pnpm modules:generate` dejan `git status --porcelain` vacío.
+
+## Comments
+
+- Hecha en `1ad9a53`.
+- Un nombre completo repetido solo puede darse con dos definiciones del mismo módulo (los ids no llevan punto), por eso `checkModules` comprueba las acciones antes que el id repetido: así el error nombra la acción.
