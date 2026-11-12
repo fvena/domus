@@ -17,7 +17,16 @@ export interface PlatformOptions {
 	readonly databaseFile: string;
 	/** The modules, in the order their migrations run, after the platform's own. */
 	readonly modules: readonly ModuleDefinition[];
+	/**
+	 * How long the content of an entry in the action log (input, result, inverse) stays usable, in
+	 * milliseconds: {@link DEFAULT_RETENTION} when unset. Each entry keeps the `expiresAt` it got when it was
+	 * written, so a change applies only to new entries.
+	 */
+	readonly retention?: number;
 }
+
+/** The retention of the action log's content unless one is given: 30 days. */
+const DEFAULT_RETENTION = 30 * 24 * 60 * 60 * 1000;
 
 export interface Platform {
 	/** How many migrations this start applied, for the log of `apps/api`. */
@@ -49,18 +58,23 @@ const internals = new WeakMap<
  * Opens SQLite and applies the pending migrations. On any failure it closes the connection and throws. It
  * takes no authorizer: in phase 1b every action is denied.
  */
-export function createPlatform({ databaseFile, modules }: PlatformOptions): Platform {
-	return openPlatform({ databaseFile, modules }, { authorizer: denyEverything, clock: Date.now });
+export function createPlatform(options: PlatformOptions): Platform {
+	return openPlatform(options, { authorizer: denyEverything, clock: Date.now });
 }
 
 /** createPlatform with a given runtime. Inside platform only; the testing entry hands it to test-utils. */
 export function openPlatform(
-	{ databaseFile, modules }: PlatformOptions,
+	{ databaseFile, modules, retention = DEFAULT_RETENTION }: PlatformOptions,
 	{ authorizer, clock }: PlatformRuntime,
 ): Platform {
 	if (databaseFile !== IN_MEMORY && !isAbsolute(databaseFile)) {
 		throw new Error(
 			`databaseFile must be an absolute path or ":memory:", got "${databaseFile}"`,
+		);
+	}
+	if (!Number.isSafeInteger(retention) || retention <= 0) {
+		throw new Error(
+			`retention must be a positive whole number of milliseconds, got ${String(retention)}`,
 		);
 	}
 	checkModules(modules);
@@ -90,7 +104,14 @@ export function openPlatform(
 		},
 	};
 	const audit = createAudit(db);
-	const actions = createActions({ connection: db, modules, authorizer, clock, audit });
+	const actions = createActions({
+		connection: db,
+		modules,
+		authorizer,
+		clock,
+		audit,
+		retention,
+	});
 	internals.set(platform, { db, modules, actions, audit });
 	return platform;
 }

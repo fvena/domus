@@ -70,10 +70,9 @@ export interface ActionsOptions {
 	readonly authorizer: Authorizer;
 	readonly clock: Clock;
 	readonly audit: Audit;
+	/** How long the content of a new entry (input, result, inverse) stays usable, in milliseconds. */
+	readonly retention: number;
 }
-
-/** How long the content of an entry (input, result, inverse) stays usable: 30 days. */
-const RETENTION = 30 * 24 * 60 * 60 * 1000;
 
 interface RegisteredAction {
 	readonly module: string;
@@ -90,6 +89,7 @@ export function createActions({
 	authorizer,
 	clock,
 	audit,
+	retention,
 }: ActionsOptions): Actions {
 	const registry = new Map<string, RegisteredAction>();
 	for (const module of modules) {
@@ -173,7 +173,8 @@ export function createActions({
 			key,
 			print,
 			() => {
-				// A repeated undo: the entry it undid and that entry's inverse are in the log.
+				// A repeated undo: the entry it undid and that entry's inverse are in the log. The inverse only
+				// builds the request to authorize anew, even when expired: it is neither returned nor run.
 				const original = audit.find(number);
 				if (!original?.inverse) throw internalError();
 				return requestFor(original, original.inverse);
@@ -183,6 +184,7 @@ export function createActions({
 				if (!original) throw new ORPCError("NOT_FOUND", { message: `no entry ${number}` });
 				if (original.undoneBy !== null) throw conflict("already-undone");
 				if (!original.inverse) throw notUndoable("irreversible");
+				if (isExpired(original.expiresAt)) throw notUndoable("expired");
 				if (audit.touchedLater(number)) throw conflict("changed-since");
 				if (!isAllowed(authorizer, requestFor(original, original.inverse)))
 					throw new ORPCError("FORBIDDEN");
@@ -226,7 +228,8 @@ export function createActions({
 			if (earlier.fingerprint !== print) throw conflict("key-reused");
 			const request = typeof repeated === "function" ? repeated() : repeated;
 			if (!isAllowed(authorizer, request)) throw new ORPCError("FORBIDDEN");
-			// Until expiry arrives, the stored content counts as always current.
+			// An expired result is never returned, and the operation never runs again under the same key.
+			if (isExpired(earlier.expiresAt)) throw conflict("result-expired");
 			return { result: earlier.result, entry: earlier.entry };
 		});
 
@@ -238,6 +241,11 @@ export function createActions({
 			if (error instanceof ORPCError) throw error;
 			throw internalError();
 		}
+	}
+
+	/** True from `expiresAt` on, by the platform clock: the content of that entry is no longer used. */
+	function isExpired(expiresAt: number): boolean {
+		return clock() >= expiresAt;
 	}
 
 	/** Runs an authorized write's handler, checks what it returned and logs its entry. */
@@ -256,7 +264,7 @@ export function createActions({
 			key: log.key,
 			fingerprint: log.fingerprint,
 			at: now,
-			expiresAt: now + RETENTION,
+			expiresAt: now + retention,
 			input,
 			result: outcome.result,
 			inverse: outcome.inverse,
@@ -327,7 +335,7 @@ export function createActions({
 }
 
 /** The reasons of a conflict the platform answers (ADR 0022). */
-type ConflictReason = "key-reused" | "already-undone" | "changed-since";
+type ConflictReason = "key-reused" | "already-undone" | "changed-since" | "result-expired";
 
 /** A conflict, with its reason in `data.reason`. */
 function conflict(reason: ConflictReason) {
@@ -335,7 +343,7 @@ function conflict(reason: ConflictReason) {
 }
 
 /** Why an entry cannot be undone (ADR 0022). */
-type NotUndoableReason = "irreversible";
+type NotUndoableReason = "irreversible" | "expired";
 
 /** An entry that cannot be undone, with its reason in `data.reason`, as a conflict carries its own. */
 function notUndoable(reason: NotUndoableReason) {

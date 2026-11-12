@@ -74,4 +74,13 @@ describe("createPlatform", () => {
 			/absolute path/,
 		);
 	});
+
+	it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+		"rejects a retention of %s milliseconds",
+		(retention) => {
+			expect(() =>
+				createPlatform({ databaseFile: ":memory:", modules: [], retention }),
+			).toThrow(/retention/);
+		},
+	);
 });

@@ -57,6 +57,8 @@ export interface LogEntry {
 export interface KeyedEntry {
 	readonly entry: number;
 	readonly fingerprint: string;
+	/** From this instant on, its result is expired. */
+	readonly expiresAt: number;
 	readonly result: unknown;
 }
 
@@ -68,6 +70,8 @@ export interface NumberedEntry {
 	readonly action: string;
 	readonly actor: Actor;
 	readonly undoneBy: number | null;
+	/** From this instant on, its content (input, result, inverse) is expired. */
+	readonly expiresAt: number;
 	/** Absent when its write cannot be undone. */
 	readonly inverse: Inverse | undefined;
 }
@@ -119,10 +123,10 @@ export function createAudit(connection: Database.Database): Audit {
 		"INSERT INTO platform_action_log_touched (entry, module, type, id) VALUES (?, ?, ?, ?)",
 	);
 	const selectByKey = connection.prepare(
-		"SELECT entry, fingerprint, result FROM platform_action_log WHERE account = ? AND via IS ? AND key = ?",
+		"SELECT entry, fingerprint, expires_at, result FROM platform_action_log WHERE account = ? AND via IS ? AND key = ?",
 	);
 	const selectByNumber = connection.prepare(
-		"SELECT entry, module, action, account, via, undone_by, inverse FROM platform_action_log WHERE entry = ?",
+		"SELECT entry, module, action, account, via, undone_by, expires_at, inverse FROM platform_action_log WHERE entry = ?",
 	);
 	const selectTouchedLater = connection.prepare(
 		`SELECT 1 FROM platform_action_log_touched AS mine
@@ -170,12 +174,13 @@ export function createAudit(connection: Database.Database): Audit {
 
 		findByKey(actor, key) {
 			const row = selectByKey.get(actor.account, actor.via ?? null, key) as
-				| Pick<EntryRow, "entry" | "fingerprint" | "result">
+				| Pick<EntryRow, "entry" | "fingerprint" | "expires_at" | "result">
 				| undefined;
 			return (
 				row && {
 					entry: row.entry,
 					fingerprint: row.fingerprint,
+					expiresAt: row.expires_at,
 					result: fromJson(row.result),
 				}
 			);
@@ -185,7 +190,14 @@ export function createAudit(connection: Database.Database): Audit {
 			const row = selectByNumber.get(entry) as
 				| Pick<
 						EntryRow,
-						"entry" | "module" | "action" | "account" | "via" | "undone_by" | "inverse"
+						| "entry"
+						| "module"
+						| "action"
+						| "account"
+						| "via"
+						| "undone_by"
+						| "expires_at"
+						| "inverse"
 				  >
 				| undefined;
 			return (
@@ -195,6 +207,7 @@ export function createAudit(connection: Database.Database): Audit {
 					action: `${row.module}.${row.action}`,
 					actor: actorOf(row),
 					undoneBy: row.undone_by,
+					expiresAt: row.expires_at,
 					inverse: fromJson(row.inverse) as Inverse | undefined,
 				}
 			);

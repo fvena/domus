@@ -75,6 +75,7 @@ describe("the action log", () => {
 		expect(audit.findByKey({ account: "ana", via: "kira" }, "k1")).toEqual({
 			entry: 1,
 			fingerprint: "probe.addNote:abc",
+			expiresAt: AT + 1000,
 			result: { id: 1, body: "pan" },
 		});
 	});
@@ -90,6 +91,7 @@ describe("the action log", () => {
 		expect(audit.findByKey({ account: "ana", via: "" }, "k1")).toEqual({
 			entry: 2,
 			fingerprint: "probe.addNote:abc",
+			expiresAt: AT + 1000,
 			result: undefined,
 		});
 		expect(audit.findByKey({ account: "ana", via: "kira" }, "k1")).toBeUndefined();
@@ -136,6 +138,7 @@ describe("the action log", () => {
 			action: "probe.addNote",
 			actor: { account: "ana", via: "kira" },
 			undoneBy: null,
+			expiresAt: AT + 1000,
 			inverse: { action: "probe.deleteNote", input: { id: 1 } },
 		});
 		expect(audit.find(4)).toHaveProperty("inverse", undefined);

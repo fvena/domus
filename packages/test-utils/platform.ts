@@ -82,6 +82,8 @@ export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	 * close. A path: that file, kept on close, for tests that open the same data again.
 	 */
 	readonly file?: true | string;
+	/** How long the content of a new log entry stays usable, in milliseconds. Unset: the platform's 30 days. */
+	readonly retention?: number;
 }
 
 /** The platform clock of a test: it moves only when the test moves it. */
@@ -147,6 +149,7 @@ export const TEST_START = Date.UTC(2026, 0, 1);
 export function createTestPlatform<const TModules extends readonly AnyModule[]>({
 	modules,
 	file,
+	retention,
 }: TestPlatformOptions<TModules>): TestPlatform<TModules> {
 	let tempDir: string | undefined;
 	let databaseFile = file ?? ":memory:";
@@ -170,7 +173,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 	let platform: Platform;
 	try {
 		platform = createPlatformWith(
-			{ databaseFile, modules },
+			{ databaseFile, modules, retention },
 			{ authorizer: (request) => authorizer(request), clock: () => now },
 		);
 	} catch (error) {
