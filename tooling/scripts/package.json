@@ -4,12 +4,18 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
+		"db:generate": "tsx db-generate.ts",
 		"type-check": "tsc --noEmit",
 		"test": "vitest run"
 	},
 	"devDependencies": {
+		"@domus/module-sdk": "workspace:*",
 		"@domus/tsconfig": "workspace:*",
 		"@types/node": "catalog:",
+		"drizzle-kit": "catalog:",
+		"drizzle-orm": "catalog:",
+		"oxfmt": "catalog:",
+		"tsx": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:"
 	}

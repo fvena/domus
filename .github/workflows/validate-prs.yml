@@ -39,6 +39,31 @@ jobs:
             - name: Check formatting
               run: pnpm format:check
 
+    generated:
+        name: Generated files are up to date
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version-file: .nvmrc
+            - uses: pnpm/action-setup@v4
+            - name: Install dependencies
+              run: pnpm install
+            # stdin closed: if drizzle-kit has a question, the job fails. Generate locally and review.
+            - name: Regenerate migrations
+              timeout-minutes: 5
+              run: pnpm db:generate < /dev/null
+            # New untracked files count too: a migration nobody committed is a change.
+            - name: Nothing changed
+              run: |
+                  if [ -n "$(git status --porcelain)" ]; then
+                      echo "Generated files are stale: run pnpm db:generate and commit the result." >&2
+                      git status --porcelain
+                      git --no-pager diff
+                      exit 1
+                  fi
+
     type-check:
         name: Type check
         runs-on: ubuntu-latest

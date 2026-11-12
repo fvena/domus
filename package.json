@@ -6,6 +6,7 @@
 	"type": "module",
 	"scripts": {
 		"build": "dotenv -c -- turbo build",
+		"db:generate": "pnpm --filter @domus/scripts db:generate",
 		"dev": "dotenv -c -- turbo dev",
 		"start": "pnpm run dev",
 		"lint": "oxlint && depcruise --config .dependency-cruiser.cjs apps packages modules",
