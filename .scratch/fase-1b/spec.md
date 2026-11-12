@@ -77,7 +77,7 @@ Una pieza nueva de `platform`, `actions`, ejecuta cada invocación en una sola s
 4. **Escritura**: exige la clave de idempotencia (sin ella, entrada no válida) y calcula la huella. Después abre una transacción de `better-sqlite3`, que abre y confirma `actions`, y dentro de ella, sin salir de una sola sección síncrona:
     1. Busca la entrada del registro para esa cuenta, `via` y clave.
     2. Si existe y su huella es otra: conflicto `key-reused`.
-    3. Si existe con la misma huella: pide la decisión a `authorization`; si deniega o lanza, no permitido y no entrega nada. Si permite y el contenido está vigente, devuelve el resultado guardado y el mismo número de entrada; si caducó, conflicto `result-expired`. En ningún caso ejecuta el manejador.
+    3. Si existe con la misma huella y su contenido caducó: conflicto `result-expired`, sin autorizar ni leer el contenido, porque no se entrega nada. Si está vigente: pide la decisión a `authorization`; si deniega o lanza, no permitido y no entrega nada; si permite, devuelve el resultado guardado y el mismo número de entrada. En ningún caso ejecuta el manejador.
     4. Si no existe: pide la decisión a `authorization`; si deniega o lanza, termina sin ejecutar. Ejecuta el manejador, valida el resultado, valida la inversa y `audit` escribe la entrada del registro y sus registros tocados. Devuelve el resultado y el número de la entrada; la inversa nunca sale.
 
     Cualquier fallo dentro de la transacción, errores de dominio incluidos, revierte el cambio y la entrada.
@@ -122,7 +122,7 @@ Errores comunes de la plataforma, sobre los códigos de oRPC: entrada no válida
 - La huella de una invocación es el nombre completo de la acción más el SHA-256 de la entrada validada en una forma canónica de JSON (claves ordenadas), de modo que el orden de las propiedades no cambia la huella.
 - Buscar la clave, ejecutar e insertar la entrada forman una sola sección síncrona dentro de la transacción, como describe «El recorrido».
 - Misma clave y misma huella, contenido vigente: se vuelve a autorizar y se devuelve el resultado guardado y el mismo número de entrada, sin ejecutar. Si se deniega, no se entrega nada.
-- Misma clave y misma huella, contenido caducado: conflicto `result-expired`, sin ejecutar. Nunca se reintenta solo con otra clave.
+- Misma clave y misma huella, contenido caducado: conflicto `result-expired`, sin ejecutar, sin autorizar y sin leer el contenido caducado. Nunca se reintenta solo con otra clave.
 - Misma clave con otra huella (otra acción u otra entrada): conflicto `key-reused`.
 - Una escritura sin clave se rechaza como entrada no válida.
 - Un intento revertido no deja ni entrada ni clave, y se puede repetir con la misma.
@@ -132,7 +132,7 @@ Errores comunes de la plataforma, sobre los códigos de oRPC: entrada no válida
 - Una operación de la plataforma, `undo`, recibe el actor, el número de una entrada y una clave de idempotencia propia. Nunca acepta una inversa que traiga quien llama.
 - La huella de `undo` es la propia operación más el número de la entrada. Un reintento de `undo` con la misma clave y la misma entrada devuelve el resultado anterior; invocar directamente la acción inversa con esa misma clave es otra huella y da `key-reused`.
 - Dentro de una sola transacción y una sola sección síncrona:
-    1. Busca la clave como en «El recorrido», con la huella de `undo`: otra huella, `key-reused`; misma huella, reautoriza y devuelve el resultado guardado o `result-expired`.
+    1. Busca la clave como en «El recorrido», con la huella de `undo`: otra huella, `key-reused`; misma huella y caducada, `result-expired`; misma huella y vigente, reautoriza con la acción y la entrada guardadas en la propia entrada del deshacer (la inversa que ejecutó, con la entrada original como contexto) y devuelve el resultado guardado.
     2. Si la entrada ya tiene «deshecha por», conflicto `already-undone`.
     3. Si su escritura no es deshacible, no se puede deshacer `irreversible`; si su contenido caducó, `expired`.
     4. Si alguna entrada posterior tocó alguno de sus registros, conflicto `changed-since`, aunque esa entrada posterior se haya deshecho después.
