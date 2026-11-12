@@ -28,4 +28,12 @@ export const generatedMigrations: readonly ModuleMigration[] = [
 			"\nCREATE TABLE `platform_verification` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`identifier` text NOT NULL,\n\t`value` text NOT NULL,\n\t`expires_at` integer NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`updated_at` integer NOT NULL\n);\n",
 		],
 	},
+	{
+		tag: "0003_open_tarot",
+		position: 4,
+		hash: "63428318e310939780db4d66dd5151078a94156c3ff171e810147d7bb1ad9b90",
+		statements: [
+			"CREATE TABLE `platform_delegation` (\n\t`account` text NOT NULL,\n\t`area` text NOT NULL,\n\t`level` text NOT NULL,\n\t`value` text NOT NULL,\n\tPRIMARY KEY(`account`, `area`, `level`),\n\tFOREIGN KEY (`account`) REFERENCES `platform_user`(`id`) ON UPDATE no action ON DELETE cascade,\n\tCONSTRAINT \"platform_delegation_level\" CHECK(\"platform_delegation\".\"level\" IN ('read', 'write', 'manage')),\n\tCONSTRAINT \"platform_delegation_value\" CHECK(\"platform_delegation\".\"value\" IN ('no', 'yes', 'confirm'))\n);\n",
+		],
+	},
 ];

@@ -87,6 +87,35 @@ describe("createTestPlatform with actions", () => {
 		expect(tick(kitchen, "k2").entry).toBe(3);
 	});
 
+	it("prepares delegation rows that Kira's calls follow, and reads the table through the real operation", async () => {
+		const guarded = defineModule({
+			id: "guarded",
+			areas: { "guarded.private": { alwaysPrivate: true } },
+			schema: {},
+			migrations: [],
+		});
+		await using test = createTestPlatform({ modules: [clockwork, guarded] });
+		const kira = test.member("ana", { via: "kira" });
+		const paco = test.context(test.prepare.account({ id: "paco", role: "admin" }));
+
+		expect(test.invoke(kira, "clockwork.double", { value: 2 })).toBe(4);
+		test.prepare.delegation("ana", "clockwork", "read", "no");
+		expect(() => test.invoke(kira, "clockwork.double", { value: 2 })).toThrow(
+			expect.objectContaining({ code: "FORBIDDEN" }),
+		);
+		expect(test.delegation(test.context("ana"), "ana").clockwork).toEqual({
+			read: "no",
+			write: "yes",
+			manage: "no",
+		});
+		// The device account has nothing in an always private area, so it delegates nothing there.
+		expect(test.delegation(paco, test.deviceAccount)["guarded.private"]).toEqual({
+			read: "no",
+			write: "no",
+			manage: "no",
+		});
+	});
+
 	it("rejects a prepared account whose id or email is taken", async () => {
 		await using test = createTestPlatform({ modules: [clockwork] });
 		test.prepare.account({ id: "ana", role: "member" });

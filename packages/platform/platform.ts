@@ -8,9 +8,10 @@ import Database from "better-sqlite3";
 
 import { type Actions, type Clock, createActions } from "./actions";
 import { type ActionLog, createActionLog } from "./audit";
-import { type Authorizer, createAuthorizer } from "./authorization";
+import { type AreaPolicy, type Authorizer, createAuthorizer } from "./authorization";
 import { accessView, registeredAreas } from "./identity/access";
 import { ensureDeviceAccount } from "./identity/accounts";
+import type { DelegationReader } from "./identity/delegation";
 import { migrations } from "./migrations";
 import { migrate } from "./migrator";
 
@@ -57,6 +58,8 @@ const internals = new WeakMap<
 		readonly actions: Actions;
 		readonly actionLog: ActionLog;
 		readonly clock: Clock;
+		readonly areas: ReadonlyMap<string, AreaPolicy>;
+		readonly authorizer: Authorizer;
 	}
 >();
 
@@ -82,6 +85,7 @@ export function openPlatform(
 	}
 	checkModules(modules);
 
+	const areas = registeredAreas(modules);
 	const db = new Database(databaseFile);
 	let appliedMigrations: number;
 	try {
@@ -95,7 +99,7 @@ export function openPlatform(
 			{ module: PLATFORM_ID, migrations },
 			...modules.map((module) => ({ module: module.id, migrations: module.migrations })),
 		]);
-		ensureDeviceAccount(db, clock());
+		ensureDeviceAccount(db, areas, clock());
 	} catch (error) {
 		db.close();
 		throw error;
@@ -108,15 +112,24 @@ export function openPlatform(
 		},
 	};
 	const actionLog = createActionLog(db);
+	const decider = authorizer ?? createAuthorizer(accessView(db, areas));
 	const actions = createActions({
 		connection: db,
 		modules,
-		authorizer: authorizer ?? createAuthorizer(accessView(db, registeredAreas(modules))),
+		authorizer: decider,
 		clock,
 		actionLog,
 		retention,
 	});
-	internals.set(platform, { db, modules, actions, actionLog, clock });
+	internals.set(platform, {
+		db,
+		modules,
+		actions,
+		actionLog,
+		clock,
+		areas,
+		authorizer: decider,
+	});
 	return platform;
 }
 
@@ -144,6 +157,17 @@ export function actionsOf(platform: Platform): Actions {
 /** The action log of a platform. Inside platform only: who reads it is decided in phase 1c. */
 export function actionLogOf(platform: Platform): ActionLog {
 	return internalsOf(platform).actionLog;
+}
+
+/** What reading a delegation table needs: the connection, the registered areas and the platform's authorizer. Inside platform only. */
+export function delegationReaderOf(platform: Platform): DelegationReader {
+	const { db, areas, authorizer } = internalsOf(platform);
+	return { connection: db, areas, authorizer };
+}
+
+/** The registered areas, the platform's own first. Inside platform only. */
+export function areasOf(platform: Platform): ReadonlyMap<string, AreaPolicy> {
+	return internalsOf(platform).areas;
 }
 
 /** The platform clock. Inside platform only. */
