@@ -2,7 +2,7 @@
 // at stop. It checks the module definitions, opens SQLite and brings its schema up to date before anything uses
 // it, makes sure the one device account exists, installs the write capture of the modules' owned tables, and
 // runs the modules' actions with the production authorizer.
-import { isAbsolute } from "node:path";
+import { dirname, isAbsolute } from "node:path";
 
 import { checkModules, type ModuleDefinition, PLATFORM_ID } from "@domus/module-sdk";
 import Database from "better-sqlite3";
@@ -27,6 +27,7 @@ import { accessView, registeredAreas } from "./identity/access";
 import { ensureDeviceAccount } from "./identity/accounts";
 import { platformOperations } from "./identity/operations";
 import type { ProofIssuer } from "./identity/proofs";
+import { type DatabaseLock, takeSharedLock } from "./lock";
 import { migrations } from "./migrations";
 import { migrate } from "./migrator";
 
@@ -140,7 +141,9 @@ export function openPlatform(
 	checkModules(modules);
 
 	const areas = registeredAreas(modules);
-	const db = new Database(databaseFile);
+	// Before the data is touched, and held until close: no restore runs while the platform has the database open.
+	const lock = databaseFile === IN_MEMORY ? undefined : takeSharedLock(dirname(databaseFile));
+	const db = openFile(databaseFile, lock);
 	let appliedMigrations: number;
 	let capture: Capture;
 	try {
@@ -159,6 +162,7 @@ export function openPlatform(
 		capture = installCapture(db, modules, areas);
 	} catch (error) {
 		db.close();
+		lock?.release();
 		throw error;
 	}
 
@@ -179,6 +183,7 @@ export function openPlatform(
 					"stop the background before closing the platform: a job may still use it",
 				);
 			if (db.open) db.close();
+			lock?.release();
 		},
 	};
 	const actionLog = createActionLog(db);
@@ -211,6 +216,16 @@ export function openPlatform(
 		background,
 	});
 	return platform;
+}
+
+/** Opens the SQLite file; when it cannot, frees the lock taken for it. */
+function openFile(databaseFile: string, lock: DatabaseLock | undefined): Database.Database {
+	try {
+		return new Database(databaseFile);
+	} catch (error) {
+		lock?.release();
+		throw error;
+	}
 }
 
 function internalsOf(platform: Platform) {

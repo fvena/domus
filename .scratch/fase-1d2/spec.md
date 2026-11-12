@@ -154,6 +154,11 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
 - Si al abrir la plataforma el cerrojo exclusivo está tomado, falla con `restore in progress`. Docker vuelve a levantar `api` después.
 - La plataforma en memoria no usa cerrojo.
 - El cerrojo se libera solo cuando el proceso muere, porque SQLite usa los bloqueos `fcntl` del sistema operativo. Funciona entre contenedores sobre el mismo volumen.
+- Detalles de la implementación (tarea 02):
+    - La tabla se llama `domus_lock`, y el compartido la crea si falta antes de leerla. Si `api` y `accounts` abren a la vez por primera vez sobre un volumen sin `domus.lock`, uno de los dos puede fallar con `restore in progress`; vuelve a abrir bien en el siguiente intento.
+    - El exclusivo sobre un `domus.lock` recién creado puede dejar `domus.lock-journal` a su lado. SQLite lo trata solo, y abrir después funciona.
+    - El cerrojo dura mientras su asa siga referenciada: el recolector de basura cierra una conexión a la que nadie llega, y con ella se va el cerrojo. Restaurar guarda la suya hasta terminar.
+    - Dentro de un proceso, solo SQLite abre `domus.lock`: cerrar cualquier otro descriptor de ese fichero (leerlo con `node:fs`, por ejemplo) suelta los bloqueos `fcntl` del proceso sobre él.
 
 ### Restaurar (Q7, Q8, Q13, Q14)
 
@@ -274,6 +279,7 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
     - restaurar una copia de hace diez días, que deja `backup-stale` y no acredita el `check`;
     - una marca ilegible, que bloquea abrir y restaurar.
 - **Costura 3: procesos hijos de prueba**, solo para lo que demuestra la muerte de un proceso. Los lanza la entrada de pruebas, que es la única que tiene puntos de corte:
+    - **El arnés** es `startChild(task)` de `@domus/platform/testing`: lanza `testing/child.ts` con tsx, que es dependencia de desarrollo de `platform`. El hijo avisa por IPC cuando tiene su tarea, o manda su mensaje de error y termina, y la prueba lo recibe como rechazo. Sale solo si el proceso de la prueba desaparece. Las tareas de restaurar y sus puntos de corte (05 y 06) se añaden como variantes nuevas de `ChildTask`.
     - **El cerrojo:** un hijo con la plataforma abierta impide restaurar al padre; un hijo restaurando impide abrir; muerto el hijo con SIGKILL, el cerrojo queda libre; y el cerrojo se toma antes de abrir los datos.
     - **Los cortes:** un hijo restaura y se mata con SIGKILL al publicar la marca (antes y después del renombrado del temporal), tras retirar el WAL, tras el renombrado de la base y antes de borrar la marca. En cada caso el padre comprueba que abrir se niega o arranca con la base anterior entera, según el punto; que el conjunto conservado sigue intacto; y que retomar deja la restaurada saneada.
 - Las pruebas cortan el proceso y comprueban la recuperación. La resistencia a un corte de luz descansa en el orden de las operaciones y los `fsync`, que se revisan en el código, no en una prueba.
