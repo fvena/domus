@@ -321,6 +321,18 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
 
     Si la implementación muestra que alguna no encaja, se corrige aquí antes de seguir.
 
+- Decisiones tomadas al implementar la 01:
+    - Las copias viven en `packages/platform/backups/`, y una regla nueva, `backups-stay-in-platform`, impide que `module-sdk` o un módulo las alcancen. Restaurar y el cerrojo pueden ampliar su ruta.
+    - La carpeta de preparación es `backup-staging/` dentro de la carpeta de datos, y la instantánea se llama `domus.db`.
+    - restic corre desde la carpeta de preparación y solo nombra `domus.db`: la instantánea queda en `/domus.db`, en la raíz, sea cual sea la carpeta de datos. Abrir la instantánea en solo lectura deja `-shm` y `-wal` a su lado, y no se suben.
+    - El entorno de restic solo lleva el repositorio, el fichero de la contraseña, `PATH`, `HOME`, `TMPDIR` y `TZ=UTC`: el secreto de las sesiones no le llega. El instante de captura va a `--time` en UTC, al segundo.
+    - El proceso hijo de `quick_check` recibe la ruta de better-sqlite3 que resuelve la plataforma (en la imagen, la de junto al bundle) y un entorno vacío. Si no dice `ok` o no puede abrir la instantánea, la ejecución falla sin reintentos con `the snapshot failed quick_check`.
+    - Hasta la 03, cualquier código de restic distinto de `0` hace fallar la ejecución sin reintentos, con el paso y el código.
+    - `DOMUS_BACKUPS_OFF` con un valor que no sea `1` impide arrancar. Las dos rutas tienen que ser absolutas, y un fichero de la contraseña con solo espacios o saltos de línea cuenta como vacío.
+    - `/health` lista ya `scheduler-silent` y `lane-stuck` a la vez cuando se dan los dos; en la 1d1 solo salía el primero.
+    - La imagen no declara `/backups` como volumen: compose lo monta siempre, y un volumen anónimo escondería que falta.
+    - El job `unit` corre en el contenedor `node:22-trixie` e instala restic con apt allí: el apt de Ubuntu 24.04 trae restic 0.16, sin el código `10`.
+    - La comprobación de restic de las pruebas es un `globalSetup` de `test-utils`, que es donde corren las pruebas de las copias.
 - La copia necesita en el NVMe un espacio libre del tamaño de la base, para la instantánea, además del repositorio.
 - Al repartir las tareas se acordó que la fila de las marcas y la forma de `/health` nacen completas en la 01, que la 05 entrega el procedimiento entero de restaurar (retomar y la marca al abrir incluidos) y que la 06 lo demuestra con procesos cortados y casos de desastre.
 

@@ -10,7 +10,7 @@ The project is built in phases. `docs/plan.md` is the only source of the plan: w
 
 ## Setup and commands
 
-Node 22 (`.nvmrc`) with corepack, which installs the pnpm `packageManager` names. Copy `.env.local.example` to `.env.local`; the root scripts load it through dotenv-cli. `pnpm install` turns on the pre-commit hook (`.githooks/pre-commit`: secret scan with gitleaks, lint, format, types); if it is off, run `pnpm run prepare`. The repository is public: the secret scan needs `gitleaks` (`brew install gitleaks`) or Docker running, and blocks the commit otherwise.
+Node 22 (`.nvmrc`) with corepack, which installs the pnpm `packageManager` names. Copy `.env.local.example` to `.env.local`; the root scripts load it through dotenv-cli. `pnpm install` turns on the pre-commit hook (`.githooks/pre-commit`: secret scan with gitleaks, lint, format, types); if it is off, run `pnpm run prepare`. The repository is public: the secret scan needs `gitleaks` (`brew install gitleaks`) or Docker running, and blocks the commit otherwise. `pnpm test` and `pnpm check` need restic (`brew install restic`) for the backups' tests.
 
 | Command                             | Purpose                                       |
 | ----------------------------------- | --------------------------------------------- |

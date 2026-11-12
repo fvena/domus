@@ -19,7 +19,7 @@ describe("the watcher of the background in /health", () => {
 
 		expect(await health(test)).toEqual({
 			status: 200,
-			body: { status: "ok", background: { status: "ok" } },
+			body: { status: "ok", background: { status: "ok", backups: "off" } },
 		});
 	});
 
@@ -28,16 +28,25 @@ describe("the watcher of the background in /health", () => {
 		test.background.start();
 
 		test.clock.advance(5 * MINUTE, { wake: false });
-		expect((await health(test)).body).toEqual({ status: "ok", background: { status: "ok" } });
+		expect((await health(test)).body).toEqual({
+			status: "ok",
+			background: { status: "ok", backups: "off" },
+		});
 
 		test.clock.advance(1, { wake: false });
 		expect(await health(test)).toEqual({
 			status: 200,
-			body: { status: "ok", background: { status: "degraded", reason: "scheduler-silent" } },
+			body: {
+				status: "ok",
+				background: { status: "degraded", reasons: ["scheduler-silent"], backups: "off" },
+			},
 		});
 
 		test.clock.advance(0);
-		expect((await health(test)).body).toEqual({ status: "ok", background: { status: "ok" } });
+		expect((await health(test)).body).toEqual({
+			status: "ok",
+			background: { status: "ok", backups: "off" },
+		});
 	});
 
 	it("says degraded while a lane is stuck, and ok when its job ends", async () => {
@@ -61,20 +70,29 @@ describe("the watcher of the background in /health", () => {
 
 		test.clock.advance(30 * SECOND);
 		test.clock.advance(10 * SECOND - 1);
-		expect((await health(test)).body).toEqual({ status: "ok", background: { status: "ok" } });
+		expect((await health(test)).body).toEqual({
+			status: "ok",
+			background: { status: "ok", backups: "off" },
+		});
 
 		test.clock.advance(1);
 		expect(await health(test)).toEqual({
 			status: 200,
-			body: { status: "ok", background: { status: "degraded", reason: "lane-stuck" } },
+			body: {
+				status: "ok",
+				background: { status: "degraded", reasons: ["lane-stuck"], backups: "off" },
+			},
 		});
 
 		end();
 		await test.background.flush();
-		expect((await health(test)).body).toEqual({ status: "ok", background: { status: "ok" } });
+		expect((await health(test)).body).toEqual({
+			status: "ok",
+			background: { status: "ok", backups: "off" },
+		});
 	});
 
-	it("tells nothing but the states and the reason, never an account or a job", async () => {
+	it("lists every reason at once, in its order, and tells nothing but states and reasons, never an account or a job", async () => {
 		let end = () => {};
 		await using test = createTestPlatform({
 			modules: [],
@@ -100,7 +118,11 @@ describe("the watcher of the background in /health", () => {
 		const { body } = await health(test);
 		expect(body).toEqual({
 			status: "ok",
-			background: { status: "degraded", reason: "scheduler-silent" },
+			background: {
+				status: "degraded",
+				reasons: ["scheduler-silent", "lane-stuck"],
+				backups: "off",
+			},
 		});
 		expect(JSON.stringify(body)).not.toMatch(/ana|stubborn|maintenance|@/);
 

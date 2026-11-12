@@ -152,6 +152,18 @@ export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	 * {@link TestBackground.enqueue} and ends them with its own promises. Not a contract for modules.
 	 */
 	readonly jobs?: Readonly<Record<string, SyntheticJob>>;
+	/**
+	 * The backups, on: a temporary repository folder and password file, absolute paths, and the restic executable
+	 * (`restic` from the `PATH` unless given, such as a fake one). Only with `file`. Unset: the backups are off.
+	 */
+	readonly backups?: TestBackups;
+}
+
+/** The backups of a test platform. */
+export interface TestBackups {
+	readonly repository: string;
+	readonly passwordFile: string;
+	readonly restic?: string;
 }
 
 /** A synthetic job of a test: its lane, its maximum time if not its lane's, and its work. */
@@ -380,6 +392,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 	confirmation,
 	tasks,
 	jobs,
+	backups,
 }: TestPlatformOptions<TModules>): TestPlatform<TModules> {
 	let tempDir: string | undefined;
 	let databaseFile = file ?? ":memory:";
@@ -405,12 +418,26 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 	let platform: Platform;
 	try {
 		platform = createPlatformWithClock(
-			{ databaseFile, modules, retention, confirmation },
+			{
+				databaseFile,
+				modules,
+				retention,
+				confirmation,
+				...(backups === undefined
+					? {}
+					: {
+							backups: {
+								repository: backups.repository,
+								passwordFile: backups.passwordFile,
+							},
+						}),
+			},
 			() => now,
 			{
 				timer,
 				...(tasks === undefined ? {} : { tasks }),
 				...(jobs === undefined ? {} : { jobs }),
+				...(backups?.restic === undefined ? {} : { restic: backups.restic }),
 			},
 		);
 	} catch (error) {

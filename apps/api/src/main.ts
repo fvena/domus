@@ -8,8 +8,15 @@ import { modules } from "./modules";
 
 const config = readConfig();
 // If the database cannot be opened or migrated, this throws and api exits before opening its port.
-const platform = createPlatform({ databaseFile: config.databaseFile, modules });
+const platform = createPlatform({
+	databaseFile: config.databaseFile,
+	modules,
+	...(config.backups === undefined ? {} : { backups: config.backups }),
+});
 console.log(`database at ${config.databaseFile}: ${platform.appliedMigrations} migrations applied`);
+console.log(
+	config.backups === undefined ? "backups off" : `backups to ${config.backups.repository}`,
+);
 
 // The background starts after the database is ready and before serving (ADR 0025).
 const { recovered } = platform.startBackground();
