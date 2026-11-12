@@ -17,6 +17,7 @@ import {
 	type Background,
 	type BackgroundStart,
 	createBackground,
+	type JobKind,
 	realTimer,
 	type ScheduledTask,
 	type Timer,
@@ -87,6 +88,8 @@ export interface PlatformRuntime {
 	readonly timer?: Timer;
 	/** Scheduled tasks a test declares besides the platform's own. */
 	readonly tasks?: readonly ScheduledTask[];
+	/** Synthetic job kinds a test declares, by name, to enqueue them itself. */
+	readonly jobs?: Readonly<Record<string, JobKind>>;
 }
 
 const IN_MEMORY = ":memory:";
@@ -115,7 +118,7 @@ export function createPlatform(options: PlatformOptions): Platform {
 /** createPlatform with a given runtime. Inside platform only; the testing entry hands test-utils its clock part. */
 export function openPlatform(
 	{ databaseFile, modules, retention = DEFAULT_RETENTION, confirmation = {} }: PlatformOptions,
-	{ clock, authorizer, timer = realTimer(clock), tasks }: PlatformRuntime,
+	{ clock, authorizer, timer = realTimer(clock), tasks, jobs }: PlatformRuntime,
 ): Platform {
 	if (databaseFile !== IN_MEMORY && !isAbsolute(databaseFile)) {
 		throw new Error(
@@ -163,6 +166,7 @@ export function openPlatform(
 		clock,
 		timer,
 		...(tasks === undefined ? {} : { extraTasks: tasks }),
+		...(jobs === undefined ? {} : { extraKinds: jobs }),
 	});
 	const platform: Platform = {
 		appliedMigrations,

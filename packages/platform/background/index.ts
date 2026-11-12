@@ -19,6 +19,8 @@ export interface BackgroundOptions {
 	readonly timer: Timer;
 	/** Tasks a test declares besides the platform's own. Only the testing entry passes them. */
 	readonly extraTasks?: readonly ScheduledTask[];
+	/** Synthetic job kinds a test declares, by name, to enqueue them itself. Only the testing entry passes them. */
+	readonly extraKinds?: Readonly<Record<string, JobKind>>;
 }
 
 /** What starting the background found, for the log of `apps/api`. */
@@ -30,8 +32,10 @@ export interface BackgroundStart {
 export interface Background {
 	/** True from `start` until `stop` has ended. */
 	readonly active: boolean;
-	/** Starts waking: records the tasks' rows and runs what is due. Once only. */
+	/** Starts waking: recovers what a previous process left running, records the tasks' rows and runs what is due. Once only. */
 	start(): BackgroundStart;
+	/** Stores a job of `kind`, due now, and wakes. Returns its id. For the synthetic jobs of the testing entry. */
+	enqueue(kind: string): number;
 	/** Stops waking and claiming, cancels the running jobs and waits until they ended. */
 	stop(): Promise<void>;
 	/** Wakes now, as a due instant would. */
@@ -45,6 +49,7 @@ export function createBackground({
 	clock,
 	timer,
 	extraTasks = [],
+	extraKinds = {},
 }: BackgroundOptions): Background {
 	const tasks = [cleanupTask(connection, clock), ...extraTasks];
 	const ids = new Set<string>();
@@ -53,6 +58,10 @@ export function createBackground({
 		ids.add(id);
 	}
 	const kinds = new Map<string, JobKind>(tasks.map((task) => [task.id, task.job]));
+	for (const [kind, job] of Object.entries(extraKinds)) {
+		if (kinds.has(kind)) throw new Error(`the job kind "${kind}" is declared twice`);
+		kinds.set(kind, job);
+	}
 
 	let state: "new" | "started" | "stopping" | "stopped" = "new";
 	let cancelWait: (() => void) | undefined;
@@ -60,6 +69,7 @@ export function createBackground({
 	const engine = createEngine({
 		connection,
 		clock,
+		timer,
 		kinds,
 		onFinish: (job) => scheduler.finish(job),
 		onIdle: () => wake(),
@@ -92,10 +102,17 @@ export function createBackground({
 
 		start() {
 			if (state !== "new") throw new Error("the background starts only once");
+			const recovered = engine.recover();
 			state = "started";
 			scheduler.sync();
 			wake();
-			return { recovered: 0 };
+			return { recovered };
+		},
+
+		enqueue(kind) {
+			const id = engine.enqueue({ kind, runAt: clock() });
+			wake();
+			return id;
 		},
 
 		async stop() {
@@ -120,4 +137,10 @@ export function createBackground({
 
 export { controlledTimer, type ControlledTimer, realTimer, type Timer } from "./timer";
 export { readTaskRuns, type ScheduledTask, type TaskRun } from "./scheduler";
-export type { JobContext } from "./engine";
+export {
+	type JobContext,
+	type JobKind,
+	type JobSnapshot,
+	PermanentJobError,
+	readJobs,
+} from "./engine";

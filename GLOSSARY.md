@@ -124,6 +124,14 @@ _Evitar_: gateway, backend.
 Una operación guardada en la cola que corre después, fuera de la petición y de la transacción que la creó. Si la pidió una persona, se vuelve a autorizar con su sesión vigente al ejecutarse.
 _Evitar_: tarea (para esto), proceso.
 
+**Carril** (`lane`):
+Una fila de la cola que ejecuta un trabajo a la vez. Hay dos, el corto y el de mantenimiento, y corren a la vez: un trabajo largo de mantenimiento no retrasa uno corto.
+_Evitar_: worker, hilo.
+
+**Atascado** (`stuck`):
+El estado de un trabajo que sigue corriendo un margen después de que su tiempo máximo lo cancelara. Su carril sigue ocupado hasta que termina o se reinicia `api`.
+_Evitar_: colgado, bloqueado.
+
 **Tarea programada** (`scheduled task`):
 Un trabajo que se repite a una hora local de la casa, cada día o cada semana. Cada ejecución prevista ocurre una sola vez, aunque la Pi estuviera apagada o cambie la hora.
 _Evitar_: cron.

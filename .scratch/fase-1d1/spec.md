@@ -256,6 +256,15 @@ En la 1d1, todo trabajo es mantenimiento de la plataforma: no tiene actor ni pas
     - En `createTestPlatform` el segundo plano no arranca solo: la prueba llama a `background.start()`, como hace `apps/api`. Así las pruebas de la 1b y la 1c, que mueven el reloj días enteros, no ven limpiezas que no pidieron. La opción `tasks` declara tareas de prueba junto a las de la plataforma.
     - El planificador despierta como mucho cada minuto desde ya, aunque la señal de vida y `/health` son de la 06.
 
+- Decisiones de la tarea 03, tomadas al implementar:
+    - El margen antes de marcar un trabajo como atascado es de 10 s después de cancelarlo. El de la parada ordenada es de 5 s, por debajo de los 10 s que Docker espera antes de matar el contenedor.
+    - Un error es definitivo si el trabajo lanza `PermanentJobError` o si su tipo no está declarado. En la 1d1 ningún trabajo tiene entrada ni actor; los trabajos que llamen a acciones (5b) traducirán sus errores a definitivos.
+    - El mensaje que guarda un trabajo fallido (en su fila y en su ejecución) no lleva datos personales: el nombre del error y, si lo tiene, su código (`SQLITE_BUSY`). Solo `PermanentJobError` y los motivos del propio motor (tiempo agotado, ejecución interrumpida) guardan su texto, escrito en inglés por la plataforma, de 200 caracteres como mucho. Cualquier otro mensaje puede citar los datos con los que falló.
+    - Entre reintentos el trabajo vuelve a pendiente con su último error; su ejecución sigue abierta hasta el final definitivo y guarda como inicio el del primer intento.
+    - Recuperar al arrancar deja el trabajo pendiente para ya, sin espera: el reinicio ya fue la espera. Si agotó los intentos queda fallido con «interrupted: the process ended while the job ran», y su ejecución también.
+    - Mientras un trabajo está atascado, su ejecución sigue sin resultado; al terminar recibe el suyo. Si un reinicio lo recupera, vuelve a pendiente como uno en ejecución.
+    - Si un trabajo cancelado por la parada termina después del margen, su final no se escribe: queda en ejecución en la base hasta el siguiente arranque.
+
 - La limpieza cambia lo que guarda la base, no lo que responde la API: las pruebas de la caducidad de la 1b y la 1c tienen que seguir pasando sin cambios después de limpiar.
 
 ## Tareas

@@ -42,6 +42,10 @@ import {
 	type Annotation,
 	backgroundSettled,
 	controlledTimer,
+	enqueueJob,
+	type JobKind,
+	type JobSnapshot,
+	readJobs,
 	readRuns,
 	type ScheduledTask,
 	type TaskRun,
@@ -139,7 +143,15 @@ export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	 * Their work is the test's, such as one that holds its job running until the test lets it end.
 	 */
 	readonly tasks?: readonly ScheduledTask[];
+	/**
+	 * Synthetic jobs of the test, by kind, of either lane: the test enqueues them with
+	 * {@link TestBackground.enqueue} and ends them with its own promises. Not a contract for modules.
+	 */
+	readonly jobs?: Readonly<Record<string, SyntheticJob>>;
 }
+
+/** A synthetic job of a test: its lane, its maximum time if not its lane's, and its work. */
+export type SyntheticJob = JobKind;
 
 /**
  * The background of a test platform: the same scheduler and engine as production, on the test's clock. Nothing
@@ -152,10 +164,19 @@ export interface TestBackground {
 	stop(): Promise<void>;
 	/** Wakes it now and settles once no job runs. */
 	runDue(): Promise<void>;
+	/** Stores a job of a synthetic kind of {@link TestPlatformOptions.jobs}, due now, and wakes. Returns its id. */
+	enqueue(kind: string): number;
+	/**
+	 * Lets every job the test already ended record its end and starts what that frees, without waiting for the
+	 * jobs still held. No real time passes on the platform clock.
+	 */
+	flush(): Promise<void>;
 	/** Settles once no job runs, also those a job's end started. */
 	settled(): Promise<void>;
 	/** A read-only snapshot of the log of runs of the scheduled tasks, oldest first. */
 	runs(): readonly TaskRun[];
+	/** A read-only snapshot of every job: kind, lane, state, attempts, when it may run and its error. */
+	jobs(): readonly JobSnapshot[];
 }
 
 /** The platform clock of a test: it moves only when the test moves it. */
@@ -337,6 +358,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 	retention,
 	confirmation,
 	tasks,
+	jobs,
 }: TestPlatformOptions<TModules>): TestPlatform<TModules> {
 	let tempDir: string | undefined;
 	let databaseFile = file ?? ":memory:";
@@ -364,7 +386,11 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		platform = createPlatformWithClock(
 			{ databaseFile, modules, retention, confirmation },
 			() => now,
-			{ timer, ...(tasks === undefined ? {} : { tasks }) },
+			{
+				timer,
+				...(tasks === undefined ? {} : { tasks }),
+				...(jobs === undefined ? {} : { jobs }),
+			},
 		);
 	} catch (error) {
 		if (tempDir) rmSync(tempDir, { recursive: true, force: true });
@@ -419,8 +445,12 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 			wakeBackground(platform);
 			return backgroundSettled(platform);
 		},
+		enqueue: (kind) => enqueueJob(platform, kind),
+		// A job's end is a chain of promises: once the macrotask queue turns, every one already ended has run it.
+		flush: () => new Promise((resolve) => setImmediate(resolve)),
 		settled: () => backgroundSettled(platform),
 		runs: () => readRuns(platform),
+		jobs: () => readJobs(platform),
 	};
 
 	const door = createHttpHandler({
