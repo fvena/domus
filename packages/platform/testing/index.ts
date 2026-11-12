@@ -24,7 +24,14 @@ import {
 	sealContext,
 	type VerifiedContext,
 } from "../authorization";
-import { readTaskRuns, type ScheduledTask, type TaskRun, type Timer } from "../background";
+import {
+	readTaskRuns,
+	readTaskStates,
+	type ScheduledTask,
+	type TaskRun,
+	type TaskState,
+	type Timer,
+} from "../background";
 import {
 	ensureDeviceAccount,
 	insertAccount,
@@ -68,7 +75,7 @@ export type {
 } from "../authorization";
 export { type ModuleDatabase, moduleDatabase } from "./module-database";
 export { controlledTimer, type ControlledTimer } from "../background";
-export type { JobContext, ScheduledTask, TaskRun } from "../background";
+export type { JobContext, ScheduledTask, TaskRun, TaskState } from "../background";
 
 /** What a test may give the background of its platform besides the clock. */
 export interface TestBackgroundRuntime {
@@ -107,6 +114,26 @@ export function backgroundSettled(platform: Platform): Promise<void> {
 /** Every run of a scheduled task, oldest first. Plain data: changing it changes nothing. */
 export function readRuns(platform: Platform): readonly TaskRun[] {
 	return readTaskRuns(connectionOf(platform));
+}
+
+/** The state of every scheduled task with a row, declared or not, by id. Plain data: changing it changes nothing. */
+export function readTasks(platform: Platform): readonly TaskState[] {
+	return readTaskStates(connectionOf(platform));
+}
+
+/**
+ * Changes the state of a declared task as the operations of the platform's area will: pause, resume, or the time
+ * the admin chose (null for its default). An undeclared task throws.
+ */
+export function changeTask(
+	platform: Platform,
+	task: string,
+	change: { readonly paused: boolean } | { readonly time: string | null },
+): void {
+	const background = backgroundOf(platform);
+	if ("time" in change) background.setTime(task, change.time);
+	else if (change.paused) background.pause(task);
+	else background.resume(task);
 }
 
 /** Runs an action through the platform's one path: validation, authorization, handler, result and, for a write, its log entry. */

@@ -41,10 +41,13 @@ import {
 	type Acknowledgement,
 	type Annotation,
 	backgroundSettled,
+	changeTask,
 	controlledTimer,
 	readRuns,
+	readTasks,
 	type ScheduledTask,
 	type TaskRun,
+	type TaskState,
 	undoEntry,
 	wakeBackground,
 	type VerifiedContext,
@@ -156,6 +159,14 @@ export interface TestBackground {
 	settled(): Promise<void>;
 	/** A read-only snapshot of the log of runs of the scheduled tasks, oldest first. */
 	runs(): readonly TaskRun[];
+	/** A read-only snapshot of the state of every task with a row, declared or not, by id. */
+	tasks(): readonly TaskState[];
+	/** Pauses a declared task, as the admin's operation will. An undeclared one throws. */
+	pause(task: string): void;
+	/** Resumes a declared task: its next run from now, without catching up what it skipped. */
+	resume(task: string): void;
+	/** Sets the local `HH:MM` the admin chose for a declared task, or null for its default. */
+	setTime(task: string, time: string | null): void;
 }
 
 /** The platform clock of a test: it moves only when the test moves it. */
@@ -421,6 +432,10 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		},
 		settled: () => backgroundSettled(platform),
 		runs: () => readRuns(platform),
+		tasks: () => readTasks(platform),
+		pause: (task) => changeTask(platform, task, { paused: true }),
+		resume: (task) => changeTask(platform, task, { paused: false }),
+		setTime: (task, time) => changeTask(platform, task, { time }),
 	};
 
 	const door = createHttpHandler({
