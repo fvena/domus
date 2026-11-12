@@ -34,6 +34,7 @@ import {
 	type ProvenOperation,
 	readDelegationOf,
 	readLog,
+	readPendingConfirmations,
 	rejectPending,
 	requestProofOf,
 	syntheticContext,
@@ -226,7 +227,8 @@ export interface TestPlatform<
 	/**
 	 * Reads the delegation table of `account` through the platform's real operation: each registered area with
 	 * its three levels, `no` where there is no row. Each person reads their own and the admin the device
-	 * account's; anything else is thrown as `FORBIDDEN`.
+	 * account's; anything else is thrown as `FORBIDDEN`. Via Kira it needs the platform's read delegated, and a
+	 * delegation that asks is thrown as `CONFIRMATION_REQUIRED`.
 	 */
 	delegation(context: VerifiedContext, account: string): DelegationTable;
 	/**
@@ -272,6 +274,11 @@ export interface TestPlatform<
 	 * exception is only for tests.
 	 */
 	log(): readonly LogEntry[];
+	/**
+	 * A read-only snapshot of every stored pending confirmation, each row as the platform keeps it, whatever its
+	 * state. That exception is only for tests: it shows what is stored, such as that no secret is.
+	 */
+	pendingConfirmations(): readonly Readonly<Record<string, unknown>>[];
 	/** Closes the platform and removes the temporary folder it created. Safe to call more than once. */
 	close(): void;
 }
@@ -425,6 +432,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 				action: "platform.readLog",
 			}) as readonly Annotation[],
 		log: () => readLog(platform),
+		pendingConfirmations: () => readPendingConfirmations(platform),
 		close,
 		[Symbol.asyncDispose]: () => Promise.resolve(close()),
 	};

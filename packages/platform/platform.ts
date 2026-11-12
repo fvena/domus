@@ -15,7 +15,6 @@ import { type ActionLog, createActionLog } from "./audit";
 import { type AreaPolicy, type Authorizer, createAuthorizer } from "./authorization";
 import { accessView, registeredAreas } from "./identity/access";
 import { ensureDeviceAccount } from "./identity/accounts";
-import type { DelegationReader } from "./identity/delegation";
 import { platformOperations } from "./identity/operations";
 import type { ProofIssuer } from "./identity/proofs";
 import { migrations } from "./migrations";
@@ -194,12 +193,6 @@ export function actionsOf(platform: Platform): Actions {
 /** The action log of a platform. Inside platform only: an account reads its own annotations through the action `platform.readLog`. */
 export function actionLogOf(platform: Platform): ActionLog {
 	return internalsOf(platform).actionLog;
-}
-
-/** What reading a delegation table needs: the connection, the registered areas and the platform's authorizer. Inside platform only. */
-export function delegationReaderOf(platform: Platform): DelegationReader {
-	const { db, areas, authorizer } = internalsOf(platform);
-	return { connection: db, areas, authorizer };
 }
 
 /** What asking for a step-up proof needs: the connection, the actions, where proofs live and the clock. Inside platform only. */

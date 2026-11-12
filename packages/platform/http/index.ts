@@ -5,24 +5,21 @@
 // it is, and hands it to the one path of the actions. So do the platform's own operations on one's password
 // (it asks for the current one and keeps only this session), sessions (only one's own, with their device),
 // pending confirmations (confirming or rejecting one's own, by the app), step-up proofs (asking for one with
-// the password) and the action log (reading one's own annotations, undoing one's own entry). The sensitive ones (changing permissions and delegation, revoking sessions and devices) are
-// writes on that same path. A write's idempotency key and a sensitive operation's step-up proof come in headers.
+// the password), delegation (reading one's own, or the device account's as admin) and the action log (reading
+// one's own annotations, undoing one's own entry). The sensitive ones (changing permissions and delegation,
+// revoking sessions and devices) are writes on that same path. A write's idempotency key and a sensitive operation's step-up proof come in headers.
 import type { ModuleDefinition } from "@domus/module-sdk";
 import { implement, ORPCError, os } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
 import { Hono } from "hono";
 
-import { READ_LOG } from "../actions";
+import { READ_DELEGATION, READ_LOG } from "../actions";
 import { sealContext, type VerifiedContext } from "../authorization";
 import { PROTOCOL, platformContract } from "../contracts";
 import { AUTH_PREFIX, type AuthOptions, createAuth } from "../identity/auth";
-import {
-	isCurrentPassword,
-	replacePassword,
-	SessionGoneError,
-	sessionsOf,
-} from "../identity/passwords";
+import { isCurrentPassword, replacePassword, SessionGoneError } from "../identity/passwords";
 import { requestProof, WrongPasswordError } from "../identity/proofs";
+import { sessionsOf } from "../identity/sessions";
 import { actionsOf, clockOf, connectionOf, type Platform, proofIssuerOf } from "../platform";
 
 export interface HttpHandler {
@@ -161,6 +158,14 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 			),
 		},
 		delegation: {
+			read: platformProcedures.delegation.read.handler(
+				async ({ input, context }) =>
+					actions.invoke({
+						context: await verifiedSession(context),
+						action: READ_DELEGATION,
+						input,
+					}) as never,
+			),
 			set: platformProcedures.delegation.set.handler(({ input, context }) =>
 				sensitive("setDelegation", input, context),
 			),

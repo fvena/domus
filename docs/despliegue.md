@@ -78,10 +78,10 @@ sesiones() { for n in paco paco2 rocio; do curl -s -o /dev/null -w "$n %{http_co
 
 1. Entra tres veces: `entrar <correo de Paco> paco`, `entrar <correo de Paco> paco2` y `entrar <correo de Rocío> rocio`. Cada una escribe las dos cookies, la de sesión con `Secure`. Si responde `429`, Better Auth ha frenado los intentos: espera diez segundos.
 2. Una operación permitida funciona: `rpc -b "$D/paco" -X POST localhost:3000/api/rpc/sessions/list` devuelve las dos sesiones de Paco, la actual con `"current":true`, y `200`. `rpc -b "$D/paco" -X POST localhost:3000/api/rpc/log/read` devuelve las anotaciones de sus entradas y `200`.
-3. Una denegada falla: Rocío no puede cambiar permisos.
+3. Una denegada falla: Rocío no puede leer la delegación de otra cuenta.
 
     ```bash
-    rpc -b "$D/rocio" -H 'idempotency-key: denegada-1' -d '{"json":{"account":"nadie","area":"platform","level":"none"}}' localhost:3000/api/rpc/permissions/set
+    rpc -b "$D/rocio" -d '{"json":{"account":"nadie"}}' localhost:3000/api/rpc/delegation/read
     ```
 
     Responde `FORBIDDEN` y `403`.

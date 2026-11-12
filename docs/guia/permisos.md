@@ -8,7 +8,7 @@ Qué puede hacer cada cuenta, qué puede hacer Kira en nombre de cada persona y 
 
 La casa se reparte en áreas. Cada módulo es una, y puede partirse en otras más finas, como la salud dentro de un módulo de personas. En cada área, una cuenta puede no hacer nada, ver, editar o administrar. Cada nivel incluye los anteriores: quien edita la compra también la ve. Cada acción dice qué nivel de qué área necesita, y Domus revisa al arrancar que todas lo digan.
 
-Paco, como admin, administra todas las áreas y nadie se lo puede quitar. Él decide hasta dónde llega Rocío en cada área y hasta dónde llega la cuenta de aparato. Nadie puede subirse su propio acceso.
+Paco, como admin, administra todas las áreas y nadie se lo puede quitar. Él decide hasta dónde llega Rocío en cada área y hasta dónde llega la cuenta de aparato. Nadie puede subirse su propio acceso. Lo de cada cuenta consigo misma, su tabla de delegación, sus sesiones y su registro de acciones, queda fuera de esos permisos: ni el admin puede bloquearlo.
 
 Kira no tiene cuenta propia. Cuando habla por alguien, usa los permisos de esa persona, rebajados por su tabla de delegación: lo que esa persona deja hacer a Kira en su nombre. En cada área y nivel la respuesta es «no», «sí» o «pregúntame antes». Rocío puede dejar que Kira lea su calendario sin preguntar y pedir que confirme antes de cambiar nada. La tabla nace copiando lo que la persona puede ver y editar, sin administrar nada. Cada persona edita la suya, el admin no la ve, y Kira no puede cambiar ninguna.
 
@@ -36,6 +36,6 @@ Comprobar las escrituras al guardar, y no solo fiarse de cada módulo, hace que 
 - Áreas y niveles: `areas` en `defineModule` y `level` en `readAction` y `writeAction` de `@domus/module-sdk/contracts`. Permisos en `platform_roles` y `platform_permissions`; delegación en `platform_delegation`.
 - Visibilidad: las tablas con dueño se declaran con las columnas comunes de `@domus/module-sdk/db`, y la captura de escrituras usa triggers temporales de SQLite.
 - Confirmaciones: `platform_confirmations`, con `CONFIRMATION_REQUIRED` como respuesta y `confirmations/confirm` y `/reject` por HTTP.
-- Cambiar permisos y delegación: `permissions/set` y `delegation/set`, que piden comprobante ([Las cuentas y las sesiones](cuentas.md)).
+- Leer la delegación: `delegation/read`. Cambiar permisos y delegación: `permissions/set` y `delegation/set`, que piden comprobante ([Las cuentas y las sesiones](cuentas.md)). `permissions/set` no acepta el área `platform`.
 - Pruebas: las de `modules/probe/tests/` y `packages/platform/authorization`.
 - Decisiones: [ADR 0007](../architecture/adr/0007-perfiles-y-permisos-si-o-no.md), [ADR 0008](../architecture/adr/0008-la-ia-como-filtro-de-delegacion.md), [ADR 0009](../architecture/adr/0009-visibilidad-privado-o-publico.md), [ADR 0010](../architecture/adr/0010-una-sola-decision-de-autorizacion.md) y [ADR 0023](../architecture/adr/0023-identidad-y-autorizacion.md).

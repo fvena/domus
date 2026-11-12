@@ -1,5 +1,5 @@
-// Passwords and sessions of an account (ADR 0023), shared by `pnpm accounts` and the platform's operations over
-// HTTP. Hashing and checking are Better Auth's own, so a password set here signs in through its routes. Each
+// Passwords of an account, and the sessions a new one ends (ADR 0023), shared by `pnpm accounts` and the
+// platform's operations over HTTP; its sessions themselves live in `sessions.ts`. Hashing and checking are Better Auth's own, so a password set here signs in through its routes. Each
 // operation does the slow, asynchronous hashing first and then writes its rows in one synchronous transaction on
 // the one connection, so it is all or nothing and nothing else interleaves with it. Passwords never reach the
 // action log: these are not actions.
@@ -11,6 +11,7 @@ import { endProofsOf } from "../actions/proofs";
 import type { AreaPolicy, Role } from "../authorization";
 import { PASSWORD_LENGTH } from "../contracts";
 import { insertAccount, setPasswordHash } from "./accounts";
+import { sessionExists } from "./sessions";
 
 /** Why a password is not accepted, or `undefined` when it is. Never repeats the password. */
 export function passwordProblem(password: string): string | undefined {
@@ -98,57 +99,4 @@ export async function isCurrentPassword(
 		.get(account);
 	if (!hash) return false;
 	return verifyPassword({ hash, password });
-}
-
-function sessionExists(connection: Database.Database, account: string, session: string): boolean {
-	return (
-		connection
-			.prepare("SELECT 1 FROM platform_session WHERE id = ? AND user_id = ?")
-			.get(session, account) !== undefined
-	);
-}
-
-/** One of an account's sessions, as its owner sees it: never its token, and its device without its id. */
-export interface SessionSummary {
-	readonly id: string;
-	readonly current: boolean;
-	readonly createdAt: number;
-	readonly expiresAt: number;
-	readonly device: { readonly name: string | null; readonly createdAt: number };
-}
-
-/**
- * The account's live sessions, newest first. Better Auth decides expiry against the real time, so the listing
- * does too, and agrees with what the next request would find.
- */
-export function sessionsOf(
-	connection: Database.Database,
-	account: string,
-	current: string | undefined,
-): SessionSummary[] {
-	return connection
-		.prepare<
-			[string, number],
-			{
-				id: string;
-				createdAt: number;
-				expiresAt: number;
-				deviceName: string | null;
-				deviceCreatedAt: number;
-			}
-		>(
-			`SELECT s.id, s.created_at AS createdAt, s.expires_at AS expiresAt,
-				d.name AS deviceName, d.created_at AS deviceCreatedAt
-			FROM platform_session s JOIN platform_devices d ON d.id = s.device_id
-			WHERE s.user_id = ? AND s.expires_at > ?
-			ORDER BY s.created_at DESC, s.id`,
-		)
-		.all(account, Date.now())
-		.map((row) => ({
-			id: row.id,
-			current: row.id === current,
-			createdAt: row.createdAt,
-			expiresAt: row.expiresAt,
-			device: { name: row.deviceName, createdAt: row.deviceCreatedAt },
-		}));
 }

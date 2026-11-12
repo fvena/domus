@@ -199,14 +199,13 @@ describe("runAccounts", () => {
 			password: SECRET,
 			operation: { action: "platform.setDelegation", input: change },
 		});
-		prepareDelegation(platform, ana, "platform", "write", "confirm");
+		prepareDelegation(platform, ana, "platform", "read", "confirm");
 		let pending = "";
 		try {
 			invokeAction(platform, {
 				context: syntheticContext({ ...context, via: "kira" }),
-				action: "platform.revokeSession",
-				input: { session: "s2" },
-				idempotencyKey: "r1",
+				action: "platform.readDelegation",
+				input: { account: ana },
 			});
 		} catch (error) {
 			pending = (error as { data: { confirmation: string } }).data.confirmation;

@@ -144,7 +144,7 @@ export function reaches(grant: Grant, level: PermissionLevel): boolean {
 }
 
 /** True when `account` may reach the own settings of `subject`: its own, or the device account's as admin. */
-function reachesSettingsOf(view: AccessView, account: string, subject: string): boolean {
+export function reachesSettingsOf(view: AccessView, account: string, subject: string): boolean {
 	if (view.roleOf(account) === undefined) return false;
 	if (account === subject) return true;
 	return view.roleOf(account) === "admin" && view.roleOf(subject) === "device";

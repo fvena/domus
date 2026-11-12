@@ -1,22 +1,11 @@
 // The delegation table of each account (ADR 0023): what it lets Kira do on its behalf, `no`, `yes` or `confirm`
 // per area and level, each on its own. It is written once, when the account is created, from the permission of
-// that moment, and never follows later changes of permission. Reading it is an operation of the platform that
-// authorization decides like any other; changing it is sensitive and arrives with step-up proofs (ticket 09).
-import { PLATFORM_ID } from "@domus/module-sdk";
+// that moment, and never follows later changes of permission. Reading it and changing it are operations of the
+// platform on the path of the actions (`identity/operations.ts`); changing it is sensitive.
 import type { PermissionLevel } from "@domus/module-sdk/contracts";
-import { ORPCError } from "@orpc/server";
 import type Database from "better-sqlite3";
 
-import {
-	type AreaPolicy,
-	type Authorizer,
-	type Delegated,
-	grantOf,
-	isAllowed,
-	isVerified,
-	reaches,
-	type VerifiedContext,
-} from "../authorization";
+import { type AreaPolicy, type Delegated, grantOf, reaches } from "../authorization";
 import { accessView } from "./access";
 
 const LEVELS: readonly PermissionLevel[] = ["read", "write", "manage"];
@@ -25,9 +14,6 @@ const LEVELS: readonly PermissionLevel[] = ["read", "write", "manage"];
 export type DelegationTable = Readonly<
 	Record<string, Readonly<Record<PermissionLevel, Delegated>>>
 >;
-
-/** The full name authorization sees for reading a delegation table. */
-const READ_DELEGATION = "platform.readDelegation";
 
 /** Stores one level of one area of the account's delegation. */
 export function setDelegation(
@@ -62,8 +48,11 @@ export function startDelegation(
 	}
 }
 
-/** The account's delegation in every registered area, `no` where it has no row. */
-function delegationTable(
+/**
+ * The account's delegation in every registered area, `no` where it has no row. Who may read it is decided on the
+ * path of the actions, where reading it is the operation `platform.readDelegation`.
+ */
+export function delegationTable(
 	connection: Database.Database,
 	areas: ReadonlyMap<string, AreaPolicy>,
 	account: string,
@@ -77,32 +66,4 @@ function delegationTable(
 			) as Record<PermissionLevel, Delegated>,
 		]),
 	);
-}
-
-export interface DelegationReader {
-	readonly connection: Database.Database;
-	readonly areas: ReadonlyMap<string, AreaPolicy>;
-	readonly authorizer: Authorizer;
-}
-
-/**
- * Reads the delegation of `account`, a read of the platform's area: each person reads their own and the admin
- * the device account's, never another person's. Via Kira it needs that read delegated. Denied: forbidden.
- */
-export function readDelegation(
-	{ connection, areas, authorizer }: DelegationReader,
-	context: VerifiedContext,
-	account: string,
-): DelegationTable {
-	if (!isVerified(context)) throw new ORPCError("INTERNAL_SERVER_ERROR");
-	const allowed = isAllowed(authorizer, {
-		context,
-		action: READ_DELEGATION,
-		kind: "read",
-		permission: { area: PLATFORM_ID, level: "read" },
-		input: { account },
-		subject: account,
-	});
-	if (!allowed) throw new ORPCError("FORBIDDEN");
-	return delegationTable(connection, areas, account);
 }

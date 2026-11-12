@@ -3,11 +3,18 @@ import { ORPCError } from "@orpc/server";
 // dbFor; a platform with the real authorization and a clock the test chooses; the way to invoke its actions and
 // undo their entries with a verified context; synthetic verified contexts; the privileged preparation of
 // accounts, roles, passwords, permission rows, delegation rows and sessions, without a session or a proof; the
-// platform's real read of a delegation table and real request of a step-up proof; and a read of its action log. A rule of .dependency-cruiser.cjs keeps every
-// other importer out, production code of platform included; the main entry offers none of it.
+// platform's real read of a delegation table and real request of a step-up proof; and a read of its action log
+// and of its stored pending confirmations. A rule of .dependency-cruiser.cjs keeps every other importer out, production code of platform included; the main entry offers none of it.
 import { hashPassword } from "better-auth/crypto";
 
-import type { ActionCall, Clock, ConfirmationCall, UndoCall, WriteOutcome } from "../actions";
+import {
+	type ActionCall,
+	type Clock,
+	type ConfirmationCall,
+	READ_DELEGATION,
+	type UndoCall,
+	type WriteOutcome,
+} from "../actions";
 import type { LogEntry } from "../audit";
 import {
 	type Delegated,
@@ -25,7 +32,7 @@ import {
 	setGrant,
 	setPasswordHash,
 } from "../identity/accounts";
-import { type DelegationTable, readDelegation, setDelegation } from "../identity/delegation";
+import { type DelegationTable, setDelegation } from "../identity/delegation";
 import {
 	type IssuedProof,
 	type ProofRequest,
@@ -36,7 +43,6 @@ import {
 	actionLogOf,
 	actionsOf,
 	areasOf,
-	delegationReaderOf,
 	clockOf,
 	connectionOf,
 	openPlatform,
@@ -83,6 +89,20 @@ export function confirmPending(platform: Platform, call: ConfirmationCall): unkn
 /** Rejects a pending confirmation through the platform's real operation. */
 export function rejectPending(platform: Platform, call: ConfirmationCall): void {
 	actionsOf(platform).reject(call);
+}
+
+/**
+ * Every stored pending confirmation, as its row holds it, whatever its state, in the order they were born. Plain
+ * data: changing it changes nothing.
+ */
+export function readPendingConfirmations(
+	platform: Platform,
+): readonly Readonly<Record<string, unknown>>[] {
+	return connectionOf(platform)
+		.prepare<[], Record<string, unknown>>(
+			"SELECT * FROM platform_confirmations ORDER BY created_at, rowid",
+		)
+		.all();
 }
 
 /** Every entry of the action log, in order, with its content even when expired. A copy: changing it changes nothing. */
@@ -145,13 +165,21 @@ export function prepareDelegation(
 	setDelegation(connectionOf(platform), account, area, level, value);
 }
 
-/** Reads the delegation of `account` through the platform's real operation, decided by its authorization. */
+/**
+ * Reads the delegation of `account` through the platform's real operation, `platform.readDelegation` on the path
+ * of the actions: decided by its authorization, and via Kira with a delegation that asks it waits as a pending
+ * confirmation.
+ */
 export function readDelegationOf(
 	platform: Platform,
 	context: VerifiedContext,
 	account: string,
 ): DelegationTable {
-	return readDelegation(delegationReaderOf(platform), context, account);
+	return actionsOf(platform).invoke({
+		context,
+		action: READ_DELEGATION,
+		input: { account },
+	}) as DelegationTable;
 }
 
 /**

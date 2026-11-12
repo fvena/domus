@@ -34,7 +34,7 @@ export const changePasswordContract = oc
 	)
 	.output(z.object({ endedSessions: z.number().int() }));
 
-/** One's own sessions, newest first, with their device; never another account's. */
+/** One's own sessions, newest first, with their device; never another account's, and never a token. */
 export const listSessionsContract = oc.output(
 	z.array(
 		z.object({
@@ -43,7 +43,12 @@ export const listSessionsContract = oc.output(
 			current: z.boolean(),
 			createdAt: z.number().int(),
 			expiresAt: z.number().int(),
-			device: z.object({ name: z.string().nullable(), createdAt: z.number().int() }),
+			device: z.object({
+				/** An opaque id, the same for every session on that device: never the device cookie. */
+				id: z.string(),
+				name: z.string().nullable(),
+				createdAt: z.number().int(),
+			}),
 		}),
 	),
 );
@@ -86,6 +91,23 @@ export const SENSITIVE_INPUTS = {
 	revokeSession: z.object({ session: z.string().min(1) }),
 	revokeDevice: z.object({ session: z.string().min(1) }),
 };
+
+/** Reading an account's delegation: whose. */
+export const READ_DELEGATION_INPUT = z.object({ account: z.string().min(1) });
+
+/** How much one level of an area is delegated to Kira (GLOSSARY: delegación). */
+const delegated = z.enum(["no", "yes", "confirm"]);
+
+/**
+ * Reading an account's delegation, a read of the platform's area: one's own, or the device account's as admin.
+ * Each registered area with its three levels. Via Kira it needs that read delegated; a delegation that asks
+ * answers `CONFIRMATION_REQUIRED`.
+ */
+export const readDelegationContract = oc
+	.input(READ_DELEGATION_INPUT)
+	.output(
+		z.record(z.string(), z.object({ read: delegated, write: delegated, manage: delegated })),
+	);
 
 /**
  * What a write answers the first time, its result and the number of its entry in the action log, or, repeated
@@ -187,7 +209,7 @@ export const platformContract = {
 	confirmations: { confirm: confirmContract, reject: rejectContract },
 	proofs: { request: requestProofContract },
 	permissions: { set: setPermissionContract },
-	delegation: { set: setDelegationContract },
+	delegation: { read: readDelegationContract, set: setDelegationContract },
 	devices: { revoke: revokeDeviceContract },
 	log: { read: readLogContract, undo: undoContract },
 };

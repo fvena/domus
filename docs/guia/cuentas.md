@@ -8,7 +8,7 @@ Cómo entra cada persona en Domus y cómo sabe Domus quién pide cada cosa. Hay 
 
 Se entra con correo y contraseña. Nadie puede darse de alta solo. Las cuentas las crea alguien con acceso a la Pi, con un comando que pide la contraseña dos veces sin mostrarla en pantalla. El mismo comando sirve para cambiarla si se olvida, porque Domus no manda correos de recuperación.
 
-Al entrar nace una sesión: una entrada abierta de una cuenta desde un aparato. Un aparato es un navegador concreto, el del móvil de Rocío o el del portátil de Paco, y no es lo mismo que la sesión: sigue siendo el mismo aparato después de cerrar sesión, y en un mismo navegador puede haber sesiones de las dos personas. Cada una ve y cierra solo las suyas.
+Al entrar nace una sesión: una entrada abierta de una cuenta desde un aparato. Un aparato es un navegador concreto, el del móvil de Rocío o el del portátil de Paco, y no es lo mismo que la sesión: sigue siendo el mismo aparato después de cerrar sesión, y en un mismo navegador puede haber sesiones de las dos personas. Cada una ve y cierra solo las suyas, agrupadas por aparato. Si intenta cerrar una ajena, Domus responde lo mismo que si no existiera.
 
 Domus recuerda la sesión con una cookie, un dato pequeño que el navegador guarda y devuelve en cada petición. Cada vez, Domus mira en la base de datos si esa sesión sigue viva. Por eso cerrar una sesión tiene efecto enseguida: si Paco cierra la sesión que se dejó abierta en otro ordenador, la siguiente petición desde ese ordenador ya no entra. Una sesión dura siete días.
 
@@ -33,7 +33,7 @@ El comprobante está pensado para el descuido de un momento. Con él, un móvil 
 - Cuentas y sesiones: Better Auth en `packages/platform/identity/auth.ts`, sobre las tablas `platform_user`, `platform_session` y `platform_account`; los aparatos en `platform_devices` y la cookie `domus.device`.
 - El comando: `pnpm accounts create|password` en desarrollo y `node /app/accounts.mjs` en el contenedor `api`, con su núcleo en `packages/platform/identity/command.ts`. Cómo se usa en la Pi está en [`docs/despliegue.md`](../despliegue.md).
 - El contexto verificado: `packages/platform/authorization/context.ts`. La puerta lo construye en `packages/platform/http`.
-- Por HTTP: `POST /api/auth/sign-in/email` y `/sign-out`; `password/change`, `sessions/list`, `sessions/revoke`, `devices/revoke` y `proofs/request` bajo `/api/rpc/`, en `platformContract` de `@domus/platform/contracts`. El comprobante viaja en la cabecera `step-up-proof`.
+- Por HTTP: `POST /api/auth/sign-in/email` y `/sign-out`; `password/change`, `sessions/list`, `sessions/revoke`, `devices/revoke`, `delegation/read` y `proofs/request` bajo `/api/rpc/`, en `platformContract` de `@domus/platform/contracts`. El comprobante viaja en la cabecera `step-up-proof`.
 - Comprobantes: la tabla `platform_proofs`.
 - Configuración de `api`: `DOMUS_AUTH_SECRET` firma las sesiones y `DOMUS_ORIGINS` dice desde qué direcciones se sirve la app.
 - Decisiones: [ADR 0006](../architecture/adr/0006-identidad-de-kira-y-aparatos.md) y [ADR 0023](../architecture/adr/0023-identidad-y-autorizacion.md).

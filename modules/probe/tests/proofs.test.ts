@@ -190,4 +190,21 @@ describe("probe's configure, an action of level manage", () => {
 		const pending = (errors[0] as { data: { confirmation: string } }).data.confirmation;
 		expect(() => test.confirm(paco, pending)).toThrow(stepUp);
 	});
+
+	it("stores a pending confirmation asked with a proof without the proof or the password", async () => {
+		const { test } = await household();
+		await using _ = test;
+		test.prepare.delegation("paco", "probe", "manage", "confirm");
+		const kira = test.context("paco", { via: "kira" });
+		const { proof } = await test.requestProof(test.context("paco"), PASSWORD, CONFIGURE);
+
+		const id = pendingFrom(() =>
+			test.invoke(kira, "probe.configure", PUBLIC, { idempotencyKey: "c1", proof }),
+		);
+
+		const stored = test.pendingConfirmations();
+		expect(stored).toEqual([expect.objectContaining({ id, account: "paco" })]);
+		expect(JSON.stringify(stored)).not.toContain(proof);
+		expect(JSON.stringify(stored)).not.toContain(PASSWORD);
+	});
 });

@@ -70,7 +70,7 @@ describe("sessions and passwords over HTTP", () => {
 				current: expect.any(Boolean),
 				createdAt: expect.any(Number),
 				expiresAt: expect.any(Number),
-				device: { name: null, createdAt: expect.any(Number) },
+				device: { id: expect.any(String), name: null, createdAt: expect.any(Number) },
 			});
 			const tokens = [phone, laptop].map(
 				(browser) => browser.cookie(SESSION_COOKIE)?.split(".")[0],
@@ -81,6 +81,28 @@ describe("sessions and passwords over HTTP", () => {
 			expect(fromLaptop.find((session) => session.current)?.id).not.toBe(
 				sessions.find((session) => session.current)?.id,
 			);
+		});
+
+		it("groups my sessions by an opaque id of their device, never the device cookie", async () => {
+			await using test = await probeWithAnaAndLuis();
+			const phone = await signedIn(test, "ana");
+			// Signing in again on the same browser opens another session on the same device.
+			expect((await phone.signIn("ana@domus.test", PASSWORD)).status).toBe(200);
+			const laptop = await signedIn(test, "ana");
+
+			const sessions = await clientOf(laptop).sessions.list();
+
+			expect(sessions).toHaveLength(3);
+			const laptopDevice = sessions.find(({ current }) => current)?.device.id;
+			const phoneDevices = sessions
+				.filter(({ current }) => !current)
+				.map(({ device }) => device.id);
+			expect(phoneDevices).toHaveLength(2);
+			expect(phoneDevices[0]).toBe(phoneDevices[1]);
+			expect(phoneDevices[0]).not.toBe(laptopDevice);
+			const listed = JSON.stringify(sessions);
+			for (const browser of [phone, laptop])
+				expect(listed).not.toContain(browser.cookie(DEVICE_COOKIE));
 		});
 
 		it("closes the current session by signing out: it fails on the next request, and the others stay", async () => {

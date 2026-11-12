@@ -10,6 +10,8 @@ import probe from "../server";
 const PASSWORD = "correct horse battery staple";
 const stepUp = expect.objectContaining({ code: "STEP_UP_REQUIRED" });
 const forbidden = expect.objectContaining({ code: "FORBIDDEN" });
+const notFound = expect.objectContaining({ code: "NOT_FOUND" });
+const badRequest = expect.objectContaining({ code: "BAD_REQUEST" });
 
 /** A platform with probe; Paco, the admin, and Ana and Luis, members, all with a password. */
 async function household() {
@@ -85,6 +87,30 @@ describe("changing permissions", () => {
 			).toThrow(forbidden);
 		}
 		expect(test.log()).toEqual([]);
+	});
+
+	it("refuses the platform's area: nobody's own settings can be frozen", async () => {
+		await using test = await household();
+		const paco = test.context("paco");
+		const ana = test.context("ana", test.prepare.session("ana"));
+		const freeze = { account: "ana", area: "platform", level: "read" } as const;
+
+		await expect(
+			test.requestProof(paco, PASSWORD, { action: "platform.setPermission", input: freeze }),
+		).rejects.toThrow(badRequest);
+		expect(() => test.setPermission(paco, freeze, { idempotencyKey: "p1" })).toThrow(
+			badRequest,
+		);
+		expect(test.log()).toEqual([]);
+
+		// Ana still changes her own delegation, which writes in the platform's area.
+		const mine = { account: "ana", area: "probe", level: "write", value: "confirm" } as const;
+		expect(
+			test.setDelegation(ana, mine, {
+				idempotencyKey: "d1",
+				proof: await proofOf(test, ana, "setDelegation", mine),
+			}),
+		).toMatchObject({ result: mine });
 	});
 
 	it("is denied via Kira, even with a proof and the delegation", async () => {
@@ -209,9 +235,28 @@ describe("revoking", () => {
 		).toThrow(expect.objectContaining({ code: "BAD_REQUEST" }));
 		expect(() =>
 			test.revokeSession(ana, luis.session, { idempotencyKey: "r2", proof: others }),
-		).toThrow(forbidden);
+		).toThrow(notFound);
 		expect(test.hasSession(mine.session)).toBe(true);
 		expect(test.hasSession(luis.session)).toBe(true);
+	});
+
+	it("answers another account's session as one that does not exist, with or without a proof", async () => {
+		await using test = await household();
+		const luis = test.prepare.session("luis");
+		const ana = test.context("ana", test.prepare.session("ana"));
+		const unknown = "no-such-session";
+
+		for (const session of [luis.session, unknown]) {
+			expect(() => test.revokeSession(ana, session, { idempotencyKey: "r1" })).toThrow(
+				notFound,
+			);
+			const proof = await proofOf(test, ana, "revokeSession", { session });
+			expect(() => test.revokeSession(ana, session, { idempotencyKey: "r1", proof })).toThrow(
+				notFound,
+			);
+		}
+		expect(test.hasSession(luis.session)).toBe(true);
+		expect(test.log()).toEqual([]);
 	});
 
 	it("lets the admin revoke a session of the device account, and no member", async () => {
@@ -224,7 +269,7 @@ describe("revoking", () => {
 
 		expect(() =>
 			test.revokeSession(ana, kitchen.session, { idempotencyKey: "r1", proof: anaProof }),
-		).toThrow(forbidden);
+		).toThrow(notFound);
 		test.revokeSession(paco, kitchen.session, {
 			idempotencyKey: "r1",
 			proof: await proofOf(test, paco, "revokeSession", input),

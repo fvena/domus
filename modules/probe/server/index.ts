@@ -96,12 +96,12 @@ export default defineModule({
 			};
 		},
 		editNote: (context) => {
-			const { db, input, errors } = context;
+			const { db, input, errors, visible } = context;
 			const before = findNote(context, input.id);
 			if (!before) throw errors.NOTE_NOT_FOUND();
 			db.update(schema.notes)
 				.set({ body: input.body })
-				.where(eq(schema.notes.id, input.id))
+				.where(and(eq(schema.notes.id, input.id), visible(schema.notes)))
 				.run();
 			return {
 				result: { id: before.id, body: input.body },
@@ -110,7 +110,7 @@ export default defineModule({
 			};
 		},
 		deleteNote: (context) => {
-			const { db, input, errors } = context;
+			const { db, input, errors, visible } = context;
 			const found = findNote(context, input.id);
 			if (!found) throw errors.NOTE_NOT_FOUND();
 			// Any comment blocks it, seen or not: deleting would break the foreign key. The answer reveals only
@@ -121,7 +121,9 @@ export default defineModule({
 				.where(eq(schema.comments.noteId, input.id))
 				.get();
 			if (blocked) throw errors.NOTE_HAS_COMMENTS();
-			db.delete(schema.notes).where(eq(schema.notes.id, input.id)).run();
+			db.delete(schema.notes)
+				.where(and(eq(schema.notes.id, input.id), visible(schema.notes)))
+				.run();
 			return {
 				result: { id: found.id, body: found.body },
 				touched: [{ type: "note", id: found.id }],
@@ -141,12 +143,12 @@ export default defineModule({
 			};
 		},
 		setNoteVisibility: (context) => {
-			const { db, input, errors } = context;
+			const { db, input, errors, visible } = context;
 			const before = findNote(context, input.id);
 			if (!before) throw errors.NOTE_NOT_FOUND();
 			db.update(schema.notes)
 				.set({ visibility: input.visibility })
-				.where(eq(schema.notes.id, input.id))
+				.where(and(eq(schema.notes.id, input.id), visible(schema.notes)))
 				.run();
 			return {
 				result: { id: before.id, visibility: input.visibility },
@@ -181,11 +183,11 @@ export default defineModule({
 			return { result: deleted, touched: [{ type: "comment", id: deleted.id }] };
 		},
 
-		configure: ({ db, input, actor, errors }) => {
+		configure: ({ db, input, actor, errors, visible }) => {
 			const mine = db
 				.update(schema.notes)
 				.set({ visibility: input.visibility })
-				.where(eq(schema.notes.owner, actor.account))
+				.where(and(eq(schema.notes.owner, actor.account), visible(schema.notes)))
 				.returning({ id: schema.notes.id })
 				.all();
 			if (mine.length === 0) throw errors.NO_NOTES();
@@ -217,7 +219,7 @@ export default defineModule({
 			if (!before) throw errors.BOARD_NOTE_NOT_FOUND();
 			db.update(schema.board)
 				.set({ body: input.body })
-				.where(eq(schema.board.id, input.id))
+				.where(and(eq(schema.board.id, input.id), visible(schema.board)))
 				.run();
 			return {
 				result: { id: before.id, body: input.body },

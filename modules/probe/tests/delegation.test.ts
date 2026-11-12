@@ -168,4 +168,15 @@ describe("reading the delegation", () => {
 
 		expect(() => test.delegation(kira, "ana")).toThrow(forbidden);
 	});
+
+	it("via Kira, asks the person when the platform's read is delegated with confirmation", async () => {
+		await using test = createTestPlatform({ modules: [probe] });
+		const ana = test.member("ana");
+		const kira = test.context("ana", { via: "kira" });
+		test.prepare.delegation("ana", "platform", "read", "confirm");
+
+		const id = pendingFrom(() => test.delegation(kira, "ana"));
+
+		expect(test.confirm(ana, id)).toEqual(test.delegation(ana, "ana"));
+	});
 });
