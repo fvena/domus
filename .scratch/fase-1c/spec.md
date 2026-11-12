@@ -298,7 +298,7 @@ Al escribir, los triggers temporales comprueban que nadie se salta las reglas de
 
 ### HTTP y la puerta (Q1)
 
-- La puerta monta las rutas de Better Auth (iniciar sesión, cerrar sesión y cambiar contraseña), las operaciones de la plataforma y las acciones de los módulos registrados, compuestas en el router de oRPC. La forma de la URL la fija la composición con `api-client`. Sin sesión válida, toda acción y toda operación de la plataforma responde no autenticado, y no se ejecuta nada.
+- La puerta monta las rutas de Better Auth (iniciar sesión y cerrar sesión), las operaciones de la plataforma y las acciones de los módulos registrados, compuestas en el router de oRPC. Cambiar la contraseña desde la app no es una ruta de Better Auth: es la operación de la plataforma `password/change`, que pide la actual y deja abierta solo la sesión desde la que se cambia. La forma de la URL la fija la composición con `api-client`. Sin sesión válida, toda acción y toda operación de la plataforma responde no autenticado, y no se ejecuta nada.
 - Errores nuevos sobre los códigos de oRPC:
     - no autenticado;
     - `CONFIRMATION_REQUIRED`, con el id de la pendiente;
@@ -467,6 +467,7 @@ Al escribir, los triggers temporales comprueban que nadie se salta las reglas de
 - Los documentos de arquitectura, el glosario y el plan ya están al día en la rama del grilling. Al cerrar, se actualizan `docs/plan.md`, `docs/despliegue.md` y `docs/guia/`.
 - Algunas decisiones de detalle se toman en esta spec y no en el grilling: los valores por defecto de cada perfil (`admin`, `manage` fijo; `member`, `write`; `device`, `read` salvo en las áreas `alwaysPrivate`), la bandera `confirmOnSharedDevice`, separada de `alwaysPrivate`, que haya una sola cuenta de aparato creada al arrancar, los nombres de los errores nuevos y la forma del acuse. Si la implementación muestra que alguna no encaja, se corrige aquí antes de seguir.
 - La 1c cambia una decisión de la 1b (la devolución del resultado guardado). Las pruebas de la 1b que la comprobaban se reescriben con el acuse, no se borran.
+- La migración `probe/0001_broad_namor` se retocó a mano después de generarla: `drizzle-kit` copiaba columnas que no existen al reconstruir una tabla. Se acepta solo porque `probe` es `testOnly` y nunca llega a una base real; en un módulo de producción, una migración generada no se edita.
 
 ## Tareas
 
