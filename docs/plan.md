@@ -25,7 +25,7 @@
 
 ## 1. Núcleo
 
-**Estado:** en curso. La 1a está hecha desde el 2026-11-12: la Pi corre `main` con la base de datos. La 1b está hecha desde el 2026-11-12: la Pi corre `main` con el registro de acciones. La 1c está decidida en su grilling y espera su spec.
+**Estado:** en curso. La 1a está hecha desde el 2026-11-12: la Pi corre `main` con la base de datos. La 1b está hecha desde el 2026-11-12: la Pi corre `main` con el registro de acciones. La 1c está construida y espera su comprobación en la Pi ([`despliegue.md`](despliegue.md)).
 
 **Terminada cuando** un módulo de prueba cubre todos los casos de permiso, confirmación y visibilidad. Cada subfase fija en su grilling cuándo termina ella. El tema `date-time` de `utils` (`date-fns` e `Intl`) entra en esta fase, con su primer uso.
 
@@ -52,7 +52,7 @@ Lo que Kira necesitará del núcleo, para el grilling de cada subfase:
 
 **Estado:** pendiente.
 
-**Incluye:** las pantallas y los flujos sobre lo que construye la 1c: el inicio de sesión, los perfiles y permisos ([ADR 0007](architecture/adr/0007-perfiles-y-permisos-si-o-no.md)), la tabla de la IA ([ADR 0008](architecture/adr/0008-la-ia-como-filtro-de-delegacion.md)) y el emparejamiento de aparatos ([ADR 0006](architecture/adr/0006-identidad-de-kira-y-aparatos.md)).
+**Incluye:** las pantallas y los flujos sobre lo que construye la 1c: el inicio de sesión, los perfiles y permisos ([ADR 0007](architecture/adr/0007-perfiles-y-permisos-si-o-no.md)), la tabla de la IA ([ADR 0008](architecture/adr/0008-la-ia-como-filtro-de-delegacion.md)) y el emparejamiento de aparatos ([ADR 0006](architecture/adr/0006-identidad-de-kira-y-aparatos.md)). Su grilling decide dos puntos que deja abiertos la 1c. La cookie de sesión va siempre con `Secure` en la Pi, así que un navegador la guarda por Tailscale (https) y no por `http://kira.local:3000` ([`despliegue.md`](despliegue.md), «Las sesiones y su cookie»). Y por HTTP una escritura devuelve su recibo (`{ result, entry }`, o el acuse), pero el tipo que da `api-client` con el contrato de un módulo dice que devuelve el resultado.
 
 **Terminada cuando** Paco y Rocío entran desde el móvil cada uno con su cuenta, un aparato emparejado entra con la cuenta `device`, y los permisos y la tabla de la IA se cambian desde ajustes. Antes del uso real, las copias de seguridad de la 1d funcionan y hay una restauración probada.
 

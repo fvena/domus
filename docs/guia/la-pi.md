@@ -14,6 +14,8 @@ Los datos están en un volumen, un trozo de disco que no pertenece a ningún con
 
 En casa se entra por `kira.local`, y desde fuera, por Tailscale.
 
+Las cuentas se crean en la propia Pi, con un comando dentro del contenedor de api. La clave que firma las sesiones está en un fichero de la Pi que no viaja con el código, y sin ella api no arranca.
+
 ## Por qué es así
 
 Queremos que un corte de luz no obligue a nadie a tocar nada, así que los programas se levantan solos.
@@ -25,5 +27,6 @@ Los datos van aparte porque en cada actualización el contenedor se tira y se vu
 - El manual con los pasos para actualizar y comprobar: [`docs/despliegue.md`](../despliegue.md).
 - Imágenes: `docker/Dockerfile`, con un destino por programa sobre Debian slim. La imagen de api lleva el binario de SQLite de su arquitectura (arm64 en la Pi).
 - Arranque: `docker-compose.yml`, con `restart: unless-stopped` y assistant y voice-gateway esperando a que api esté `healthy`.
-- Acceso: `ssh kira`. El volumen de datos es `domus_domus-data`.
-- Decisiones: [ADR 0003](../architecture/adr/0003-procesos-y-contenedores.md) y [ADR 0021](../architecture/adr/0021-datos-de-los-modulos-y-migraciones.md).
+- Acceso: `ssh kira`. El volumen de datos es `domus_domus-data` y los secretos, `~/domus/.env`.
+- Cuentas: `docker compose exec api node /app/accounts.mjs create …`.
+- Decisiones: [ADR 0003](../architecture/adr/0003-procesos-y-contenedores.md), [ADR 0021](../architecture/adr/0021-datos-de-los-modulos-y-migraciones.md) y [ADR 0023](../architecture/adr/0023-identidad-y-autorizacion.md).
