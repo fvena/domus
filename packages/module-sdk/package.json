@@ -2,15 +2,22 @@
 	"name": "@domus/module-sdk",
 	"version": "0.0.0",
 	"private": true,
-	"main": "./index.ts",
-	"types": "./index.ts",
+	"exports": {
+		".": "./index.ts",
+		"./db": "./db/index.ts"
+	},
 	"scripts": {
 		"clean": "git clean -xdf .cache .turbo dist node_modules",
-		"type-check": "tsc --noEmit"
+		"type-check": "tsc --noEmit",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"drizzle-orm": "catalog:"
 	},
 	"devDependencies": {
 		"@domus/tsconfig": "workspace:*",
 		"@types/node": "catalog:",
-		"typescript": "catalog:"
+		"typescript": "catalog:",
+		"vitest": "catalog:"
 	}
 }

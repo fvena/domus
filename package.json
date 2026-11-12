@@ -6,6 +6,7 @@
 	"type": "module",
 	"scripts": {
 		"build": "dotenv -c -- turbo build",
+		"db:generate": "pnpm --filter @domus/scripts db:generate",
 		"dev": "dotenv -c -- turbo dev",
 		"start": "pnpm run dev",
 		"lint": "oxlint && depcruise --config .dependency-cruiser.cjs apps packages modules",
@@ -15,7 +16,8 @@
 		"format:check": "oxfmt --check",
 		"type-check": "dotenv -c -- turbo type-check",
 		"test": "dotenv -c -- turbo test",
-		"prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true"
+		"prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true",
+		"modules:generate": "pnpm --filter @domus/scripts modules:generate"
 	},
 	"devDependencies": {
 		"@domus/tsconfig": "workspace:*",

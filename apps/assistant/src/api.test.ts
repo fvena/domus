@@ -1,12 +1,12 @@
-import { createTestHttpHandler } from "@domus/test-utils";
+import { createTestPlatform } from "@domus/test-utils";
 import { describe, expect, it } from "vitest";
 
 import { checkApi } from "./api";
 
 describe("checkApi", () => {
 	it("finds the api ready in process", async () => {
-		const handler = createTestHttpHandler();
-		const check = checkApi({ baseUrl: "http://api", fetch: handler.fetch });
+		await using api = createTestPlatform({ modules: [] });
+		const check = checkApi({ baseUrl: "http://api", fetch: api.door.fetch });
 		expect(await check(new AbortController().signal)).toBe("ready");
 	});
 

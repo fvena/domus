@@ -4,12 +4,22 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
+		"db:generate": "tsx db-generate.ts",
 		"type-check": "tsc --noEmit",
-		"test": "vitest run"
+		"test": "vitest run",
+		"modules:generate": "tsx modules-generate.ts"
 	},
 	"devDependencies": {
+		"@domus/module-sdk": "workspace:*",
+		"@domus/platform": "workspace:*",
 		"@domus/tsconfig": "workspace:*",
+		"@types/better-sqlite3": "catalog:",
 		"@types/node": "catalog:",
+		"better-sqlite3": "catalog:",
+		"drizzle-kit": "catalog:",
+		"drizzle-orm": "catalog:",
+		"oxfmt": "catalog:",
+		"tsx": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:"
 	}

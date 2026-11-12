@@ -2,18 +2,18 @@
 
 Única fuente del plan de Domus: qué entra en cada fase, cuándo se da por terminada y en qué estado está. Se construye solo lo que pide la fase en curso, y cada funcionalidad entra después de su propia revisión en grilling ([ADR 0001](architecture/adr/0001-domus-con-kira-dentro.md)). Al terminar cada fase, lo que ya funciona se publica en la Pi. Cuando una fase cambia de estado, o su grilling fija qué incluye o cuándo termina, se corrige aquí. Las decisiones que la justifican están en [`architecture/README.md`](architecture/README.md) y en los ADR.
 
-| Fase | Qué                            | Estado                  |
-| ---- | ------------------------------ | ----------------------- |
-| 0    | Esqueleto                      | hecha (2026-11-11)      |
-| 1    | Núcleo                         | pendiente; la siguiente |
-| 2    | Sistema de diseño              | pendiente               |
-| 3    | Personas, cuentas y aparatos   | pendiente               |
-| 4    | Módulo piloto: listas y compra | pendiente               |
-| 5    | Kira básica                    | pendiente               |
-| 6    | Los demás módulos, uno a uno   | pendiente               |
-| 7    | Memoria de Kira                | pendiente               |
-| 8    | Especialistas                  | pendiente               |
-| 9    | Iniciativa y domótica por voz  | pendiente               |
+| Fase | Qué                            | Estado             |
+| ---- | ------------------------------ | ------------------ |
+| 0    | Esqueleto                      | hecha (2026-11-11) |
+| 1    | Núcleo                         | en curso (1a)      |
+| 2    | Sistema de diseño              | pendiente          |
+| 3    | Personas, cuentas y aparatos   | pendiente          |
+| 4    | Módulo piloto: listas y compra | pendiente          |
+| 5    | Kira básica                    | pendiente          |
+| 6    | Los demás módulos, uno a uno   | pendiente          |
+| 7    | Memoria de Kira                | pendiente          |
+| 8    | Especialistas                  | pendiente          |
+| 9    | Iniciativa y domótica por voz  | pendiente          |
 
 ## 0. Esqueleto
 
@@ -25,14 +25,14 @@
 
 ## 1. Núcleo
 
-**Estado:** pendiente; es la siguiente, y empieza por la 1a.
+**Estado:** en curso. La 1a pasó su grilling el 2026-11-12 y se está construyendo.
 
 **Terminada cuando** un módulo de prueba cubre todos los casos de permiso, confirmación y visibilidad. Cada subfase fija en su grilling cuándo termina ella. El tema `date-time` de `utils` (`date-fns` e `Intl`) entra en esta fase, con su primer uso.
 
-- **1a. Base de datos y módulos.** SQLite ([ADR 0002](architecture/adr/0002-vue-spa-sqlite-y-pwa.md)); la lista fija de módulos, generada en el build, que llega con el primer módulo; la forma de `module-sdk` y cómo guarda cada módulo sus datos, que se diseñan en el grilling de la 1a ([ADR 0017](architecture/adr/0017-estructura-del-repositorio.md)); la puerta recibe `platform` y la lista de módulos, y `test-utils` la monta sobre una `platform` en memoria ([ADR 0020](architecture/adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md)).
-- **1b. Acciones.** Cada módulo declara sus acciones en sus `contracts/` (contratos primero), y la web las llama con `clientFor` ([ADR 0020](architecture/adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md)). Su grilling decide si la acción es el único camino de cambio, el mismo para la web, Kira, lo compartido y las tareas programadas, con la confirmación y la auditoría de las dos identidades en un solo sitio.
+- **1a. Base de datos y módulos.** Decidida en su grilling ([spec de la 1a](../.scratch/fase-1a/spec.md), [ADR 0021](architecture/adr/0021-datos-de-los-modulos-y-migraciones.md)). Incluye SQLite en un solo fichero con `better-sqlite3` en `platform`, y una `platform` en memoria en `test-utils` ([ADR 0002](architecture/adr/0002-vue-spa-sqlite-y-pwa.md)); la forma mínima de `module-sdk`, `defineModule` y tablas con prefijo sobre Drizzle ([ADR 0017](architecture/adr/0017-estructura-del-repositorio.md)); las migraciones, generadas con `drizzle-kit` y aplicadas al arrancar por un ejecutor propio en una sola transacción; el módulo de prueba `probe`; la lista de módulos de `api`, generada, guardada en git y comprobada; la puerta recibe `platform` y la lista, y `apps/api` las compone ([ADR 0020](architecture/adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md)); y el binario nativo de SQLite en la imagen de la Pi. No trae rutas HTTP nuevas: `status` sigue siendo la única RPC. **Terminada cuando** `probe` existe con su tabla y sus migraciones, entra en las pruebas y queda fuera de la lista de producción; las pruebas de `platform`, `test-utils` y `tooling` cubren las migraciones, el historial, los prefijos y la lista; la CI no deja cambios tras `pnpm db:generate` y `pnpm modules:generate`; pasan todas las comprobaciones y el build; y en la Pi la fila de `platform/0000` es la misma antes y después de reiniciar y de recrear `api`.
+- **1b. Acciones.** Cada módulo declara sus acciones en sus `contracts/` (contratos primero, [ADR 0020](architecture/adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md)). Hasta la 1c las acciones no se montan en HTTP, y la llamada desde la web con `clientFor` queda aplazada hasta entonces; ninguna acción se ejecuta sin autorización, y su grilling decide cómo se cubre el hueco ([ADR 0021](architecture/adr/0021-datos-de-los-modulos-y-migraciones.md)). Su grilling decide si la acción es el único camino de cambio, el mismo para la web, Kira, lo compartido y las tareas programadas, con la confirmación y la auditoría de las dos identidades en un solo sitio.
 - **1c. Identidad y autorización.** La identidad con Better Auth, con assurance y step-up ligado a la operación exacta ([ADR 0002](architecture/adr/0002-vue-spa-sqlite-y-pwa.md)), y la decisión única en `platform/authorization` ([ADR 0010](architecture/adr/0010-una-sola-decision-de-autorizacion.md)): permisos sí o no por área y nivel, expresados con Permix ([ADR 0007](architecture/adr/0007-perfiles-y-permisos-si-o-no.md)); la tabla de la IA ([ADR 0008](architecture/adr/0008-la-ia-como-filtro-de-delegacion.md)); privado o público ([ADR 0009](architecture/adr/0009-visibilidad-privado-o-publico.md)); y las confirmaciones pendientes. Su grilling decide si Permix queda como pieza interna de ese módulo. Las pantallas (iniciar sesión, ajustes, emparejar) son la fase 3.
-- **1d. Segundo plano:** cola, tareas programadas ([ADR 0015](architecture/adr/0015-tareas-programadas-generales.md)), eventos en directo hacia la app, avisos al móvil y archivos.
+- **1d. Segundo plano:** cola, tareas programadas ([ADR 0015](architecture/adr/0015-tareas-programadas-generales.md)), eventos en directo hacia la app, avisos al móvil y archivos; y las copias de seguridad, fuera de la Pi, con retención y una restauración probada.
 - **1e. Llaves de API.** La de Kira y las de otras apps, con «de parte de». Entre sus criterios de aceptación: el mismo cliente funciona con llave y da error sin ella ([ADR 0020](architecture/adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md)).
 
 Lo que Kira necesitará del núcleo, para el grilling de cada subfase:
@@ -54,7 +54,7 @@ Lo que Kira necesitará del núcleo, para el grilling de cada subfase:
 
 **Incluye:** las pantallas y los flujos sobre lo que construye la 1c: el inicio de sesión, los perfiles y permisos ([ADR 0007](architecture/adr/0007-perfiles-y-permisos-si-o-no.md)), la tabla de la IA ([ADR 0008](architecture/adr/0008-la-ia-como-filtro-de-delegacion.md)) y el emparejamiento de aparatos ([ADR 0006](architecture/adr/0006-identidad-de-kira-y-aparatos.md)).
 
-**Terminada cuando** Paco y Rocío entran desde el móvil cada uno con su cuenta, un aparato emparejado entra con la cuenta `device`, y los permisos y la tabla de la IA se cambian desde ajustes.
+**Terminada cuando** Paco y Rocío entran desde el móvil cada uno con su cuenta, un aparato emparejado entra con la cuenta `device`, y los permisos y la tabla de la IA se cambian desde ajustes. Antes del uso real, las copias de seguridad de la 1d funcionan y hay una restauración probada.
 
 ## 4. Módulo piloto: listas y compra
 

@@ -4,7 +4,8 @@
 	"private": true,
 	"exports": {
 		".": "./index.ts",
-		"./contracts": "./contracts/index.ts"
+		"./contracts": "./contracts/index.ts",
+		"./testing": "./testing/index.ts"
 	},
 	"scripts": {
 		"clean": "git clean -xdf .cache .turbo dist node_modules",
@@ -12,8 +13,11 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
+		"@domus/module-sdk": "workspace:*",
 		"@orpc/contract": "catalog:",
 		"@orpc/server": "catalog:",
+		"better-sqlite3": "catalog:",
+		"drizzle-orm": "catalog:",
 		"hono": "catalog:",
 		"zod": "catalog:"
 	},
@@ -21,6 +25,7 @@
 		"@domus/api-client": "workspace:*",
 		"@domus/tsconfig": "workspace:*",
 		"@hono/node-server": "catalog:",
+		"@types/better-sqlite3": "catalog:",
 		"@types/node": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:"

@@ -1,5 +1,9 @@
 {
 	"$schema": "./node_modules/oxfmt/configuration_schema.json",
+	"ignorePatterns": [
+		"modules/*/server/migrations/",
+		"tooling/scripts/fixtures/migrations/*/meta/"
+	],
 	"arrowParens": "always",
 	"printWidth": 100,
 	"singleQuote": false,

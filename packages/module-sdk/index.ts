@@ -1,2 +1,10 @@
-// The only part of platform a module may use: a scoped context with its own tables, files and declared calls. Built in phase 1.
-export {};
+// The only part of platform a module may use (ADR 0021). Phase 1a brings defineModule and, in
+// @domus/module-sdk/db, prefixed tables over Drizzle; each later subphase adds its piece.
+export {
+	checkModules,
+	defineModule,
+	type ModuleDefinition,
+	type ModuleMigration,
+	type ModuleSchema,
+	PLATFORM_ID,
+} from "./module";

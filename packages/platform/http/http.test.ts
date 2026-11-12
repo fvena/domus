@@ -1,14 +1,36 @@
 import type { AddressInfo } from "node:net";
 
 import { clientFor } from "@domus/api-client";
+import { defineModule } from "@domus/module-sdk";
+import { id, moduleTables } from "@domus/module-sdk/db";
 import { serve } from "@hono/node-server";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { createHttpHandler } from ".";
 import { PROTOCOL, platformContract } from "../contracts";
+import { createPlatform } from "../platform";
+
+const { table } = moduleTables("notes");
+const notes = defineModule({
+	id: "notes",
+	schema: { items: table("items", { id: id() }) },
+	migrations: [
+		{
+			tag: "0000_notes",
+			position: 0,
+			hash: "hash-of-0000_notes",
+			statements: [
+				"CREATE TABLE `notes_items` (`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL);",
+			],
+		},
+	],
+});
 
 describe("http handler", () => {
-	const handler = createHttpHandler();
+	const modules = [notes];
+	const platform = createPlatform({ databaseFile: ":memory:", modules });
+	afterAll(() => platform.close());
+	const handler = createHttpHandler({ platform, modules });
 
 	it("answers the health check", async () => {
 		const response = await handler.fetch(new Request("http://domus/health"));
@@ -39,5 +61,14 @@ describe("http handler", () => {
 			new Request("http://domus/api/rpc/nothing", { method: "POST" }),
 		);
 		expect(response.status).toBe(404);
+	});
+
+	it("publishes nothing of the modules it receives", async () => {
+		for (const path of ["/api/rpc/notes", "/api/rpc/notes/items", "/api/notes"]) {
+			const response = await handler.fetch(
+				new Request(`http://domus${path}`, { method: "POST" }),
+			);
+			expect(response.status, path).toBe(404);
+		}
 	});
 });

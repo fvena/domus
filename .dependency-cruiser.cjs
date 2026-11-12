@@ -5,7 +5,8 @@
  */
 
 /** Libraries that hold data or run AI. Apps reach them only through platform; modules only through module-sdk. */
-const DATA_AND_AI_LIBS = "node_modules/(better-sqlite3|kysely|ai|@ai-sdk|@anthropic-ai)/";
+const DATA_AND_AI_LIBS =
+	"node_modules/(better-sqlite3|drizzle-orm|kysely|ai|@ai-sdk|@anthropic-ai)/";
 
 /** The one part of platform that the browser, assistant and voice-gateway may import. */
 const PLATFORM_CONTRACTS = "packages/platform/contracts/";
@@ -49,7 +50,7 @@ module.exports = {
 		{
 			name: "api-reaches-modules-through-server-entry",
 			comment:
-				"apps/api starts each module through its server entry (the registry generated at build time, from phase 1a), never its internals.",
+				"apps/api starts each module through its server entry (the module list written by pnpm modules:generate and kept in git, ADR 0021), never its internals.",
 			severity: "error",
 			from: { path: "^apps/api/" },
 			to: { path: "^modules/", pathNot: "^modules/[^/]+/server/index\\.ts$" },
@@ -199,6 +200,17 @@ module.exports = {
 			severity: "error",
 			from: { path: "^packages/utils/([^/]+)/" },
 			to: { path: "^packages/utils/", pathNot: "^packages/utils/$1/" },
+		},
+		{
+			name: "only-test-utils-reaches-platform-testing",
+			comment:
+				"@domus/platform/testing hands out a module's raw Drizzle client, outside authorization: only test-utils takes it, for dbFor (ADR 0021).",
+			severity: "error",
+			from: {
+				path: "^(apps|packages|modules)/",
+				pathNot: "^packages/(test-utils|platform)/",
+			},
+			to: { path: "^packages/platform/testing/" },
 		},
 		{
 			name: "only-tests-import-test-utils",

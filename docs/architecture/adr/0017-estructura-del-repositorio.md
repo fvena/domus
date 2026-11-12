@@ -12,3 +12,4 @@ Una regla rota se arregla cambiando la importación, nunca relajando la regla.
 
 Fecha: 2026-11-11. Preguntas del grilling: P42b, P50b, P54.
 Precisado por el ADR 0020: `web`, `assistant` y `voice-gateway` importan de `platform` solo sus contratos, y `api-client` no tiene contratos propios; el generador del registro de módulos llega en la fase 1a.
+Precisado por el ADR 0021: la lista de módulos ya no se genera en el build; la escribe `pnpm modules:generate`, se guarda en git y una prueba comprueba que está al día. La forma de `module-sdk` en la 1a es `defineModule` con tablas con prefijo, sobre Drizzle.
