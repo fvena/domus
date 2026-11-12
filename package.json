@@ -16,7 +16,8 @@
 		"format:check": "oxfmt --check",
 		"type-check": "dotenv -c -- turbo type-check",
 		"test": "dotenv -c -- turbo test",
-		"prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true"
+		"prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true",
+		"modules:generate": "pnpm --filter @domus/scripts modules:generate"
 	},
 	"devDependencies": {
 		"@domus/tsconfig": "workspace:*",

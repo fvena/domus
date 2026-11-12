@@ -1,15 +1,12 @@
 // Turns the migrations drizzle-kit writes into a module's `server/migrations/` into `server/migrations.ts`,
 // the data `defineModule` carries and the platform's runner applies (ADR 0021).
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { join } from "node:path";
 
 import type { ModuleMigration } from "@domus/module-sdk";
 import { readMigrationFiles } from "drizzle-orm/migrator";
 
-const root = join(import.meta.dirname, "../..");
-const oxfmt = join(createRequire(import.meta.url).resolve("oxfmt/package.json"), "../bin/oxfmt");
+import { formatWithOxfmt } from "./format";
 
 interface JournalEntry {
 	readonly idx: number;
@@ -146,9 +143,5 @@ function render(migrations: readonly ModuleMigration[], target: string): string 
 		`export const migrations: readonly ModuleMigration[] = ${JSON.stringify(migrations)};`,
 		"",
 	].join("\n");
-	return execFileSync(process.execPath, [oxfmt, `--stdin-filepath=${target}`], {
-		cwd: root,
-		input: source,
-		encoding: "utf8",
-	});
+	return formatWithOxfmt(source, target);
 }

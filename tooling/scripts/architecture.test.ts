@@ -7,14 +7,17 @@ import { join } from "node:path";
 import { cruise, type ICruiseResult } from "dependency-cruiser";
 import { describe, expect, it } from "vitest";
 
+import { apiModuleList } from "./module-list";
+
 const require = createRequire(import.meta.url);
 const config = require("../../.dependency-cruiser.cjs");
+const root = join(import.meta.dirname, "../..");
 const fixture = join(import.meta.dirname, "fixtures/architecture");
 
-async function violations(): Promise<string[]> {
+async function cruiseWithRules(baseDir: string, paths: string[]): Promise<ICruiseResult> {
 	const { options } = config;
-	const result = await cruise(["apps", "packages", "modules"], {
-		baseDir: fixture,
+	const result = await cruise(paths, {
+		baseDir,
 		ruleSet: { forbidden: config.forbidden },
 		validate: true,
 		doNotFollow: options.doNotFollow,
@@ -22,7 +25,11 @@ async function violations(): Promise<string[]> {
 		tsPreCompilationDeps: true,
 		enhancedResolveOptions: options.enhancedResolveOptions,
 	});
-	const output = result.output as ICruiseResult;
+	return result.output as ICruiseResult;
+}
+
+async function violations(): Promise<string[]> {
+	const output = await cruiseWithRules(fixture, ["apps", "packages", "modules"]);
 	return output.summary.violations.map((v) => `${v.rule.name}: ${v.from} -> ${v.to}`).sort();
 }
 
@@ -37,6 +44,7 @@ describe("dependency rules", () => {
 	it("flag exactly the forbidden imports of the fixture", async () => {
 		expect(await violations()).toEqual([
 			"api-reaches-modules-through-server-entry: apps/api/src/bad.ts -> modules/lists/server/internal.ts",
+			"api-reaches-modules-through-server-entry: apps/api/src/modules.ts -> modules/lists/server/internal.ts",
 			"apps-hold-no-business-logic: apps/api/src/db.ts -> node_modules/better-sqlite3/index.js",
 			"apps-hold-no-business-logic: apps/api/src/drizzle.ts -> node_modules/drizzle-orm/index.js",
 			"assistant-and-voice-gateway-only-talk-to-api: apps/assistant/src/bad.ts -> modules/lists/contracts/index.ts",
@@ -60,6 +68,7 @@ describe("dependency rules", () => {
 			"nothing-imports-an-app: packages/platform/src/bad.ts -> apps/api/src/main.ts",
 			"only-package-exports: apps/api/src/bad.ts -> modules/lists/server/internal.ts",
 			"only-package-exports: apps/api/src/bad.ts -> packages/platform/src/internal.ts",
+			"only-package-exports: apps/api/src/modules.ts -> modules/lists/server/internal.ts",
 			"only-tests-import-test-utils: apps/api/src/uses-test-utils.ts -> packages/test-utils/src/index.ts",
 			"packages-never-import-modules: packages/platform/src/bad.ts -> modules/lists/server/index.ts",
 			"platform-contracts-stand-alone: packages/platform/contracts/bad.ts -> packages/platform/http/index.ts",
@@ -73,5 +82,13 @@ describe("dependency rules", () => {
 			"web-never-imports-the-server-side: apps/web/src/bad.ts -> packages/module-sdk/src/index.ts",
 			"web-reaches-modules-through-web-entry: apps/web/src/module-contracts.ts -> modules/lists/contracts/index.ts",
 		]);
+	});
+
+	// The fixture's apps/api/src/modules.ts proves the rule fires on a list of that shape; this proves the
+	// real list is not excluded (it would be inside a generated/ folder) and so `pnpm lint` checks it.
+	it("check the committed module list of apps/api", async () => {
+		const output = await cruiseWithRules(root, [apiModuleList.file]);
+		expect(output.modules.map((module) => module.source)).toContain(apiModuleList.file);
+		expect(output.summary.violations).toEqual([]);
 	});
 });

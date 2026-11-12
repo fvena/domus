@@ -1,0 +1,78 @@
+// The module list generator (ADR 0021): a worked example with definitions written here, and the real
+// modules of `modules/`, whose list must match the committed file.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+import { defineModule } from "@domus/module-sdk";
+import { describe, expect, it } from "vitest";
+
+import { apiModuleList, type FoundModule, loadModules, moduleListSource } from "./module-list";
+
+const root = join(import.meta.dirname, "../..");
+
+function found(folder: string, id: string, testOnly?: boolean): FoundModule {
+	return {
+		folder,
+		packageName: `@domus/${folder}`,
+		definition: defineModule({ id, testOnly, schema: {}, migrations: [] }),
+	};
+}
+
+describe("moduleListSource", () => {
+	it("imports each module's server entry, by id, and leaves out the testOnly ones", () => {
+		const source = moduleListSource(
+			[found("tasks", "tasks"), found("probe", "probe", true), found("lists", "lists")],
+			apiModuleList,
+		);
+		expect(source).toBe(
+			[
+				"// Written by `pnpm modules:generate` (ADR 0021). Do not edit: add or change a module and generate.",
+				"",
+				'import listsModule from "@domus/lists/server";',
+				'import type { PlatformOptions } from "@domus/platform";',
+				'import tasksModule from "@domus/tasks/server";',
+				"",
+				'export const modules: PlatformOptions["modules"] = [listsModule, tasksModule];',
+				"",
+			].join("\n"),
+		);
+	});
+
+	it("writes an empty list when every module is testOnly", () => {
+		expect(moduleListSource([found("probe", "probe", true)], apiModuleList)).toBe(
+			[
+				"// Written by `pnpm modules:generate` (ADR 0021). Do not edit: add or change a module and generate.",
+				"",
+				'import type { PlatformOptions } from "@domus/platform";',
+				"",
+				'export const modules: PlatformOptions["modules"] = [];',
+				"",
+			].join("\n"),
+		);
+	});
+
+	it("fails when a module's id is not its folder's name", () => {
+		expect(() => moduleListSource([found("lists", "shopping")], apiModuleList)).toThrow(
+			'modules/lists: the id is "shopping"; it must be the folder\'s name, "lists"',
+		);
+	});
+
+	it("checks the modules as createPlatform does, testOnly ones included", () => {
+		expect(() =>
+			moduleListSource([found("platform", "platform", true)], apiModuleList),
+		).toThrow('module "platform": the id is reserved');
+	});
+});
+
+describe("the real modules", () => {
+	it("give the committed list of apps/api, regenerated in memory", async () => {
+		const source = moduleListSource(await loadModules(root), apiModuleList);
+		expect(source).toBe(readFileSync(join(root, apiModuleList.file), "utf8"));
+	});
+
+	it("include probe, and its list does not import it", async () => {
+		const modules = await loadModules(root);
+		expect(modules.map((module) => module.definition.id)).toContain("probe");
+		expect(moduleListSource(modules, apiModuleList)).not.toContain("@domus/probe");
+	});
+});
