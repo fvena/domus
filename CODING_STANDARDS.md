@@ -12,12 +12,25 @@ Read during review. Mechanical rules live in tooling and are not repeated here: 
 ## Decisions
 
 - Code that contradicts an ADR is a finding, unless a later ADR refines it.
+- A spec line that contradicts an ADR, the code, or a decision recorded in a ticket's Comments is a finding: the spec changes in the same commit as the decision.
 - A new abstraction (a factory, a layer, a configuration system) answers a concrete problem the change has today, with a test that shows it. Otherwise it is Speculative Generality.
 
 ## Tests
 
 - A guarantee that a spec or an ADR promises (ids never reused, migrations all or nothing, nothing new published) has a test that tries to break it at its narrowest grain: one statement, one migration, one request. A test that reaches the guarantee only across a wider boundary leaves the narrow case open, and that gap is a finding.
 - A variant the spec admits (a schema that transforms, an absent `via`, an error with data) is exercised by at least one test, even when the module under test does not need it. A guarantee carried by a type (it must reject something) has a `@ts-expect-error` test: a library's types can accept more than they read.
+
+## Security
+
+Read every path that authorizes, confirms, proves or reveals with these three in mind:
+
+- **Existence oracle.** A caller who may not see a record gets the same answer for a hidden record as for a missing one: the same code, the same data, and the same order of checks, so no earlier check (a proof, a permission) answers differently first. The one admitted exception is the referential block of ADR 0024.
+- **Check-then-act.** Whatever is verified outside the transaction that uses it, or before an `await` (a password hash, a session, a proof), is verified again inside that transaction.
+- **Every path authorizes alike.** A repeat, a confirmation and an undo authorize as the first call does, proof included; a confirmation counts only as the confirmation that was missing. A pending is reused only where it can be answered (same session and conversation).
+
+## Documents
+
+- A changed page of `docs/guia/` comes with a review by the `humanizer` skill, as `docs/AGENTS.md` asks.
 
 ## Data
 

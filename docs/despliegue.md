@@ -86,22 +86,35 @@ sesiones() { for n in paco paco2 rocio; do curl -s -o /dev/null -w "$n %{http_co
 
     Responde `FORBIDDEN` y `403`.
 
-4. Revoca la segunda sesión de Paco desde la primera. Guarda su id, la de `"current":false` en el paso 2, en `S`, y pide un comprobante para esa operación exacta con la contraseña de Paco:
+4. Revoca la segunda sesión de Paco desde la primera. Esta orden guarda en `S` el id de la sesión de Paco que no es la actual, y lo escribe:
 
     ```bash
-    S=<id de la sesión>
+    S=$(curl -s -b "$D/paco" -H 'Origin: http://kira.local:3000' -X POST localhost:3000/api/rpc/sessions/list | jq -r '.json[] | select(.current | not) | .id'); echo "$S"
+    ```
+
+    Sin comprobante, revocarla falla con `STEP_UP_REQUIRED` y `403`:
+
+    ```bash
+    rpc -b "$D/paco" -H 'idempotency-key: revocar-1' -d "{\"json\":{\"session\":\"$S\"}}" localhost:3000/api/rpc/sessions/revoke
+    ```
+
+    Pide un comprobante para esa operación exacta. Pega esta línea sola, pulsa Enter y escribe la contraseña de Paco, que no se ve; si la pegas junto con la siguiente, `read` se queda con esa línea en vez de la contraseña:
+
+    ```bash
     read -rsp 'Contraseña de Paco: ' pw; echo
-    printf '{"json":{"password":"%s","operation":{"action":"platform.revokeSession","input":{"session":"%s"}}}}' "$pw" "$S" \
-      | rpc -b "$D/paco" --data-binary @- localhost:3000/api/rpc/proofs/request; unset pw
     ```
 
-    Devuelve `{"json":{"proof":"…","expiresAt":…}}` y `200`. Con ese comprobante, en los 5 minutos siguientes:
+    Esta guarda el comprobante en `P` y escribe `200`:
 
     ```bash
-    rpc -b "$D/paco" -H 'idempotency-key: revocar-1' -H 'step-up-proof: <comprobante>' -d "{\"json\":{\"session\":\"$S\"}}" localhost:3000/api/rpc/sessions/revoke
+    P=$(printf '{"json":{"password":"%s","operation":{"action":"platform.revokeSession","input":{"session":"%s"}}}}' "$pw" "$S" | rpc -b "$D/paco" --data-binary @- localhost:3000/api/rpc/proofs/request | tee /dev/stderr | sed 's/ [0-9]*$//' | jq -r '.json.proof'); unset pw
     ```
 
-    Devuelve `{"json":{"result":{"session":"…"},"entry":…}}` y `200`. Sin la cabecera `step-up-proof`, la misma orden responde `STEP_UP_REQUIRED` y `403`.
+    Con él, en los 5 minutos siguientes, la revocación responde `{"json":{"result":{"session":"…"},"entry":…}}` y `200`:
+
+    ```bash
+    rpc -b "$D/paco" -H 'idempotency-key: revocar-1' -H "step-up-proof: $P" -d "{\"json\":{\"session\":\"$S\"}}" localhost:3000/api/rpc/sessions/revoke
+    ```
 
 5. `sesiones` escribe `paco 200`, `paco2 401` y `rocio 200`.
 
@@ -119,12 +132,12 @@ En la Pi, dentro de `~/domus` (`ssh kira`, `cd ~/domus`). Esta orden lee el hist
 docker compose exec api node -e "const db = new (require('better-sqlite3'))('/data/domus.db', { readonly: true, fileMustExist: true }); console.log(db.prepare('SELECT * FROM platform_migrations ORDER BY module, position').all()); db.close()"
 ```
 
-1. Ejecútala y apunta las filas de `platform`, `hash` y `applied_at` incluidos. Las dos primeras están escritas a mano: `position` `0` (`0000_migration_history`) y `position` `1` (`0001_action_log`, el registro de acciones). Desde `position` `2` son las generadas por `drizzle-kit` (ADR 0023), cuyo nombre empieza por su propio número: `0001_lively_sharon_carter`, `0002_milky_shen` (cuentas, sesiones, aparatos y permisos), `0003_open_tarot` (delegación), `0004_vengeful_the_leader` (confirmaciones pendientes), `0005_perfect_ultragirl` (comprobantes) y `0006_outstanding_star_brand` (pendientes que solo se confirman en contexto).
+1. Ejecútala y apunta las filas de `platform`, `hash` y `applied_at` incluidos. Las dos primeras están escritas a mano: `position` `0` (`0000_migration_history`) y `position` `1` (`0001_action_log`, el registro de acciones). Desde `position` `2` son las generadas por `drizzle-kit` (ADR 0023), una por cada fichero `.sql` de `packages/platform/migrations/` en orden, salvo `0000`, la base que nunca se ejecuta; su nombre lleva su propio número, uno menos que su posición.
 2. `docker compose restart api` y vuelve a ejecutarla.
 3. `docker compose up -d --force-recreate api`, que cambia el contenedor y conserva el volumen, y vuelve a ejecutarla.
 4. Tras el paso 2 y tras el 3, `sesiones` (de «Comprobar las cuentas y la autorización», en la misma terminal) sigue escribiendo `paco 200`, `paco2 401` y `rocio 200`, y la orden `curl` de «Comprobar» sigue dando `401` y `404`.
 
-Las tres lecturas dan las mismas filas completas, `applied_at` incluido, y ninguna fila nueva. Si `applied_at` cambia, el contenedor no está usando el volumen. La primera vez que `api` arranca con la 1c sobre la base de la 1b, su registro dice `6 migrations applied` y las filas `0` y `1` no cambian; en los arranques siguientes, `0`.
+Las tres lecturas dan las mismas filas completas, `applied_at` incluido, y ninguna fila nueva. Si `applied_at` cambia, el contenedor no está usando el volumen. Tras una actualización que trae migraciones, el primer arranque de `api` dice `<N> migrations applied`, con `<N>` las que faltaban, y las filas que ya había no cambian; en los arranques siguientes, `0`. Si `docker compose up` recrea `api` justo después, esa línea queda en el registro del contenedor anterior: las filas nuevas, con el mismo `applied_at` o casi, dicen lo mismo.
 
 ## Secretos
 
