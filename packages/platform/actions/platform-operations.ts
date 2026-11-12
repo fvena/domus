@@ -1,9 +1,10 @@
 // The platform's own operations on the path of the actions (ADR 0023): reading the action log, and those that
 // `identity/operations.ts` defines, such as reading a delegation or the sensitive changes of permissions,
-// delegation and sessions. Each one is registered as an action of the platform's area, so it goes through the
+// delegation and sessions, and the settings of the scheduled tasks of `background/operations.ts`. Each one is registered as an action of the platform's area, so it goes through the
 // same validation, authorization, delegation, confirmation and proofs as a module's.
 import { PLATFORM_ID } from "@domus/module-sdk";
 import type { AnySchema } from "@orpc/contract";
+import type { z } from "zod";
 
 import type { ActionLog } from "../audit";
 import type { SensitiveOperation, VerifiedContext } from "../authorization";
@@ -17,16 +18,24 @@ export const READ_DELEGATION = `${PLATFORM_ID}.readDelegation`;
 
 /**
  * An operation of the platform (ADR 0023) on the path of the actions. A read of the platform's area, or a write
- * of it: with a key, logged without touched records and never undoable. A sensitive one is a write that needs a
- * step-up proof.
+ * of it: with a key and logged without touched records. A sensitive one, or one at level `manage`, is a write
+ * that needs a step-up proof.
  */
 export interface PlatformOperation {
 	/** Its name after `platform.`. */
 	readonly name: string;
 	/** A write unless it says it is a read. */
 	readonly kind?: "read" | "write";
+	/** The level it asks for in the platform's area: its kind unless it says `manage`. */
+	readonly level?: "manage";
+	/**
+	 * For a write: true when its `run` returns `{ result, inverse }`, the inverse a write of the platform whose
+	 * input brings back what it changed. Never undoable unless it says so.
+	 */
+	readonly undoable?: boolean;
 	readonly sensitive?: SensitiveOperation;
-	readonly inputSchema: AnySchema;
+	/** Undefined for one that takes no input. */
+	readonly inputSchema: AnySchema | undefined;
 	/** The account whose settings or data it reads or changes, read inside its read or write. */
 	readonly subject: (input: unknown, context: VerifiedContext) => string | undefined;
 	/**
@@ -39,6 +48,24 @@ export interface PlatformOperation {
 	readonly run: (input: unknown, context: VerifiedContext) => unknown;
 }
 
+/** One operation with its input typed by its schema, which the path of the actions validates before either runs. */
+interface TypedOperation<TSchema extends z.ZodType> extends Omit<
+	PlatformOperation,
+	"inputSchema" | "subject" | "find" | "run"
+> {
+	readonly inputSchema: TSchema;
+	readonly subject: (input: z.infer<TSchema>, context: VerifiedContext) => string | undefined;
+	readonly find?: (input: z.infer<TSchema>, context: VerifiedContext) => void;
+	readonly run: (input: z.infer<TSchema>, context: VerifiedContext) => unknown;
+}
+
+/** An operation as the path of the actions takes it, which hands each function only the input its schema accepted. */
+export function platformOperation<TSchema extends z.ZodType>(
+	typed: TypedOperation<TSchema>,
+): PlatformOperation {
+	return typed as unknown as PlatformOperation;
+}
+
 /** The platform's operations as registered actions, by their full name, reading the log among them. */
 export function platformActions(
 	operations: readonly PlatformOperation[],
@@ -47,12 +74,13 @@ export function platformActions(
 	const registered = new Map<string, RegisteredAction>();
 	for (const operation of operations) {
 		const kind = operation.kind ?? "write";
+		const undoable = kind === "write" && operation.undoable === true;
 		registered.set(`${PLATFORM_ID}.${operation.name}`, {
 			module: PLATFORM_ID,
 			name: operation.name,
 			kind,
-			undoable: false,
-			permission: { area: PLATFORM_ID, level: kind },
+			undoable,
+			permission: { area: PLATFORM_ID, level: operation.level ?? kind },
 			inputSchema: operation.inputSchema,
 			outputSchema: undefined,
 			...(operation.sensitive === undefined ? {} : { sensitive: operation.sensitive }),
@@ -61,7 +89,15 @@ export function platformActions(
 			execute:
 				kind === "read"
 					? (context, input) => operation.run(input, context)
-					: (context, input) => ({ result: operation.run(input, context), touched: [] }),
+					: undoable
+						? (context, input) => ({
+								...(operation.run(input, context) as object),
+								touched: [],
+							})
+						: (context, input) => ({
+								result: operation.run(input, context),
+								touched: [],
+							}),
 		});
 	}
 	// Reading the log, a read of the platform's area about one's own entries: on this path, so via Kira it goes

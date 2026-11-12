@@ -7,7 +7,7 @@ import type Database from "better-sqlite3";
 import type { Clock } from "../actions";
 import { cleanupTask } from "./cleanup";
 import { createEngine, type JobKind } from "./engine";
-import { createScheduler, type ScheduledTask } from "./scheduler";
+import { createScheduler, type ScheduledTask, type TaskOverview } from "./scheduler";
 import type { Timer } from "./timer";
 
 /** The longest the background sleeps without waking, even with nothing due. */
@@ -48,6 +48,12 @@ export interface Background {
 	resume(task: string): void;
 	/** Sets the local `HH:MM` the admin chose for a declared task, or null for its default. */
 	setTime(task: string, time: string | null): void;
+	/** Records a manual run of a declared task and enqueues its job, due now. Throws {@link TaskBusyError}. */
+	launch(task: string): number;
+	/** The time the admin chose for a declared task and whether it is paused. Throws {@link UnknownTaskError}. */
+	state(task: string): { readonly time: string | null; readonly paused: boolean };
+	/** Each declared task as the admin sees it. Reads only. */
+	overview(): readonly TaskOverview[];
 }
 
 export function createBackground({
@@ -101,6 +107,16 @@ export function createBackground({
 		cancelWait = timer.at(Math.max(next, now), wake);
 	}
 
+	/**
+	 * Wakes after a change to a task. Inside an open transaction, such as an action's, it wakes once the
+	 * synchronous section that holds it has ended: a job must never start inside a transaction that may still roll
+	 * back, and a wake after a rollback only finds nothing new.
+	 */
+	function wakeAfterChange(): void {
+		if (connection.inTransaction) queueMicrotask(wake);
+		else wake();
+	}
+
 	return {
 		get active() {
 			return state === "started" || state === "stopping";
@@ -134,18 +150,28 @@ export function createBackground({
 		// Each change wakes the background, so it waits for the task's new next run.
 		pause(task) {
 			scheduler.pause(task);
-			wake();
+			wakeAfterChange();
 		},
 
 		resume(task) {
 			scheduler.resume(task);
-			wake();
+			wakeAfterChange();
 		},
 
 		setTime(task, time) {
 			scheduler.setTime(task, time);
-			wake();
+			wakeAfterChange();
 		},
+
+		launch(task) {
+			const run = scheduler.launch(task);
+			wakeAfterChange();
+			return run;
+		},
+
+		state: (task) => scheduler.state(task),
+
+		overview: () => scheduler.overview(),
 
 		async settled() {
 			for (;;) {
@@ -163,6 +189,8 @@ export {
 	readTaskStates,
 	type ScheduledTask,
 	type TaskRun,
+	TaskBusyError,
+	type TaskOverview,
 	type TaskState,
 	UnknownTaskError,
 } from "./scheduler";

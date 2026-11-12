@@ -67,6 +67,43 @@ export interface Scheduler {
 	resume(task: string): void;
 	/** Sets the time the admin chose, or none to go back to the default, and moves the next run from now. */
 	setTime(task: string, time: string | null): void;
+	/**
+	 * Records a manual run of the task, due now, and enqueues its job, in one transaction. Returns the run's id.
+	 * Throws {@link TaskBusyError} when the task has a run pending or in progress, and creates nothing.
+	 */
+	launch(task: string): number;
+	/** The time the admin chose for a declared task and whether it is paused. Throws {@link UnknownTaskError}. */
+	state(task: string): { readonly time: string | null; readonly paused: boolean };
+	/** Each declared task as the admin sees it, in the order of their declaration. Reads only. */
+	overview(): readonly TaskOverview[];
+}
+
+/** One declared task as the admin sees it: what listing the tasks answers. */
+export interface TaskOverview {
+	readonly id: string;
+	/** Its frequency with the time the admin chose, else its default. */
+	readonly frequency: Frequency;
+	readonly paused: boolean;
+	readonly nextAt: number;
+	/** The run the log recorded last, whichever its result. */
+	readonly lastRun: {
+		readonly manual: boolean;
+		readonly plannedAt: number;
+		readonly startedAt: number | null;
+		readonly finishedAt: number | null;
+		readonly result: TaskRun["result"];
+		readonly error: string | null;
+	} | null;
+	/** True while one of its jobs is stuck. */
+	readonly stuck: boolean;
+}
+
+/** A task with a run pending or in progress, stuck included: it gets no other. */
+export class TaskBusyError extends Error {
+	constructor(readonly task: string) {
+		super(`the scheduled task "${task}" has a run pending or in progress`);
+		this.name = "TaskBusyError";
+	}
 }
 
 /** A task the code does not declare, or not anymore: its row, if any, is kept but not touched. */
@@ -125,6 +162,26 @@ export function createScheduler({
 				WHERE platform_task_runs.task = ? AND platform_jobs.state IN ('pending', 'running', 'stuck')`,
 		)
 		.pluck();
+	const stuckJob = connection
+		.prepare(
+			`SELECT 1 FROM platform_jobs JOIN platform_task_runs ON platform_task_runs.id = platform_jobs.task_run
+				WHERE platform_task_runs.task = ? AND platform_jobs.state = 'stuck'`,
+		)
+		.pluck();
+	const lastRun = connection.prepare<
+		[string],
+		{
+			planned_date: string | null;
+			planned_at: number;
+			started_at: number | null;
+			finished_at: number | null;
+			result: TaskRun["result"];
+			error: string | null;
+		}
+	>(
+		`SELECT planned_date, planned_at, started_at, finished_at, result, error FROM platform_task_runs
+			WHERE task = ? ORDER BY id DESC LIMIT 1`,
+	);
 	const endRun = connection.prepare(
 		`UPDATE platform_task_runs SET started_at = ?, finished_at = ?, result = ?, error = ?
 			WHERE id = ?`,
@@ -170,6 +227,15 @@ export function createScheduler({
 		const created = insertRun.run(task.id, date, planned);
 		if (created.changes !== 1) return;
 		enqueue({ kind: task.id, runAt: now, taskRun: Number(created.lastInsertRowid) });
+	});
+
+	const launch = connection.transaction((id: string, now: number): number => {
+		const { task } = declared(id);
+		if (inProgress.get(id) !== undefined) throw new TaskBusyError(id);
+		// A manual run has no planned date, so it never takes the place of a planned one.
+		const run = Number(insertRun.run(id, null, now).lastInsertRowid);
+		enqueue({ kind: task.id, runAt: now, taskRun: run });
+		return run;
 	});
 
 	/** A declared task and its row, created as `sync` would if the background has not started yet. */
@@ -226,6 +292,39 @@ export function createScheduler({
 			const chosen = { ...row, time };
 			// Computing the next run first refuses a time that is not HH:MM before anything is stored.
 			setState.run(time, row.paused, nextAfter(task, chosen, clock()), id);
+		},
+
+		launch: (id) => launch(id, clock()),
+
+		state(id) {
+			const { row } = declared(id);
+			return { time: row.time, paused: row.paused === 1 };
+		},
+
+		overview() {
+			const now = clock();
+			return tasks.map((task) => {
+				// A declared task without a row yet shows what `sync` would give it.
+				const row = selectTask.get(task.id) as TaskRow | undefined;
+				const last = lastRun.get(task.id);
+				return {
+					id: task.id,
+					frequency: { ...task.frequency, at: row?.time ?? task.frequency.at },
+					paused: row?.paused === 1,
+					nextAt: row?.next_at ?? nextAfter(task, undefined, now),
+					lastRun: last
+						? {
+								manual: last.planned_date === null,
+								plannedAt: last.planned_at,
+								startedAt: last.started_at,
+								finishedAt: last.finished_at,
+								result: last.result,
+								error: last.error,
+							}
+						: null,
+					stuck: stuckJob.get(task.id) !== undefined,
+				};
+			});
 		},
 	};
 }

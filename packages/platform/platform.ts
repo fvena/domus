@@ -22,6 +22,7 @@ import {
 	type ScheduledTask,
 	type Timer,
 } from "./background";
+import { taskOperations } from "./background/operations";
 import { accessView, registeredAreas } from "./identity/access";
 import { ensureDeviceAccount } from "./identity/accounts";
 import { platformOperations } from "./identity/operations";
@@ -196,7 +197,7 @@ export function openPlatform(
 		retention,
 		confirmations: createConfirmations(db, confirmationTimes),
 		proofs,
-		operations: platformOperations(db, areas),
+		operations: [...platformOperations(db, areas), ...taskOperations(background)],
 	});
 	internals.set(platform, {
 		db,

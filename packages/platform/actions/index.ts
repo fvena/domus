@@ -161,7 +161,7 @@ export interface ActionsOptions {
 }
 
 export type { ConfirmationCall, ConfirmationTimes, PlatformOperation };
-export { READ_DELEGATION, READ_LOG } from "./platform-operations";
+export { platformOperation, READ_DELEGATION, READ_LOG } from "./platform-operations";
 
 /** The actions of `modules`, which `checkModules` has already accepted, on one connection. */
 export function createActions({

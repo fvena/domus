@@ -9,7 +9,7 @@ import { ORPCError } from "@orpc/server";
 import type Database from "better-sqlite3";
 import { z } from "zod";
 
-import type { PlatformOperation } from "../actions";
+import { type PlatformOperation, platformOperation as operation } from "../actions";
 import { endConfirmationsOnDevice } from "../actions/confirmations";
 import { endProofsOnDevice } from "../actions/proofs";
 import { type AreaPolicy, reachesSettingsOf, type VerifiedContext } from "../authorization";
@@ -18,22 +18,6 @@ import { accessView } from "./access";
 import { setGrant } from "./accounts";
 import { delegationTable, setDelegation } from "./delegation";
 import { sessionLookup } from "./sessions";
-
-/** One operation with its input typed by its schema, which the path of the actions validates before either runs. */
-interface TypedOperation<TSchema extends z.ZodType> extends Omit<
-	PlatformOperation,
-	"inputSchema" | "subject" | "find" | "run"
-> {
-	readonly inputSchema: TSchema;
-	readonly subject: (input: z.infer<TSchema>, context: VerifiedContext) => string | undefined;
-	readonly find?: (input: z.infer<TSchema>, context: VerifiedContext) => void;
-	readonly run: (input: z.infer<TSchema>, context: VerifiedContext) => unknown;
-}
-
-/** An operation as the path of the actions takes it, which hands each function only the input its schema accepted. */
-function operation<TSchema extends z.ZodType>(typed: TypedOperation<TSchema>): PlatformOperation {
-	return typed as unknown as PlatformOperation;
-}
 
 /** The platform's operations on `connection`, over the registered `areas`. */
 export function platformOperations(

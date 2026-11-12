@@ -273,6 +273,15 @@ En la 1d1, todo trabajo es mantenimiento de la plataforma: no tiene actor ni pas
     - Mientras un trabajo está atascado, su ejecución sigue sin resultado; al terminar recibe el suyo. Si un reinicio lo recupera, vuelve a pendiente como uno en ejecución.
     - Si un trabajo cancelado por la parada termina después del margen, su final no se escribe: queda en ejecución en la base hasta el siguiente arranque.
 
+- Decisiones de la tarea 05, tomadas al implementar:
+    - Las rutas son `tasks/list`, `tasks/setTime`, `tasks/pause`, `tasks/resume` y `tasks/launch`; en el camino de las acciones, `platform.listTasks`, `platform.setTaskTime`, `platform.pauseTask`, `platform.resumeTask` y `platform.launchTask`, que es lo que nombra un comprobante. La hora es `HH:MM`, y `null` vuelve a la de por defecto.
+    - La última ejecución de la lista es la última que anotó el registro, sea cual sea su resultado (también «saltada»), con `manual`, sus instantes, su resultado (vacío mientras corre) y su mensaje de error para quien opera. La lista solo muestra las tareas que el código declara, en su orden.
+    - La inversa de pausar o reanudar devuelve el estado de pausa anterior: deshacer una pausa reanuda, con la próxima ejecución calculada desde ese momento. Deshacer un cambio de hora vuelve a la hora elegida antes, o a la de por defecto.
+    - Una tarea que no existe responde «no encontrado» antes de la autorización y del comprobante, también a un miembro.
+    - Lanzar con una ejecución pendiente, en curso o atascada responde `CONFLICT` con el motivo `task-busy`.
+    - Un cambio hecho dentro de la transacción de una acción despierta el segundo plano cuando esa transacción ha terminado: ningún trabajo empieza dentro de una transacción que aún puede revertirse.
+    - Ninguna tarea declara todavía si se puede lanzar a mano: en la 1d1 todas se pueden. El campo llega con la primera que no deba.
+
 - La limpieza cambia lo que guarda la base, no lo que responde la API: las pruebas de la caducidad de la 1b y la 1c tienen que seguir pasando sin cambios después de limpiar.
 
 ## Tareas

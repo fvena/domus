@@ -197,6 +197,83 @@ export const undoContract = oc
 	.input(z.object({ entry: z.number().int().positive() }))
 	.output(writeOutcome(z.unknown()));
 
+/** A local time of the house, `HH:MM`. */
+const localTime = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "not a local HH:MM");
+
+/** A scheduled task by its id. */
+const scheduledTask = z.object({ task: z.string().min(1).max(64) });
+
+/**
+ * The inputs of the settings of the scheduled tasks (ADR 0025), `manage` writes of the platform's area that run
+ * on the path of the actions as `platform.<name>`: that name and this input are what a step-up proof is asked
+ * for. A time of null goes back to the task's default.
+ */
+export const TASK_INPUTS = {
+	setTaskTime: scheduledTask.extend({ time: localTime.nullable() }),
+	pauseTask: scheduledTask,
+	resumeTask: scheduledTask,
+	launchTask: scheduledTask,
+};
+
+/** How often a task runs: every day, or every week on a weekday, at a local time of the house. */
+const frequency = z.union([
+	z.object({ every: z.literal("day"), at: localTime }),
+	z.object({
+		every: z.literal("week"),
+		on: z.enum(["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]),
+		at: localTime,
+	}),
+]);
+
+/**
+ * One scheduled task as the admin sees it, without personal data: its id, its effective frequency (with the time
+ * the admin chose, else its default), whether it is paused, its next run, its last run with its result (null
+ * while it runs; the error is an operator's message in English), and whether its job is stuck.
+ */
+export const scheduledTaskView = z.object({
+	id: z.string(),
+	frequency,
+	paused: z.boolean(),
+	nextAt: z.number().int(),
+	lastRun: z
+		.object({
+			manual: z.boolean(),
+			plannedAt: z.number().int(),
+			startedAt: z.number().int().nullable(),
+			finishedAt: z.number().int().nullable(),
+			result: z.enum(["ok", "failed", "cancelled", "stuck", "skipped"]).nullable(),
+			error: z.string().nullable(),
+		})
+		.nullable(),
+	stuck: z.boolean(),
+});
+
+/** Listing the scheduled tasks, a read of the platform's area without a proof: any account with `read` on it. */
+export const listTasksContract = oc.output(z.array(scheduledTaskView));
+
+/** Changing a task's time, or back to its default with null: undoable, it moves the next run from now. */
+export const setTaskTimeContract = oc
+	.input(TASK_INPUTS.setTaskTime)
+	.output(writeOutcome(TASK_INPUTS.setTaskTime));
+
+/** Pausing a task: it creates no run until it resumes. Undoable. */
+export const pauseTaskContract = oc
+	.input(TASK_INPUTS.pauseTask)
+	.output(writeOutcome(scheduledTask.extend({ paused: z.literal(true) })));
+
+/** Resuming a task, its next run from now, without catching up what it skipped. Undoable. */
+export const resumeTaskContract = oc
+	.input(TASK_INPUTS.resumeTask)
+	.output(writeOutcome(scheduledTask.extend({ paused: z.literal(false) })));
+
+/**
+ * Launching a task now, a manual run of its own: irreversible. A task with a run pending or in progress answers
+ * `CONFLICT` with the reason `task-busy`, and gets no other.
+ */
+export const launchTaskContract = oc
+	.input(TASK_INPUTS.launchTask)
+	.output(writeOutcome(scheduledTask.extend({ run: z.number().int() })));
+
 /**
  * The platform's operations. Each sensitive one (permissions, delegation, revoking sessions and devices) is a
  * write: it takes its idempotency key and its step-up proof in headers, and answers `STEP_UP_REQUIRED` (403)
@@ -212,4 +289,11 @@ export const platformContract = {
 	delegation: { read: readDelegationContract, set: setDelegationContract },
 	devices: { revoke: revokeDeviceContract },
 	log: { read: readLogContract, undo: undoContract },
+	tasks: {
+		list: listTasksContract,
+		setTime: setTaskTimeContract,
+		pause: pauseTaskContract,
+		resume: resumeTaskContract,
+		launch: launchTaskContract,
+	},
 };

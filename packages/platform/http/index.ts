@@ -7,7 +7,8 @@
 // pending confirmations (confirming or rejecting one's own, by the app), step-up proofs (asking for one with
 // the password), delegation (reading one's own, or the device account's as admin) and the action log (reading
 // one's own annotations, undoing one's own entry). The sensitive ones (changing permissions and delegation,
-// revoking sessions and devices) are writes on that same path. A write's idempotency key and a sensitive operation's step-up proof come in headers.
+// revoking sessions and devices) are writes on that same path, and so are the settings of the scheduled tasks
+// (ADR 0025: listing them, a read; changing a time, pausing, resuming and launching, `manage` writes). A write's idempotency key and a sensitive operation's step-up proof come in headers.
 import type { ModuleDefinition } from "@domus/module-sdk";
 import { implement, ORPCError, os } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
@@ -15,6 +16,7 @@ import { Hono } from "hono";
 
 import { READ_DELEGATION, READ_LOG } from "../actions";
 import { sealContext, type VerifiedContext } from "../authorization";
+import { LIST_TASKS } from "../background/operations";
 import { PROTOCOL, platformContract } from "../contracts";
 import { AUTH_PREFIX, type AuthOptions, createAuth } from "../identity/auth";
 import { replacePassword, SessionGoneError, verifiedPasswordHash } from "../identity/passwords";
@@ -62,7 +64,10 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	const identity = createAuth(connection, auth);
 	const actions = actionsOf(platform);
 
-	/** Runs one of the platform's sensitive operations on the path of the actions, as a write with a session. */
+	/**
+	 * Runs one of the platform's writes on the path of the actions with a session: the sensitive ones and the
+	 * `manage` settings of the scheduled tasks, each with its key and its proof.
+	 */
 	async function sensitive(name: string, input: unknown, context: DoorContext): Promise<never> {
 		return actions.invoke({
 			context: await verifiedSession(context),
@@ -205,6 +210,27 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 					idempotencyKey: context.idempotencyKey ?? "",
 					...(context.proof === undefined ? {} : { proof: context.proof }),
 				}),
+			),
+		},
+		tasks: {
+			list: platformProcedures.tasks.list.handler(
+				async ({ context }) =>
+					actions.invoke({
+						context: await verifiedSession(context),
+						action: LIST_TASKS,
+					}) as never,
+			),
+			setTime: platformProcedures.tasks.setTime.handler(({ input, context }) =>
+				sensitive("setTaskTime", input, context),
+			),
+			pause: platformProcedures.tasks.pause.handler(({ input, context }) =>
+				sensitive("pauseTask", input, context),
+			),
+			resume: platformProcedures.tasks.resume.handler(({ input, context }) =>
+				sensitive("resumeTask", input, context),
+			),
+			launch: platformProcedures.tasks.launch.handler(({ input, context }) =>
+				sensitive("launchTask", input, context),
 			),
 		},
 		confirmations: {
