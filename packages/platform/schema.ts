@@ -228,7 +228,8 @@ export const delegation = sqliteTable(
  * the session it was born in while that session lives: revoking it sets it to null, which ends a pending
  * confirmation that was `bound` to one. `context_only` marks one born of the shared device rule: only the
  * channel `contexto` confirms it, and it expires when its window closes. `entry` links a confirmed write to its
- * entry in the action log.
+ * entry in the action log. The cleanup (ADR 0025) empties `operation` once it expired and keeps the rest, which
+ * still decides the answer.
  */
 export const confirmations = sqliteTable(
 	"platform_confirmations",
@@ -239,7 +240,7 @@ export const confirmations = sqliteTable(
 			.references(() => user.id, { onDelete: "cascade" }),
 		via: text(),
 		kind: text({ enum: ["read", "write"] }).notNull(),
-		operation: text().notNull(),
+		operation: text(),
 		fingerprint: text().notNull(),
 		key: text(),
 		origin: text().notNull(),

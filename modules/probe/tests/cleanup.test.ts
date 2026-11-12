@@ -1,4 +1,4 @@
-import { createTestPlatform, TEST_START } from "@domus/test-utils";
+import { createTestPlatform, pendingFrom, TEST_START } from "@domus/test-utils";
 import { describe, expect, it } from "vitest";
 
 import probe from "../server";
@@ -43,6 +43,19 @@ const irreversible = expect.objectContaining({
 	code: "UNPROCESSABLE_CONTENT",
 	data: { reason: "irreversible" },
 });
+const conflict = (reason: string) => ({ code: "CONFLICT", data: { reason } });
+const PASSWORD = "correct horse battery staple";
+const CONFIGURE = { action: "probe.configure", input: { visibility: "public" } } as const;
+
+/** What a call answers, comparable before and after cleaning: its value, or its error's code and data. */
+function outcomeOf(call: () => unknown): unknown {
+	try {
+		return call();
+	} catch (error) {
+		const { code, data } = error as { code?: unknown; data?: unknown };
+		return { code, data };
+	}
+}
 
 describe("the cleanup of the action log", () => {
 	it("empties the input and inverse of an expired entry, and leaves a current one whole", async () => {
@@ -111,5 +124,147 @@ describe("the cleanup of the action log", () => {
 
 		expect(test.background.runs()).toHaveLength(2);
 		expect(test.log()).toEqual(once);
+	});
+});
+
+/** Kira for Ana, in a conversation on her phone: her writes through Kira ask her to confirm. */
+const KIRA = {
+	via: "kira",
+	device: "ana-phone",
+	session: undefined,
+	channel: "contexto",
+	identity: "password",
+	conversation: "c1",
+} as const;
+
+describe("the cleanup of pending confirmations", () => {
+	it("empties the operation of an expired one, whatever its state, and leaves a current one whole", async () => {
+		await using test = createTestPlatform({ modules: [probe] });
+		const ana = test.member("ana");
+		test.prepare.delegation("ana", "probe", "write", "confirm");
+		const kira = test.context("ana", KIRA);
+		const add = (body: string, key: string) =>
+			pendingFrom(() =>
+				test.invoke(kira, "probe.addNote", { body }, { idempotencyKey: key }),
+			);
+		const consumed = add("regar", "k1");
+		test.confirm(ana, consumed);
+		add("podar", "k2");
+		test.clock.set(CLEANUP_AFTER_EXPIRY - 60 * 60 * 1000);
+		add("barrer", "k3");
+		const before = test.pendingConfirmations();
+
+		await runCleanup(test);
+
+		expect(before.every((row) => typeof row["operation"] === "string")).toBe(true);
+		expect(test.pendingConfirmations()).toEqual([
+			{ ...before[0], operation: null },
+			{ ...before[1], operation: null },
+			before[2],
+		]);
+	});
+
+	it("answers the same before and after: consumed, rejected, expired, ended with its session, and a repeat", async () => {
+		await using test = createTestPlatform({ modules: [probe] });
+		test.prepare.account({ id: "ana", role: "member" });
+		await test.prepare.password("ana", PASSWORD);
+		test.prepare.delegation("ana", "probe", "write", "confirm");
+		const phone = test.prepare.session("ana");
+		const laptop = test.prepare.session("ana");
+		const ana = test.context("ana", laptop);
+		const kira = test.context("ana", KIRA);
+		const add = (body: string, key: string) =>
+			test.invoke(kira, "probe.addNote", { body }, { idempotencyKey: key });
+		const consumed = pendingFrom(() => add("regar", "k1"));
+		test.confirm(ana, consumed);
+		const rejected = pendingFrom(() => add("podar", "k2"));
+		test.reject(ana, rejected);
+		const expiredOne = pendingFrom(() => add("barrer", "k3"));
+		const onPhone = pendingFrom(() =>
+			test.invoke(
+				test.context("ana", { ...KIRA, ...phone }),
+				"probe.addNote",
+				{ body: "fregar" },
+				{ idempotencyKey: "k4" },
+			),
+		);
+		const revoke = { session: phone.session };
+		const { proof } = await test.requestProof(ana, PASSWORD, {
+			action: "platform.revokeSession",
+			input: revoke,
+		});
+		test.revokeSession(ana, phone.session, { idempotencyKey: "r1", proof });
+		test.clock.set(CLEANUP_AFTER_EXPIRY - 1);
+		const answers = () => [
+			outcomeOf(() => test.confirm(ana, consumed)),
+			outcomeOf(() => test.reject(ana, rejected)),
+			outcomeOf(() => test.confirm(ana, expiredOne)),
+			outcomeOf(() => test.confirm(ana, onPhone)),
+			outcomeOf(() => add("regar", "k1")),
+			outcomeOf(() => add("otra", "k3")),
+		];
+		const before = answers();
+
+		await runCleanup(test);
+
+		expect(answers()).toEqual(before);
+		expect(before).toEqual([
+			conflict("confirmation-consumed"),
+			conflict("confirmation-consumed"),
+			conflict("confirmation-expired"),
+			conflict("confirmation-expired"),
+			{ entry: 1, repeated: true },
+			conflict("key-reused"),
+		]);
+	});
+});
+
+describe("the cleanup of step-up proofs", () => {
+	it("answers the same before and after: a repeat with its used proof, an expired one and one whose session ended", async () => {
+		await using test = createTestPlatform({ modules: [probe] });
+		test.prepare.account({ id: "paco", role: "admin" });
+		await test.prepare.password("paco", PASSWORD);
+		const phone = test.prepare.session("paco");
+		const laptop = test.prepare.session("paco");
+		const paco = test.context("paco", laptop);
+		const fromPhone = test.context("paco", phone);
+		test.invoke(paco, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "n1" });
+		const ask = async (context: typeof paco) =>
+			(await test.requestProof(context, PASSWORD, CONFIGURE)).proof;
+		const configure = (context: typeof paco, key: string, proof: string) =>
+			test.invoke(context, "probe.configure", CONFIGURE.input, {
+				idempotencyKey: key,
+				proof,
+			});
+		const used = await ask(paco);
+		configure(paco, "c1", used);
+		const unused = await ask(paco);
+		const onPhone = await ask(fromPhone);
+		const revoke = { session: phone.session };
+		test.revokeSession(paco, phone.session, {
+			idempotencyKey: "r1",
+			proof: (
+				await test.requestProof(paco, PASSWORD, {
+					action: "platform.revokeSession",
+					input: revoke,
+				})
+			).proof,
+		});
+		test.clock.set(CLEANUP_AFTER_EXPIRY - 1);
+		const answers = () => [
+			outcomeOf(() => configure(paco, "c1", used)),
+			outcomeOf(() => configure(paco, "c2", unused)),
+			outcomeOf(() => configure(fromPhone, "c3", onPhone)),
+		];
+		const before = answers();
+
+		await runCleanup(test);
+
+		expect(answers()).toEqual(before);
+		expect(before).toEqual([
+			{ entry: 2, repeated: true },
+			{ code: "STEP_UP_REQUIRED", data: undefined },
+			{ code: "STEP_UP_REQUIRED", data: undefined },
+		]);
 	});
 });

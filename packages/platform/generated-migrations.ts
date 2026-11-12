@@ -78,4 +78,19 @@ export const generatedMigrations: readonly ModuleMigration[] = [
 			"\nCREATE TABLE `platform_tasks` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`time` text,\n\t`paused` integer DEFAULT false NOT NULL,\n\t`next_at` integer NOT NULL\n);\n",
 		],
 	},
+	{
+		tag: "0008_bumpy_ultimates",
+		position: 9,
+		hash: "583be68e7add1f7a2c46bc658adba1e6fd704f55dfe86b2d69bd9ae702a9d17f",
+		statements: [
+			"PRAGMA foreign_keys=OFF;",
+			"\nCREATE TABLE `__new_platform_confirmations` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`account` text NOT NULL,\n\t`via` text,\n\t`kind` text NOT NULL,\n\t`operation` text,\n\t`fingerprint` text NOT NULL,\n\t`key` text,\n\t`origin` text NOT NULL,\n\t`session` text,\n\t`bound` integer NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`window_closes_at` integer NOT NULL,\n\t`expires_at` integer NOT NULL,\n\t`context_only` integer DEFAULT false NOT NULL,\n\t`state` text NOT NULL,\n\t`entry` integer,\n\tFOREIGN KEY (`account`) REFERENCES `platform_user`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`session`) REFERENCES `platform_session`(`id`) ON UPDATE no action ON DELETE set null,\n\tFOREIGN KEY (`entry`) REFERENCES `platform_action_log`(`entry`) ON UPDATE no action ON DELETE no action,\n\tCONSTRAINT \"platform_confirmations_kind\" CHECK(\"__new_platform_confirmations\".\"kind\" IN ('read', 'write')),\n\tCONSTRAINT \"platform_confirmations_state\" CHECK(\"__new_platform_confirmations\".\"state\" IN ('pending', 'consumed', 'rejected', 'ended'))\n);\n",
+			'\nINSERT INTO `__new_platform_confirmations`("id", "account", "via", "kind", "operation", "fingerprint", "key", "origin", "session", "bound", "created_at", "window_closes_at", "expires_at", "context_only", "state", "entry") SELECT "id", "account", "via", "kind", "operation", "fingerprint", "key", "origin", "session", "bound", "created_at", "window_closes_at", "expires_at", "context_only", "state", "entry" FROM `platform_confirmations`;',
+			"\nDROP TABLE `platform_confirmations`;",
+			"\nALTER TABLE `__new_platform_confirmations` RENAME TO `platform_confirmations`;",
+			"\nPRAGMA foreign_keys=ON;",
+			"\nCREATE INDEX `platform_confirmations_account_key` ON `platform_confirmations` (`account`,`key`);",
+			"\nCREATE INDEX `platform_confirmations_session` ON `platform_confirmations` (`session`);",
+		],
+	},
 ];

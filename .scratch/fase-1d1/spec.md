@@ -273,6 +273,12 @@ En la 1d1, todo trabajo es mantenimiento de la plataforma: no tiene actor ni pas
     - Mientras un trabajo está atascado, su ejecución sigue sin resultado; al terminar recibe el suyo. Si un reinicio lo recupera, vuelve a pendiente como uno en ejecución.
     - Si un trabajo cancelado por la parada termina después del margen, su final no se escribe: queda en ejecución en la base hasta el siguiente arranque.
 
+- Decisiones de la tarea 04, tomadas al implementar:
+    - Un lote cambia como mucho 500 filas. Tras un lote lleno, la limpieza cede el turno al bucle de eventos antes del siguiente, así la API, el tiempo máximo y la parada llegan entre lotes; después comprueba la señal.
+    - La antigüedad de un trabajo y de una ejecución se mide desde su final (`finished_at`), y el límite entra: un trabajo que terminó hace justo 30 días se purga. Una ejecución sin resultado no se purga nunca, y una a la que aún apunta un trabajo espera a que se purgue ese trabajo.
+    - «Comprobantes terminados» son los de estado `ended` (cambio de contraseña, aparato revocado). Uno emitido cuya sesión se revocó se borra al pasar su caducidad, cinco minutos después como mucho.
+    - Una tarea pausada más de 90 días se queda sin ejecuciones en la lista: la purga no guarda la última de cada tarea.
+
 - La limpieza cambia lo que guarda la base, no lo que responde la API: las pruebas de la caducidad de la 1b y la 1c tienen que seguir pasando sin cambios después de limpiar.
 
 ## Tareas

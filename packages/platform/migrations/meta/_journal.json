@@ -57,6 +57,13 @@
 			"when": 1794510151166,
 			"tag": "0007_aspiring_kabuki",
 			"breakpoints": true
+		},
+		{
+			"idx": 8,
+			"version": "6",
+			"when": 1794511199050,
+			"tag": "0008_bumpy_ultimates",
+			"breakpoints": true
 		}
 	]
 }
