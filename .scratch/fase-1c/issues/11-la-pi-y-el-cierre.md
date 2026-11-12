@@ -1,6 +1,6 @@
 # 11. La Pi y el cierre de la 1c
 
-Status: ready-for-agent
+Status: ready-for-human
 Blocked by: 01, 02, 03, 04, 05, 06, 07, 08, 09, 10
 
 Spec: [`../spec.md`](../spec.md), sección «Documentos y la Pi». ADR 0023.
@@ -21,6 +21,13 @@ La 1c publicada en la Pi y cerrada en los documentos:
 
 ## Aceptación
 
-- [ ] La comprobación de `despliegue.md` pasa en la Pi con `main`.
-- [ ] El plan, la guía y, si hace falta, la arquitectura y el glosario están al día.
-- [ ] Pasan `pnpm format:check`, `pnpm lint`, `pnpm type-check`, `pnpm test` y `pnpm build`, y `pnpm db:generate && pnpm modules:generate` dejan `git status --porcelain` vacío.
+- [ ] La comprobación de `despliegue.md` pasa en la Pi con `main`. Esta parte la hace una persona con acceso a la Pi.
+- [x] El plan, la guía y, si hace falta, la arquitectura y el glosario están al día.
+- [x] Pasan `pnpm format:check`, `pnpm lint`, `pnpm type-check`, `pnpm test` y `pnpm build`, y `pnpm db:generate && pnpm modules:generate` dejan `git status --porcelain` vacío.
+
+## Comments
+
+- Hecho en `733dec7`. `docs/despliegue.md`: la fila de secretos, crear el `.env` antes de la primera actualización con la 1c, «Las cuentas» (`docker compose exec api node /app/accounts.mjs create|password …`, con terminal; el aviso de que el `pnpm` de la raíz imprime la orden), «Las sesiones y su cookie», «Comprobar las cuentas y la autorización» (funciones `rpc`, `entrar` y `sesiones` en bash; las contraseñas se piden sin eco y llegan a `curl` por la entrada estándar), y «Comprobar que los datos persisten» con las filas generadas desde la posición 2 y las sesiones tras `restart` y tras recrear `api`. «Comprobar» ya no dice que `status` sea la única RPC: sin sesión, `log/read` responde 401 y `probe/listNotes` 404. `docs/guia/`: temas nuevos `cuentas.md` y `permisos.md`, y cambios en `README.md`, `acciones.md` (acuse, registro propio, deshacer lo propio, HTTP), `seguridad.md`, `arquitectura.md`, `datos.md`, `programas.md` y `la-pi.md`, revisados con `humanizer`. La arquitectura, el glosario y el ADR 0023 no contradicen lo construido y no cambian.
+- La cookie `Secure` (punto abierto de la 03): con `baseURL` dinámico sin protocolo, Better Auth 1.7.20 decide el prefijo `__Secure-` y el atributo `Secure` una sola vez al arrancar, con `NODE_ENV === "production"` (`createCookieGetter` en `better-auth/dist/cookies`; solo los recalcula por petición con `crossSubDomainCookies`). En la imagen `NODE_ENV=production`, así que la cookie de sesión lleva `Secure` por las dos direcciones: un navegador la guarda por Tailscale (https) y la rechaza por `http://kira.local:3000`. La cookie `domus.device` sigue el protocolo de la petición que ve `api`, que siempre es http (`tailscale serve` pasa a `:3000`), así que nunca lleva `Secure`. No lo he cambiado: lo he documentado en `despliegue.md` y lo he anotado en `docs/plan.md` como punto abierto del grilling de la fase 3, junto con el tipo de las escrituras en `api-client` que también dejó abierto la 03.
+- Comprobado en local con `apps/api` construida, `NODE_ENV=production` y los `DOMUS_ORIGINS` de la Pi: una base de la 1b (hecha con `main` en `0388fb3`) recibe `5 migrations applied` y luego `0` en cada arranque; las filas de `platform/0000` y `0001` son idénticas, `applied_at` incluido; una base nueva aplica 7 y luego 0. `accounts.mjs` crea las dos cuentas (también dentro de la imagen `api` con `docker exec -it`, contenedor de solo lectura; sin terminal se niega). Con los pasos de `despliegue.md`: las tres sesiones entran y enseñan las cookies, `sessions/list` y `log/read` responden 200, `permissions/set` de Rocío responde `FORBIDDEN` 403, `sessions/revoke` sin comprobante `STEP_UP_REQUIRED` y con él 200; tras revocar y tras dos reinicios, `paco 200`, `paco2 401` y `rocio 200`.
+- Quedan para una persona, después de fusionar en `main`: la comprobación en la Pi con los pasos de `docs/despliegue.md` (crear `.env`, «Las cuentas», «Comprobar», «Comprobar las cuentas y la autorización» y «Comprobar que los datos persisten»), y marcar la 1c como hecha, con su fecha, en `docs/plan.md` (tabla y estado de la fase 1). Al marcarla, el ticket pasa a `Status: resolved`.
