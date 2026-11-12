@@ -322,4 +322,16 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
     Si la implementación muestra que alguna no encaja, se corrige aquí antes de seguir.
 
 - La copia necesita en el NVMe un espacio libre del tamaño de la base, para la instantánea, además del repositorio.
-- Las tareas se dividen con `/to-tickets` y se listan en una sección «Tareas» al final de esta spec.
+- Al repartir las tareas se acordó que la fila de las marcas y la forma de `/health` nacen completas en la 01, que la 05 entrega el procedimiento entero de restaurar (retomar y la marca al abrir incluidos) y que la 06 lo demuestra con procesos cortados y casos de desastre.
+
+## Tareas
+
+| Tarea                                                         | Qué                                         | Bloqueada por |
+| ------------------------------------------------------------- | ------------------------------------------- | ------------- |
+| [01](issues/01-copia-diaria-de-punta-a-punta.md)              | Copia diaria de punta a punta               | —             |
+| [02](issues/02-el-cerrojo-de-la-base.md)                      | El cerrojo de la base                       | —             |
+| [03](issues/03-fallos-cancelacion-y-retencion-de-la-copia.md) | Fallos, cancelación y retención de la copia | 01            |
+| [04](issues/04-backup-check-y-el-vigilante-completo.md)       | `backup-check` y el vigilante completo      | 03            |
+| [05](issues/05-restaurar-de-punta-a-punta.md)                 | Restaurar de punta a punta, con retomar     | 01, 02, 03    |
+| [06](issues/06-restaurar-ante-cortes-y-desastres.md)          | Restaurar ante cortes y desastres           | 05            |
+| [07](issues/07-la-pi-y-el-cierre.md)                          | La Pi y el cierre de la 1d2                 | todas         |
