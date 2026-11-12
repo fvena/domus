@@ -1,6 +1,6 @@
 # 05. Ajustes de las tareas por HTTP
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 02, 03
 
 Spec: [`../spec.md`](../spec.md), sección «Las operaciones de ajustes de las tareas». ADR 0025, ADR 0023.
@@ -25,15 +25,20 @@ El admin ve y ajusta las tareas programadas por HTTP, con las mismas reglas que 
 
 ## Criterios de aceptación
 
-- [ ] Por HTTP, con sesiones reales:
-    - [ ] el admin y un miembro listan las tareas, sin comprobante;
-    - [ ] el admin cambia la hora, pausa, reanuda y lanza con un comprobante de esa operación;
-    - [ ] sin comprobante o con el de otra operación, la puerta lo pide otra vez;
-    - [ ] un miembro recibe «no permitido» al cambiar algo;
-    - [ ] sin sesión, no autenticado.
-- [ ] Repetir con la misma clave devuelve el acuse y no repite el cambio.
-- [ ] Deshacer un cambio de hora y una pausa devuelve el estado anterior, y la lista lo muestra.
-- [ ] Lanzar con una ejecución pendiente o en curso responde con un conflicto, y la ejecución manual corre y queda en el registro de ejecuciones.
-- [ ] Una tarea que no existe responde «no encontrado».
-- [ ] La lista muestra el resultado de la última ejecución y un trabajo atascado.
-- [ ] `pnpm check` pasa.
+- [x] Por HTTP, con sesiones reales:
+    - [x] el admin y un miembro listan las tareas, sin comprobante;
+    - [x] el admin cambia la hora, pausa, reanuda y lanza con un comprobante de esa operación;
+    - [x] sin comprobante o con el de otra operación, la puerta lo pide otra vez;
+    - [x] un miembro recibe «no permitido» al cambiar algo;
+    - [x] sin sesión, no autenticado.
+- [x] Repetir con la misma clave devuelve el acuse y no repite el cambio.
+- [x] Deshacer un cambio de hora y una pausa devuelve el estado anterior, y la lista lo muestra.
+- [x] Lanzar con una ejecución pendiente o en curso responde con un conflicto, y la ejecución manual corre y queda en el registro de ejecuciones.
+- [x] Una tarea que no existe responde «no encontrado».
+- [x] La lista muestra el resultado de la última ejecución y un trabajo atascado.
+- [x] `pnpm check` pasa.
+
+## Comments
+
+- Hecho en `1cad8ad`. Decisiones tomadas al implementar, también en la spec («Notas»): rutas `tasks/list|setTime|pause|resume|launch` y operaciones `platform.listTasks|setTaskTime|pauseTask|resumeTask|launchTask`; la última ejecución de la lista es la última anotada, sea cual sea su resultado (también «saltada»); deshacer una pausa reanuda con la próxima ejecución desde ese momento; una tarea no declarada responde «no encontrado» antes del comprobante, también a un miembro; lanzar con una ejecución pendiente, en curso o atascada responde `CONFLICT` con `task-busy`; ninguna tarea declara aún si se puede lanzar a mano.
+- Límites para las siguientes: `PlatformOperation` admite ya `level: "manage"` y `undoable` (su `run` devuelve `{ result, inverse }`), y `platformOperation` vive en `actions/platform-operations.ts`. `Background` ofrece `launch`, `state` y `overview` (la lista, solo lectura). Un cambio de una tarea dentro de la transacción de una acción despierta el segundo plano con `queueMicrotask`, al acabar esa transacción: en las pruebas, `background.flush()` deja que arranque el trabajo lanzado.
