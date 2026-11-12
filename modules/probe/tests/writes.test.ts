@@ -32,7 +32,6 @@ describe("probe writes", () => {
 				idempotencyKey: "k1",
 				at: TEST_START,
 				input: { body: "comprar pan" },
-				result: { id: 1, body: "comprar pan" },
 				touched: [{ module: "probe", type: "note", id: "1" }],
 				inverse: { action: "probe.deleteNote", input: { id: 1 } },
 				undoes: null,

@@ -162,14 +162,20 @@ describe("createTestPlatform with actions", () => {
 		test.invoke(ana, "clockwork.double", { value: 2 }, { idempotencyKey: "k1" });
 	});
 
-	it("types a write: it takes its key and returns its result and entry number", async () => {
+	it("types a write: it takes its key and returns its result and entry number, or an acknowledgement", async () => {
 		await using test = createTestPlatform({ modules: [clockwork] });
 		const ana = test.member("ana");
 
 		const written = test.invoke(ana, "clockwork.tick", { value: 7 }, { idempotencyKey: "k1" });
 
-		expectTypeOf(written).toEqualTypeOf<{ readonly result: number; readonly entry: number }>();
+		expectTypeOf(written).toEqualTypeOf<
+			| { readonly result: number; readonly entry: number }
+			| { readonly entry: number; readonly repeated: true }
+		>();
 		expect(written).toEqual({ result: 7, entry: 1 });
+		expect(
+			test.invoke(ana, "clockwork.tick", { value: 7 }, { idempotencyKey: "k1" }),
+		).toStrictEqual({ entry: 1, repeated: true });
 		// @ts-expect-error: a write needs its key.
 		expect(() => test.invoke(ana, "clockwork.tick", { value: 7 })).toThrow();
 	});
@@ -183,7 +189,7 @@ describe("createTestPlatform with actions", () => {
 		snapshot[0]!.idempotencyKey = "changed";
 
 		expect(test.log()).toEqual([
-			expect.objectContaining({ entry: 1, idempotencyKey: "k1", result: 7 }),
+			expect.objectContaining({ entry: 1, idempotencyKey: "k1", input: { value: 7 } }),
 		]);
 	});
 });

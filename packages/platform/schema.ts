@@ -1,6 +1,7 @@
 // The platform's tables in Drizzle (ADR 0023), all under the `platform_` prefix. `pnpm db:generate` writes the
 // platform's migrations from here into `migrations/`. The first one it wrote is the base: it stands for the
 // hand-written platform/0000 and platform/0001, which created the tables declared below, and it never runs.
+// The ones after it change those tables: platform/0002 drops the action log's result column (ADR 0023).
 // platform/audit keeps reading and writing these tables with prepared statements.
 import { sql } from "drizzle-orm";
 import {
@@ -32,7 +33,8 @@ export const migrationHistory = sqliteTable(
 
 /**
  * platform/0001: the action log (ADR 0022). The key is unique per account and via, with no via as a value
- * of its own: `via IS NULL` tells it apart from an empty via.
+ * of its own: `via IS NULL` tells it apart from an empty via. Its content is the input and the inverse: since
+ * platform/0002 it keeps no result (ADR 0023).
  */
 export const actionLog = sqliteTable(
 	"platform_action_log",
@@ -49,7 +51,6 @@ export const actionLog = sqliteTable(
 		undoes: integer().references((): AnySQLiteColumn => actionLog.entry),
 		undoneBy: integer("undone_by").references((): AnySQLiteColumn => actionLog.entry),
 		input: text(),
-		result: text(),
 		inverse: text(),
 	},
 	(table) => [

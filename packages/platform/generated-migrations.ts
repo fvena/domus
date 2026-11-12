@@ -4,8 +4,14 @@ import type { ModuleMigration } from "@domus/module-sdk";
 
 export const generatedMigrations: readonly ModuleMigration[] = [
 	{
-		tag: "0001_broken_blackheart",
+		tag: "0001_lively_sharon_carter",
 		position: 2,
+		hash: "45fc89e93dbe3ce3adab1187fe68762b22c1e2ff74af1d5f9684cce8437d9606",
+		statements: ["ALTER TABLE `platform_action_log` DROP COLUMN `result`;"],
+	},
+	{
+		tag: "0002_milky_shen",
+		position: 3,
 		hash: "c031c0c34e6fd690356f04c195d8e8d362c439c123303f9292b4be929b498a54",
 		statements: [
 			"CREATE TABLE `platform_account` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`account_id` text NOT NULL,\n\t`provider_id` text NOT NULL,\n\t`user_id` text NOT NULL,\n\t`access_token` text,\n\t`refresh_token` text,\n\t`id_token` text,\n\t`access_token_expires_at` integer,\n\t`refresh_token_expires_at` integer,\n\t`scope` text,\n\t`password` text,\n\t`created_at` integer NOT NULL,\n\t`updated_at` integer NOT NULL,\n\tFOREIGN KEY (`user_id`) REFERENCES `platform_user`(`id`) ON UPDATE no action ON DELETE cascade\n);\n",

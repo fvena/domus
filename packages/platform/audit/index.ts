@@ -1,4 +1,5 @@
-// The action log (ADR 0022): one entry per committed write, over the tables of platform/0001. Plain prepared
+// The action log (ADR 0022): one entry per committed write, over the tables of platform/0001, without the result
+// column platform/0002 drops (ADR 0023): an entry's content is its input and its inverse. Plain prepared
 // statements of better-sqlite3; `schema.ts` declares the same tables only for drizzle-kit (ADR 0023). It writes inside the transaction platform/actions
 // opens and never commits on its own.
 import type { Actor, Inverse, TouchedRecord } from "@domus/module-sdk";
@@ -14,10 +15,9 @@ export interface NewEntry {
 	readonly fingerprint: string;
 	/** The platform clock's instant of the write, in milliseconds since the epoch. */
 	readonly at: number;
-	/** From this instant on, the content is expired. */
+	/** From this instant on, the content (input and inverse) is expired. */
 	readonly expiresAt: number;
 	readonly input: unknown;
-	readonly result: unknown;
 	readonly inverse: Inverse | undefined;
 	/** Records of `module`. */
 	readonly touched: readonly TouchedRecord[];
@@ -43,14 +43,13 @@ export interface NumberedEntry {
 	readonly idempotencyKey: string;
 	readonly fingerprint: string;
 	readonly at: number;
-	/** From this instant on, its content (input, result, inverse) is expired. */
+	/** From this instant on, its content (input and inverse) is expired. */
 	readonly expiresAt: number;
 	/** The entry this one undid, when it is an undo. */
 	readonly undoes: number | null;
 	/** The entry that undid this one. */
 	readonly undoneBy: number | null;
 	readonly input: unknown;
-	readonly result: unknown;
 	/** Null when its write cannot be undone. */
 	readonly inverse: Inverse | null;
 }
@@ -60,12 +59,10 @@ export interface LogEntry extends Omit<NumberedEntry, "module"> {
 	readonly touched: readonly LoggedRecord[];
 }
 
-/** The annotation of an entry found by its key: what tells a repeated request from another one. */
+/** The annotation of an entry found by its key: what tells a repeated request from another one and acknowledges it. */
 export interface KeyedEntry {
 	readonly entry: number;
 	readonly fingerprint: string;
-	/** From this instant on, its content is expired. */
-	readonly expiresAt: number;
 }
 
 export interface ActionLog {
@@ -96,7 +93,6 @@ interface EntryRow {
 	readonly undoes: number | null;
 	readonly undone_by: number | null;
 	readonly input: string | null;
-	readonly result: string | null;
 	readonly inverse: string | null;
 }
 
@@ -108,14 +104,14 @@ interface TouchedRow extends LoggedRecord {
 export function createActionLog(connection: Database.Database): ActionLog {
 	const insertEntry = connection.prepare(
 		`INSERT INTO platform_action_log
-			(module, action, account, via, key, fingerprint, at, expires_at, undoes, input, result, inverse)
-			VALUES (@module, @action, @account, @via, @key, @fingerprint, @at, @expiresAt, @undoes, @input, @result, @inverse)`,
+			(module, action, account, via, key, fingerprint, at, expires_at, undoes, input, inverse)
+			VALUES (@module, @action, @account, @via, @key, @fingerprint, @at, @expiresAt, @undoes, @input, @inverse)`,
 	);
 	const insertTouched = connection.prepare(
 		"INSERT INTO platform_action_log_touched (entry, module, type, id) VALUES (?, ?, ?, ?)",
 	);
 	const selectByKey = connection.prepare(
-		"SELECT entry, fingerprint, expires_at FROM platform_action_log WHERE account = ? AND via IS ? AND key = ?",
+		"SELECT entry, fingerprint FROM platform_action_log WHERE account = ? AND via IS ? AND key = ?",
 	);
 	const selectByNumber = connection.prepare("SELECT * FROM platform_action_log WHERE entry = ?");
 	const selectTouchedLater = connection.prepare(
@@ -153,7 +149,6 @@ export function createActionLog(connection: Database.Database): ActionLog {
 					expiresAt: entry.expiresAt,
 					undoes: entry.undoes ?? null,
 					input: toJson(entry.input),
-					result: toJson(entry.result),
 					inverse: toJson(entry.inverse),
 				}).lastInsertRowid,
 			);
@@ -169,11 +164,9 @@ export function createActionLog(connection: Database.Database): ActionLog {
 
 		findByKey(actor, idempotencyKey) {
 			const row = selectByKey.get(actor.account, actor.via ?? null, idempotencyKey) as
-				| Pick<EntryRow, "entry" | "fingerprint" | "expires_at">
+				| Pick<EntryRow, "entry" | "fingerprint">
 				| undefined;
-			return (
-				row && { entry: row.entry, fingerprint: row.fingerprint, expiresAt: row.expires_at }
-			);
+			return row && { entry: row.entry, fingerprint: row.fingerprint };
 		},
 
 		find(entry) {
@@ -220,7 +213,6 @@ function entryOf(row: EntryRow): NumberedEntry {
 		undoes: row.undoes,
 		undoneBy: row.undone_by,
 		input: fromJson(row.input),
-		result: fromJson(row.result),
 		inverse: (fromJson(row.inverse) as Inverse | undefined) ?? null,
 	};
 }

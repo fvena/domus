@@ -78,6 +78,10 @@ _Evitar_: historial, log.
 El nombre que quien pide una escritura da a esa operación, para que repetirla no la ejecute dos veces.
 _Evitar_: id de petición.
 
+**Acuse** (`acknowledgement`):
+Lo que devuelve repetir una escritura o un deshacer con la misma clave y la misma petición, tras volver a autorizar: solo el número de su entrada, `{ entry, repeated: true }`, sin contenido y sin ejecutar nada, aunque el contenido haya caducado o la entrada se haya deshecho.
+_Evitar_: resultado guardado, recibo.
+
 **Inversa** (`inverse`):
 La acción, con su entrada, que deshace una escritura concreta. La deja la propia escritura al ejecutarse; deshacer es ejecutar la inversa.
 _Evitar_: rollback, compensación.

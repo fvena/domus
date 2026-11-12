@@ -6,7 +6,7 @@
 // main entry offers none of it.
 import { hashPassword } from "better-auth/crypto";
 
-import type { ActionCall, Clock, UndoCall, WriteReceipt } from "../actions";
+import type { ActionCall, Clock, UndoCall, WriteOutcome } from "../actions";
 import type { LogEntry } from "../audit";
 import { type Grant, type Role, sealContext, type VerifiedContext } from "../authorization";
 import {
@@ -26,7 +26,7 @@ import {
 	type PlatformOptions,
 } from "../platform";
 
-export type { WriteReceipt } from "../actions";
+export type { Acknowledgement, WriteOutcome, WriteReceipt } from "../actions";
 export type { LogEntry } from "../audit";
 export type {
 	Channel,
@@ -49,7 +49,7 @@ export function invokeAction(platform: Platform, call: ActionCall): unknown {
 }
 
 /** Undoes an entry through the platform's one path: its stored inverse, the checks and one new log entry. */
-export function undoEntry(platform: Platform, call: UndoCall): WriteReceipt {
+export function undoEntry(platform: Platform, call: UndoCall): WriteOutcome {
 	return actionsOf(platform).undo(call);
 }
 

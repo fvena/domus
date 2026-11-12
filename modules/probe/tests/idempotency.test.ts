@@ -17,7 +17,7 @@ function probePlatform(file?: string) {
 const keyReused = expect.objectContaining({ code: "CONFLICT", data: { reason: "key-reused" } });
 
 describe("probe idempotency", () => {
-	it("answers a retry with the same result and entry, without running the write again", async () => {
+	it("answers a retry with an acknowledgement of its entry, without content and without running the write again", async () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
 
@@ -34,10 +34,23 @@ describe("probe idempotency", () => {
 			{ idempotencyKey: "k1" },
 		);
 
-		expect(retry).toEqual({ result: { id: 1, body: "comprar pan" }, entry: 1 });
-		expect(retry).toStrictEqual(first);
+		expect(first).toEqual({ result: { id: 1, body: "comprar pan" }, entry: 1 });
+		expect(retry).toStrictEqual({ entry: 1, repeated: true });
 		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
 		expect(test.log()).toHaveLength(1);
+	});
+
+	it("acknowledges a retry of a write undone since, without running it again", async () => {
+		const { test, ana } = probePlatform();
+		await using _ = test;
+		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
+		test.undo(ana, 1, { idempotencyKey: "u1" });
+
+		expect(
+			test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" }),
+		).toStrictEqual({ entry: 1, repeated: true });
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([]);
+		expect(test.log()).toHaveLength(2);
 	});
 
 	it("answers key-reused when the same key comes with another action, without change or entry", async () => {
@@ -68,7 +81,7 @@ describe("probe idempotency", () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;
 		test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" });
-		const edited = test.invoke(
+		test.invoke(
 			ana,
 			"probe.editNote",
 			{ id: 1, body: "comprar leche" },
@@ -82,7 +95,7 @@ describe("probe idempotency", () => {
 				{ body: "comprar leche", id: 1 },
 				{ idempotencyKey: "k2" },
 			),
-		).toStrictEqual(edited);
+		).toStrictEqual({ entry: 2, repeated: true });
 		expect(test.log()).toHaveLength(2);
 	});
 
@@ -151,10 +164,10 @@ describe("probe idempotency", () => {
 		});
 		afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-		it("does not run a key the closed platform already ran", async () => {
+		it("acknowledges a key the closed platform already ran, without running it", async () => {
 			const databaseFile = join(dir, "domus.db");
 			const before = probePlatform(databaseFile);
-			const first = before.test.invoke(
+			before.test.invoke(
 				before.ana,
 				"probe.addNote",
 				{ body: "comprar pan" },
@@ -172,7 +185,7 @@ describe("probe idempotency", () => {
 					{ body: "comprar pan" },
 					{ idempotencyKey: "k1" },
 				),
-			).toStrictEqual(first);
+			).toStrictEqual({ entry: 1, repeated: true });
 			expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
 			expect(test.log()).toHaveLength(1);
 		});

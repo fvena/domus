@@ -25,9 +25,10 @@ import {
 	preparePassword,
 	readLog,
 	syntheticContext,
+	type Acknowledgement,
 	undoEntry,
 	type VerifiedContext,
-	type WriteReceipt,
+	type WriteOutcome,
 } from "@domus/platform/testing";
 
 import { createTestBrowser, type TestBrowser } from "./browser";
@@ -75,10 +76,13 @@ type InvokeArguments<TAction> =
 		? [input: ActionInput<TAction>, options: WriteOptions]
 		: InputArguments<ActionInput<TAction>>;
 
-/** A read returns its result; a write, its result and the number of its entry in the action log. */
+/**
+ * A read returns its result. A write returns its result and the number of its entry in the action log the
+ * first time, and an acknowledgement without content when repeated.
+ */
 export type InvokeResult<TAction> =
 	ActionMetaOf<TAction> extends WriteActionMeta
-		? { readonly result: ActionOutput<TAction>; readonly entry: number }
+		? { readonly result: ActionOutput<TAction>; readonly entry: number } | Acknowledgement
 		: ActionOutput<TAction>;
 
 export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
@@ -153,8 +157,9 @@ export interface TestPlatform<
 	member(id: string, options?: ContextOptions): VerifiedContext;
 	/**
 	 * Runs an action of `modules` through the platform's real path, with the real authorization. A read takes
-	 * no key and returns its result. A write takes its key and returns its result and entry number. Platform
-	 * errors, and those a contract declares, are thrown with their oRPC `code`.
+	 * no key and returns its result. A write takes its key and returns its result and entry number, or
+	 * `{ entry, repeated: true }` when its key and request were already done. Platform errors, and those a
+	 * contract declares, are thrown with their oRPC `code`.
 	 */
 	invoke<TName extends ActionName<TModules>>(
 		context: VerifiedContext,
@@ -163,9 +168,10 @@ export interface TestPlatform<
 	): InvokeResult<ActionContractOf<TModules, TName>>;
 	/**
 	 * Undoes the entry numbered `entry` through the platform's real path, with its own key: the inverse the
-	 * entry stored runs and logs one new entry. Returns the inverse's result and that entry's number.
+	 * entry stored runs and logs one new entry. Returns the inverse's result and that entry's number, or an
+	 * acknowledgement when its key was already done.
 	 */
-	undo(context: VerifiedContext, entry: number, options: WriteOptions): WriteReceipt;
+	undo(context: VerifiedContext, entry: number, options: WriteOptions): WriteOutcome;
 	/**
 	 * A read-only snapshot of the action log: every entry, in order, with its content even when expired. That
 	 * exception is only for tests.

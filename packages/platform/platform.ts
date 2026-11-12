@@ -20,7 +20,7 @@ export interface PlatformOptions {
 	/** The modules, in the order their migrations run, after the platform's own. */
 	readonly modules: readonly ModuleDefinition[];
 	/**
-	 * How long the content of an entry in the action log (input, result, inverse) stays usable, in
+	 * How long the content of an entry in the action log (input, inverse) stays usable, in
 	 * milliseconds: {@link DEFAULT_RETENTION} when unset. Each entry keeps the `expiresAt` it got when it was
 	 * written, so a change applies only to new entries.
 	 */

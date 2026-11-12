@@ -1,7 +1,7 @@
 // `pnpm db:generate` also writes the platform's migrations (ADR 0023): drizzle-kit's first one is the base,
 // which stands for the hand-written platform/0000 + platform/0001 and never runs; the next ones get their
 // positions from 2 on, under their generated names.
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,6 +9,7 @@ import Database from "better-sqlite3";
 import { readMigrationFiles } from "drizzle-orm/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { generatedMigrations } from "../../packages/platform/generated-migrations";
 import { handWrittenMigrations } from "../../packages/platform/hand-written-migrations";
 import { migrate } from "../../packages/platform/migrator";
 import { drizzleKitGenerate } from "./drizzle-kit";
@@ -22,19 +23,26 @@ function read(folder: string): { journal: Journal; files: MigrationFile[] } {
 	return { journal, files: readMigrationFiles({ migrationsFolder: folder }) };
 }
 
-/** The real base, alone, as drizzle-kit wrote it: the first entry of the real folder. */
-const base = (() => {
-	const { journal, files } = read(realFolder);
-	return {
-		journal: { ...journal, entries: journal.entries.slice(0, 1) },
-		files: files.slice(0, 1),
-	};
-})();
+/** The real folder, as drizzle-kit wrote it. */
+const real = read(realFolder);
+
+/** The real base, alone. */
+const base = {
+	journal: { entries: real.journal.entries.slice(0, 1) },
+	files: real.files.slice(0, 1),
+};
 
 describe("the base", () => {
 	it("is the platform's first generated migration, and nothing of it runs", () => {
-		expect(base.journal.entries[0]!.tag).toBe("0000_nice_lenny_balinger");
 		expect(toPlatformMigrations(base.journal, base.files, handWrittenMigrations)).toEqual([]);
+	});
+
+	it("leaves the real generated migrations to run from position 2 on", () => {
+		const generated = toPlatformMigrations(real.journal, real.files, handWrittenMigrations);
+		expect(generated).toEqual(generatedMigrations);
+		expect(generated.map((migration) => migration.position)).toEqual(
+			generated.map((_, index) => index + 2),
+		);
 	});
 
 	it("has the schema platform/0000 + platform/0001 create", () => {
@@ -79,21 +87,9 @@ describe("a migration generated after the base", () => {
 	let generated: ReturnType<typeof toPlatformMigrations>;
 
 	beforeAll(() => {
-		// A copy of the real base alone, and a schema that adds one table to the tables of 0000 + 0001.
+		// A copy of the real folder, and a schema that adds one table to the platform's.
 		folder = mkdtempSync(join(tmpdir(), "domus-platform-migrations-"));
-		const tag = base.journal.entries[0]!.tag;
-		cpSync(join(realFolder, `${tag}.sql`), join(folder, `${tag}.sql`));
-		cpSync(
-			join(realFolder, "meta/0000_snapshot.json"),
-			join(folder, "meta/0000_snapshot.json"),
-		);
-		const real = JSON.parse(readFileSync(join(realFolder, "meta/_journal.json"), "utf8")) as {
-			entries: unknown[];
-		};
-		writeFileSync(
-			join(folder, "meta/_journal.json"),
-			JSON.stringify({ ...real, entries: real.entries.slice(0, 1) }, null, 2),
-		);
+		cpSync(realFolder, folder, { recursive: true });
 		drizzleKitGenerate(join(import.meta.dirname, "fixtures/platform-schema/schema.ts"), folder);
 		const { journal, files } = read(folder);
 		generated = toPlatformMigrations(journal, files, handWrittenMigrations);
@@ -103,23 +99,29 @@ describe("a migration generated after the base", () => {
 		if (folder) rmSync(folder, { recursive: true, force: true });
 	});
 
-	it("gets position 2 under the name drizzle-kit gave it", () => {
+	it("gets the next position under the name drizzle-kit gave it", () => {
 		const { journal } = read(folder);
-		expect(generated.map(({ tag, position }) => ({ tag, position }))).toEqual([
-			{ tag: journal.entries[1]!.tag, position: 2 },
-		]);
-		expect(generated[0]!.tag).toMatch(/^0001_/);
+		const last = journal.entries.length - 1;
+		const [added, ...none] = generated.slice(generatedMigrations.length);
+		expect(generated.slice(0, generatedMigrations.length)).toEqual(generatedMigrations);
+		expect(none).toEqual([]);
+		expect(added).toMatchObject({ tag: journal.entries[last]!.tag, position: last + 1 });
+		expect(added!.tag).toMatch(new RegExp(`^${String(last).padStart(4, "0")}_`));
 	});
 
 	it("leaves the same schema on a clean install and on a database of phase 1b", () => {
 		const platform = [...handWrittenMigrations, ...generated];
 
 		const clean = new Database(":memory:");
-		expect(migrate(clean, [{ module: "platform", migrations: platform }])).toBe(3);
+		expect(migrate(clean, [{ module: "platform", migrations: platform }])).toBe(
+			2 + generated.length,
+		);
 
 		const of1b = new Database(":memory:");
 		migrate(of1b, [{ module: "platform", migrations: handWrittenMigrations }]);
-		expect(migrate(of1b, [{ module: "platform", migrations: platform }])).toBe(1);
+		expect(migrate(of1b, [{ module: "platform", migrations: platform }])).toBe(
+			generated.length,
+		);
 
 		const schema = (db: Database.Database) =>
 			schemaOf(

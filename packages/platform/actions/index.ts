@@ -3,7 +3,8 @@
 // and logs nothing. A write needs a key and runs in one better-sqlite3 transaction that this path opens and
 // commits: its handler, the checks of its result and inverse, and its entry in the action log. Any failure
 // inside rolls back both the change and the entry. An undo takes the same path with the inverse its entry
-// stored: one transaction for the checks, the inverse, its one new entry and the undone-by link.
+// stored: one transaction for the checks, the inverse, its one new entry and the undone-by link. Neither keeps
+// its result: repeating one under the same key answers an acknowledgement without content (ADR 0023).
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
@@ -48,24 +49,36 @@ export interface ActionCall {
 	readonly idempotencyKey?: string;
 }
 
-/** What a write returns: its result and the number of its entry in the action log. Never its inverse. */
+/** What a write returns the first time: its result and the number of its entry in the action log. Never its inverse. */
 export interface WriteReceipt {
 	readonly result: unknown;
 	readonly entry: number;
 }
 
+/**
+ * What a repeated write or undo returns: the number of the entry the first time logged, without content
+ * (ADR 0023). The same once its content expired or its entry was undone.
+ */
+export interface Acknowledgement {
+	readonly entry: number;
+	readonly repeated: true;
+}
+
+/** What a write or an undo returns: a receipt the first time, an acknowledgement when repeated. */
+export type WriteOutcome = WriteReceipt | Acknowledgement;
+
 export interface Actions {
 	/**
 	 * Runs an action, or throws one of the platform's errors or one its contract declares. A read returns its
-	 * result; a write, a {@link WriteReceipt}. Synchronous, like the handlers.
+	 * result; a write, a {@link WriteOutcome}. Synchronous, like the handlers.
 	 */
 	invoke(call: ActionCall): unknown;
 	/**
 	 * Undoes an entry with the inverse its write stored, never one the caller brings. Returns the inverse's
-	 * result and its one new entry, linked to the entry it undoes. Throws like a write, or a conflict or a
-	 * "cannot be undone" with its reason.
+	 * result and its one new entry, linked to the entry it undoes, or an acknowledgement when repeated. Throws
+	 * like a write, or a conflict or a "cannot be undone" with its reason.
 	 */
-	undo(call: UndoCall): WriteReceipt;
+	undo(call: UndoCall): WriteOutcome;
 }
 
 /** An undo: the verified context of who asks, the number of the entry to undo and the caller's own idempotency key. */
@@ -81,7 +94,7 @@ export interface ActionsOptions {
 	readonly authorizer: Authorizer;
 	readonly clock: Clock;
 	readonly actionLog: ActionLog;
-	/** How long the content of a new entry (input, result, inverse) stays usable, in milliseconds. */
+	/** How long the content of a new entry (input, inverse) stays usable, in milliseconds. */
 	readonly retention: number;
 }
 
@@ -214,7 +227,7 @@ export function createActions({
 		action: string,
 		input: unknown,
 		idempotencyKey: string | undefined,
-	): WriteReceipt {
+	): WriteOutcome {
 		const actor = actorOf(context);
 		const fingerprint = writeFingerprint(action, input);
 		const request: AuthorizationRequest = {
@@ -236,7 +249,7 @@ export function createActions({
 		);
 	}
 
-	function undo({ context, entry: number, idempotencyKey }: UndoCall): WriteReceipt {
+	function undo({ context, entry: number, idempotencyKey }: UndoCall): WriteOutcome {
 		if (!isVerified(context)) throw internalError();
 		const actor = actorOf(context);
 		const fingerprint = undoFingerprint(number);
@@ -258,12 +271,16 @@ export function createActions({
 			actor,
 			idempotencyKey,
 			fingerprint,
-			// A repeated undo is authorized with the inverse its own entry ran, which is still current: the
-			// entry it undid may have expired. Only that entry's annotation gives the context.
+			// A repeated undo is authorized with the inverse its own entry ran, never with the content of the entry
+			// it undid, whose annotation gives only the context. The inverse's input is its own entry's content,
+			// so once that expired the request goes without it.
 			(own) => {
 				const original = actionLog.find(number);
 				if (!original) throw internalError();
-				return requestFor(original, { action: own.action, input: own.input });
+				return requestFor(original, {
+					action: own.action,
+					input: isExpired(own.expiresAt) ? undefined : own.input,
+				});
 			},
 			(key) => {
 				const original = actionLog.find(number);
@@ -292,10 +309,10 @@ export function createActions({
 	/**
 	 * One idempotent operation under `idempotencyKey`, a write or an undo. Looking the key up, running and
 	 * logging stay in one synchronous section of one transaction, so no other operation with the same key can
-	 * slip in between. The same key under another fingerprint is a conflict. Under the same one, an expired
-	 * entry answers result-expired without being read or authorized, since nothing is delivered; a current one
-	 * is authorized anew with the request `repeated` builds from it, and its stored result and number come
-	 * back without running anything. A new key goes to `fresh`, which authorizes, runs and logs.
+	 * slip in between. The same key under another fingerprint is a conflict. Under the same one, the request
+	 * `repeated` builds from the earlier entry is authorized anew and an acknowledgement with its number comes
+	 * back, without content and without running anything, whether its content expired or it was undone since
+	 * (ADR 0023). A new key goes to `fresh`, which authorizes, runs and logs.
 	 */
 	function once(
 		actor: Actor,
@@ -303,21 +320,19 @@ export function createActions({
 		fingerprint: string,
 		repeated: (earlier: NumberedEntry) => AuthorizationRequest,
 		fresh: (idempotencyKey: string) => WriteReceipt,
-	): WriteReceipt {
+	): WriteOutcome {
 		if (typeof idempotencyKey !== "string" || idempotencyKey === "")
 			throw new ORPCError("BAD_REQUEST", { message: "a write needs an idempotency key" });
 
-		return connection.transaction((): WriteReceipt => {
+		return connection.transaction((): WriteOutcome => {
 			const keyed = actionLog.findByKey(actor, idempotencyKey);
 			if (!keyed) return fresh(idempotencyKey);
 			if (keyed.fingerprint !== fingerprint) throw conflict("key-reused");
-			// Expired content is never used, and the operation never runs again under the same key.
-			if (isExpired(keyed.expiresAt)) throw conflict("result-expired");
 
 			const earlier = actionLog.find(keyed.entry);
 			if (!earlier) throw internalError();
 			authorize(repeated(earlier));
-			return { result: earlier.result, entry: earlier.entry };
+			return { entry: earlier.entry, repeated: true };
 		})();
 	}
 
@@ -371,7 +386,6 @@ export function createActions({
 			at: now,
 			expiresAt: now + retention,
 			input,
-			result: outcome.result,
 			inverse: outcome.inverse,
 			touched: outcome.touched,
 			undoes: logged.undoes,
@@ -441,7 +455,7 @@ function guarded<T>(operation: () => T): T {
 }
 
 /** The reasons of a conflict the platform answers (ADR 0022). */
-type ConflictReason = "key-reused" | "already-undone" | "changed-since" | "result-expired";
+type ConflictReason = "key-reused" | "already-undone" | "changed-since";
 
 /** A conflict, with its reason in `data.reason`. */
 function conflict(reason: ConflictReason) {

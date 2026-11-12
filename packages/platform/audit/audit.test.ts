@@ -17,7 +17,6 @@ function entry(overrides: Partial<NewEntry> = {}): NewEntry {
 		at: AT,
 		expiresAt: AT + 1000,
 		input: { body: "pan" },
-		result: { id: 1, body: "pan" },
 		inverse: { action: "probe.deleteNote", input: { id: 1 } },
 		touched: [{ type: "note", id: 1 }],
 		...overrides,
@@ -33,6 +32,14 @@ function upgradedBase() {
 	expect(migrate(db, [{ module: "platform", migrations: migrations.slice(0, 1) }])).toBe(1);
 	expect(migrate(db, [{ module: "platform", migrations }])).toBe(migrations.length - 1);
 	return createActionLog(db);
+}
+
+/** The columns of the action log, as SQLite reports them. */
+function logColumns(): string[] {
+	return db
+		.prepare<[], { name: string }>("SELECT name FROM pragma_table_info('platform_action_log')")
+		.all()
+		.map((column) => column.name);
 }
 
 describe("the action log", () => {
@@ -64,7 +71,6 @@ describe("the action log", () => {
 				undoes: null,
 				undoneBy: null,
 				input: { body: "pan" },
-				result: { id: 1, body: "pan" },
 				inverse: { action: "probe.deleteNote", input: { id: 1 } },
 				touched: [
 					{ module: "probe", type: "note", id: "1" },
@@ -75,8 +81,34 @@ describe("the action log", () => {
 		expect(actionLog.findByKey({ account: "ana", via: "kira" }, "k1")).toEqual({
 			entry: 1,
 			fingerprint: "probe.addNote:abc",
-			expiresAt: AT + 1000,
 		});
+		expect(logColumns()).not.toContain("result");
+	});
+
+	it("keeps the entries of a log of phase 1b, without their result, and their keys unique", () => {
+		db = new Database(":memory:");
+		migrate(db, [{ module: "platform", migrations: migrations.slice(0, 2) }]);
+		db.prepare(
+			`INSERT INTO platform_action_log
+				(module, action, account, via, key, fingerprint, at, expires_at, input, result, inverse)
+				VALUES ('probe', 'addNote', 'ana', NULL, 'k1', 'probe.addNote:abc', ?, ?, '{"body":"pan"}', '{"id":1}', NULL)`,
+		).run(AT, AT + 1000);
+
+		expect(migrate(db, [{ module: "platform", migrations }])).toBe(migrations.length - 2);
+		const actionLog = createActionLog(db);
+
+		expect(logColumns()).not.toContain("result");
+		expect(actionLog.entries()).toEqual([
+			expect.objectContaining({ entry: 1, input: { body: "pan" }, inverse: null }),
+		]);
+		expect(actionLog.entries()[0]).not.toHaveProperty("result");
+		expect(actionLog.findByKey({ account: "ana" }, "k1")).toEqual({
+			entry: 1,
+			fingerprint: "probe.addNote:abc",
+		});
+		expect(() =>
+			db.transaction(() => actionLog.record(entry({ actor: { account: "ana" } })))(),
+		).toThrow(/UNIQUE/);
 	});
 
 	it("finds an entry by its key only for the same account and via, no via being a value of its own", () => {
@@ -90,36 +122,22 @@ describe("the action log", () => {
 		expect(actionLog.findByKey({ account: "ana", via: "" }, "k1")).toEqual({
 			entry: 2,
 			fingerprint: "probe.addNote:abc",
-			expiresAt: AT + 1000,
 		});
 		expect(actionLog.findByKey({ account: "ana", via: "kira" }, "k1")).toBeUndefined();
 		expect(actionLog.findByKey({ account: "luis" }, "k1")).toBeUndefined();
 		expect(actionLog.findByKey({ account: "ana" }, "k2")).toBeUndefined();
 	});
 
-	it("keeps an entry without input, result or inverse apart from one whose values are null", () => {
+	it("keeps an entry without input or inverse apart from one whose input is null", () => {
 		const actionLog = upgradedBase();
 		db.transaction(() => {
-			actionLog.record(
-				entry({
-					idempotencyKey: "k1",
-					input: undefined,
-					result: undefined,
-					inverse: undefined,
-				}),
-			);
-			actionLog.record(entry({ idempotencyKey: "k2", input: null, result: null }));
+			actionLog.record(entry({ idempotencyKey: "k1", input: undefined, inverse: undefined }));
+			actionLog.record(entry({ idempotencyKey: "k2", input: null }));
 		})();
 
-		expect(
-			actionLog.entries().map(({ input, result, inverse }) => ({ input, result, inverse })),
-		).toEqual([
-			{ input: undefined, result: undefined, inverse: null },
-			{
-				input: null,
-				result: null,
-				inverse: { action: "probe.deleteNote", input: { id: 1 } },
-			},
+		expect(actionLog.entries().map(({ input, inverse }) => ({ input, inverse }))).toEqual([
+			{ input: undefined, inverse: null },
+			{ input: null, inverse: { action: "probe.deleteNote", input: { id: 1 } } },
 		]);
 	});
 
@@ -157,7 +175,6 @@ describe("the action log", () => {
 			undoes: null,
 			undoneBy: null,
 			input: { body: "pan" },
-			result: { id: 1, body: "pan" },
 			inverse: { action: "probe.deleteNote", input: { id: 1 } },
 		});
 		expect(actionLog.find(4)).toHaveProperty("inverse", null);
