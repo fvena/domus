@@ -6,7 +6,7 @@ Read `docs/architecture/README.md` before changing structure, permissions or how
 
 ## Phase
 
-The project is built in phases. `docs/plan.md` is the only source of the plan: what each phase includes, when it is done, and its state. Build only what the current phase asks for: each feature enters after its own grilling review.
+The project is built in phases. `docs/plan.md` is the only source of the plan: what each phase includes, when it is done, and its state. Build only what the current phase asks for: each feature enters after its own grilling review. Closing a phase or subphase includes bringing `docs/guia/`, the guide for people, up to date with what it built (rules in `docs/AGENTS.md`).
 
 ## Setup and commands
 
