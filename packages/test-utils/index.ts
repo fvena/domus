@@ -11,3 +11,5 @@ export {
 	type TestPreparation,
 } from "./platform";
 export type { VerifiedContext } from "@domus/platform/testing";
+/** The platform's own operations, for HTTP tests of modules, whose rules keep them from platform's contracts. */
+export { platformContract } from "@domus/platform/contracts";
