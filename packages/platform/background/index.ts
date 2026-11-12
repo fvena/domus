@@ -7,7 +7,12 @@ import type Database from "better-sqlite3";
 import type { Clock } from "../actions";
 import { cleanupTask } from "./cleanup";
 import { createEngine, type JobKind } from "./engine";
-import { createScheduler, type ScheduledTask, type TaskOverview } from "./scheduler";
+import {
+	createScheduler,
+	type ScheduledTask,
+	type TaskOverview,
+	type TaskSettings,
+} from "./scheduler";
 import type { Timer } from "./timer";
 
 /** The longest the background sleeps without waking, even with nothing due. */
@@ -61,7 +66,9 @@ export interface Background {
 	/** Records a manual run of a declared task and enqueues its job, due now. Throws {@link TaskBusyError}. */
 	launch(task: string): number;
 	/** The time the admin chose for a declared task and whether it is paused. Throws {@link UnknownTaskError}. */
-	state(task: string): { readonly time: string | null; readonly paused: boolean };
+	state(task: string): TaskSettings;
+	/** True when the code declares the task. */
+	has(task: string): boolean;
 	/** Each declared task as the admin sees it. Reads only. */
 	overview(): readonly TaskOverview[];
 	/** The watcher: degraded while the scheduler is silent past the threshold or a lane is stuck, else ok. */
@@ -187,6 +194,8 @@ export function createBackground({
 
 		state: (task) => scheduler.state(task),
 
+		has: (task) => scheduler.has(task),
+
 		overview: () => scheduler.overview(),
 
 		health() {
@@ -214,6 +223,7 @@ export {
 	type TaskRun,
 	TaskBusyError,
 	type TaskOverview,
+	type TaskSettings,
 	type TaskState,
 	UnknownTaskError,
 } from "./scheduler";

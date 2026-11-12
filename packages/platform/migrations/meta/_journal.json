@@ -64,6 +64,13 @@
 			"when": 1794511199050,
 			"tag": "0008_bumpy_ultimates",
 			"breakpoints": true
+		},
+		{
+			"idx": 9,
+			"version": "6",
+			"when": 1794511890479,
+			"tag": "0009_new_thanos",
+			"breakpoints": true
 		}
 	]
 }

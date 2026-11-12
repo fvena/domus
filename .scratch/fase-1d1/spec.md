@@ -96,8 +96,8 @@ En la 1d1, todo trabajo es mantenimiento de la plataforma: no tiene actor ni pas
     - un identificador estable;
     - su carril;
     - su frecuencia por defecto: «cada día a las HH:MM» o «cada semana, tal día a las HH:MM». No hay expresiones cron;
-    - su tiempo máximo;
-    - si se puede lanzar a mano.
+    - su trabajo, cuyo tiempo máximo es el de su tipo de trabajo o, si no declara uno, el de su carril.
+- En la 1d1 todas las tareas se pueden lanzar a mano. El campo que lo impida llega con la primera que no deba.
 - Una tabla de la plataforma guarda el estado de cada tarea: la hora que eligió el admin, si existe; si está pausada; y la próxima ejecución prevista. La hora elegida sobrevive a las actualizaciones aunque cambie la de por defecto. Una fila de una tarea que el código ya no declara se conserva y se ignora: no rompe el arranque.
 - **Hora de la casa.** Las horas son locales de `Europe/Madrid`. La zona va fija en el código, sin depender de `TZ` ni de la zona del proceso. Los cálculos los hace `@domus/utils/date-time`, que llega en esta subfase sobre `date-fns` y su soporte de zonas horarias.
 - **Cambio de hora.**
@@ -107,7 +107,7 @@ En la 1d1, todo trabajo es mantenimiento de la plataforma: no tiene actor ni pas
 - **Marcar y encolar juntos.** Cuando una ejecución vence, el planificador crea su trabajo y marca la próxima ejecución prevista en la misma transacción. Si algo falla entre las dos escrituras, no queda ninguna.
 - **Lo perdido.** Si al despertar hay varias ejecuciones vencidas de una tarea (la Pi estuvo apagada), corre una sola: la más reciente. La próxima prevista se calcula desde ahora. No se crea una ejecución si la tarea ya tiene una pendiente o en curso. En ese caso esa fecha queda anotada como saltada.
 - Una tarea pausada no crea ejecuciones. Al reanudarla, su próxima ejecución se calcula desde el momento de reanudar, sin recuperar lo que se saltó mientras estuvo pausada.
-- **Registro de ejecuciones.** Cada ejecución guarda la tarea, la fecha prevista o «manual», cuándo empezó y terminó, su resultado (bien, fallida, cancelada, atascada o saltada) y, si falló, un mensaje para quien opera el sistema, en inglés y sin datos personales.
+- **Registro de ejecuciones.** Cada ejecución guarda la tarea, la fecha prevista o «manual», cuándo empezó y terminó, su resultado (bien, fallida, cancelada o saltada; vacío mientras corre, también si su trabajo está atascado, que es un estado del trabajo y no de la ejecución) y, si falló, un mensaje para quien opera el sistema, en inglés y sin datos personales.
 
 ### Las tareas de la 1d1 (Q1)
 
@@ -283,7 +283,7 @@ En la 1d1, todo trabajo es mantenimiento de la plataforma: no tiene actor ni pas
     - Las rutas son `tasks/list`, `tasks/setTime`, `tasks/pause`, `tasks/resume` y `tasks/launch`; en el camino de las acciones, `platform.listTasks`, `platform.setTaskTime`, `platform.pauseTask`, `platform.resumeTask` y `platform.launchTask`, que es lo que nombra un comprobante. La hora es `HH:MM`, y `null` vuelve a la de por defecto.
     - La última ejecución de la lista es la última que anotó el registro, sea cual sea su resultado (también «saltada»), con `manual`, sus instantes, su resultado (vacío mientras corre) y su mensaje de error para quien opera. La lista solo muestra las tareas que el código declara, en su orden.
     - La inversa de pausar o reanudar devuelve el estado de pausa anterior: deshacer una pausa reanuda, con la próxima ejecución calculada desde ese momento. Deshacer un cambio de hora vuelve a la hora elegida antes, o a la de por defecto.
-    - Una tarea que no existe responde «no encontrado» antes de la autorización y del comprobante, también a un miembro.
+    - Una tarea que no existe responde «no encontrado» antes de la autorización y del comprobante, también a un miembro. (Cambiado en la revisión: ver abajo.)
     - Lanzar con una ejecución pendiente, en curso o atascada responde `CONFLICT` con el motivo `task-busy`.
     - Un cambio hecho dentro de la transacción de una acción despierta el segundo plano cuando esa transacción ha terminado: ningún trabajo empieza dentro de una transacción que aún puede revertirse.
     - Ninguna tarea declara todavía si se puede lanzar a mano: en la 1d1 todas se pueden. El campo llega con la primera que no deba.
@@ -295,6 +295,11 @@ En la 1d1, todo trabajo es mantenimiento de la plataforma: no tiene actor ni pas
     - El mando simula un planificador callado moviendo el reloj sin despertar: `clock.advance(ms, { wake: false })` y `clock.set(instant, { wake: false })`. El siguiente movimiento que despierta trae la señal de vuelta.
 
 - La limpieza cambia lo que guarda la base, no lo que responde la API: las pruebas de la caducidad de la 1b y la 1c tienen que seguir pasando sin cambios después de limpiar.
+
+## Revisión
+
+- Una tarea que no existe responde «no encontrado» después de la autorización y del comprobante, como las demás operaciones de la plataforma: un miembro que intenta una escritura `manage` recibe «no permitido» exista o no la tarea, y el admin sin comprobante recibe `STEP_UP_REQUIRED`. Solo las operaciones sobre sesiones buscan antes de autorizar, porque una sesión ajena debe responder igual que una inexistente; una tarea no es de nadie.
+- «Atascada» no es un resultado de una ejecución: es un estado del trabajo. La ejecución sigue sin resultado mientras su trabajo está atascado (decisión de la 03). La migración `platform/0009` quita ese valor de la columna de resultados.
 
 ## Tareas
 

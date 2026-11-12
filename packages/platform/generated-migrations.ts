@@ -93,4 +93,18 @@ export const generatedMigrations: readonly ModuleMigration[] = [
 			"\nCREATE INDEX `platform_confirmations_session` ON `platform_confirmations` (`session`);",
 		],
 	},
+	{
+		tag: "0009_new_thanos",
+		position: 10,
+		hash: "31e16b6beba99387d7aa754c80113f19887406e23e0ce4d8ef0e2f72f20deeb0",
+		statements: [
+			"PRAGMA foreign_keys=OFF;",
+			"\nCREATE TABLE `__new_platform_task_runs` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`task` text NOT NULL,\n\t`planned_date` text,\n\t`planned_at` integer NOT NULL,\n\t`started_at` integer,\n\t`finished_at` integer,\n\t`result` text,\n\t`error` text,\n\tCONSTRAINT \"platform_task_runs_result\" CHECK(\"__new_platform_task_runs\".\"result\" IN ('ok', 'failed', 'cancelled', 'skipped'))\n);\n",
+			'\nINSERT INTO `__new_platform_task_runs`("id", "task", "planned_date", "planned_at", "started_at", "finished_at", "result", "error") SELECT "id", "task", "planned_date", "planned_at", "started_at", "finished_at", "result", "error" FROM `platform_task_runs`;',
+			"\nDROP TABLE `platform_task_runs`;",
+			"\nALTER TABLE `__new_platform_task_runs` RENAME TO `platform_task_runs`;",
+			"\nPRAGMA foreign_keys=ON;",
+			"\nCREATE UNIQUE INDEX `platform_task_runs_planned` ON `platform_task_runs` (`task`,`planned_date`);",
+		],
+	},
 ];

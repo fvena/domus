@@ -2,7 +2,8 @@
 // Listing them is a read without personal data. Changing a task's time, pausing and resuming it are undoable
 // `manage` writes, whose inverse brings back the time or the state it had; launching it now is an irreversible
 // `manage` write. Being `manage`, each write needs a step-up proof; authorization decides who may. A task the code
-// does not declare is not found, before anything asks for a proof.
+// does not declare is not found once authorization and the proof said yes: as with the platform's other operations,
+// one who may not change the tasks is not allowed, whether the task exists or not.
 import { ORPCError } from "@orpc/server";
 
 import type { Background } from ".";
@@ -16,11 +17,11 @@ export const LIST_TASKS = "platform.listTasks";
 
 /** The operations of the scheduled tasks of `background`. */
 export function taskOperations(background: Background): readonly PlatformOperation[] {
-	/** The task as listing shows it; one the code does not declare is not found. */
-	const declared = ({ task }: { task: string }) => {
-		const found = background.overview().find((candidate) => candidate.id === task);
-		if (!found) throw new ORPCError("NOT_FOUND", { message: "no such scheduled task" });
-		return found;
+	/** The task's settings before a change; one the code does not declare is not found. */
+	const settingsOf = (task: string) => {
+		if (!background.has(task))
+			throw new ORPCError("NOT_FOUND", { message: "no such scheduled task" });
+		return background.state(task);
 	};
 	/** Puts the paused state back as it was: the inverse of pausing or resuming. */
 	const stateBack = (task: string, paused: boolean) => ({
@@ -43,9 +44,8 @@ export function taskOperations(background: Background): readonly PlatformOperati
 			undoable: true,
 			inputSchema: TASK_INPUTS.setTaskTime,
 			subject: noSubject,
-			find: declared,
 			run: ({ task, time }) => {
-				const before = background.state(task);
+				const before = settingsOf(task);
 				background.setTime(task, time);
 				return {
 					result: { task, time },
@@ -59,9 +59,8 @@ export function taskOperations(background: Background): readonly PlatformOperati
 			undoable: true,
 			inputSchema: TASK_INPUTS.pauseTask,
 			subject: noSubject,
-			find: declared,
 			run: ({ task }) => {
-				const before = background.state(task);
+				const before = settingsOf(task);
 				background.pause(task);
 				return { result: { task, paused: true }, inverse: stateBack(task, before.paused) };
 			},
@@ -72,9 +71,8 @@ export function taskOperations(background: Background): readonly PlatformOperati
 			undoable: true,
 			inputSchema: TASK_INPUTS.resumeTask,
 			subject: noSubject,
-			find: declared,
 			run: ({ task }) => {
-				const before = background.state(task);
+				const before = settingsOf(task);
 				background.resume(task);
 				return { result: { task, paused: false }, inverse: stateBack(task, before.paused) };
 			},
@@ -84,8 +82,8 @@ export function taskOperations(background: Background): readonly PlatformOperati
 			level: "manage",
 			inputSchema: TASK_INPUTS.launchTask,
 			subject: noSubject,
-			find: declared,
 			run: ({ task }) => {
+				settingsOf(task);
 				try {
 					return { task, run: background.launch(task) };
 				} catch (error) {

@@ -241,7 +241,7 @@ export const scheduledTaskView = z.object({
 			plannedAt: z.number().int(),
 			startedAt: z.number().int().nullable(),
 			finishedAt: z.number().int().nullable(),
-			result: z.enum(["ok", "failed", "cancelled", "stuck", "skipped"]).nullable(),
+			result: z.enum(["ok", "failed", "cancelled", "skipped"]).nullable(),
 			error: z.string().nullable(),
 		})
 		.nullable(),

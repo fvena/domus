@@ -72,10 +72,14 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	const actions = actionsOf(platform);
 
 	/**
-	 * Runs one of the platform's writes on the path of the actions with a session: the sensitive ones and the
-	 * `manage` settings of the scheduled tasks, each with its key and its proof.
+	 * Runs the platform's write `platform.<name>` on the path of the actions with a session, its key and its proof:
+	 * the sensitive ones and the `manage` settings of the scheduled tasks.
 	 */
-	async function sensitive(name: string, input: unknown, context: DoorContext): Promise<never> {
+	async function platformWrite(
+		name: string,
+		input: unknown,
+		context: DoorContext,
+	): Promise<never> {
 		return actions.invoke({
 			context: await verifiedSession(context),
 			action: `platform.${name}`,
@@ -159,17 +163,17 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 				return sessionsOf(connection, account, session);
 			}),
 			revoke: platformProcedures.sessions.revoke.handler(({ input, context }) =>
-				sensitive("revokeSession", input, context),
+				platformWrite("revokeSession", input, context),
 			),
 		},
 		devices: {
 			revoke: platformProcedures.devices.revoke.handler(({ input, context }) =>
-				sensitive("revokeDevice", input, context),
+				platformWrite("revokeDevice", input, context),
 			),
 		},
 		permissions: {
 			set: platformProcedures.permissions.set.handler(({ input, context }) =>
-				sensitive("setPermission", input, context),
+				platformWrite("setPermission", input, context),
 			),
 		},
 		delegation: {
@@ -182,7 +186,7 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 					}) as never,
 			),
 			set: platformProcedures.delegation.set.handler(({ input, context }) =>
-				sensitive("setDelegation", input, context),
+				platformWrite("setDelegation", input, context),
 			),
 		},
 		proofs: {
@@ -228,16 +232,16 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 					}) as never,
 			),
 			setTime: platformProcedures.tasks.setTime.handler(({ input, context }) =>
-				sensitive("setTaskTime", input, context),
+				platformWrite("setTaskTime", input, context),
 			),
 			pause: platformProcedures.tasks.pause.handler(({ input, context }) =>
-				sensitive("pauseTask", input, context),
+				platformWrite("pauseTask", input, context),
 			),
 			resume: platformProcedures.tasks.resume.handler(({ input, context }) =>
-				sensitive("resumeTask", input, context),
+				platformWrite("resumeTask", input, context),
 			),
 			launch: platformProcedures.tasks.launch.handler(({ input, context }) =>
-				sensitive("launchTask", input, context),
+				platformWrite("launchTask", input, context),
 			),
 		},
 		confirmations: {

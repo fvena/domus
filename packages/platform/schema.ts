@@ -325,14 +325,14 @@ export const taskRuns = sqliteTable(
 		plannedAt: integer("planned_at").notNull(),
 		startedAt: integer("started_at"),
 		finishedAt: integer("finished_at"),
-		result: text({ enum: ["ok", "failed", "cancelled", "stuck", "skipped"] }),
+		result: text({ enum: ["ok", "failed", "cancelled", "skipped"] }),
 		error: text(),
 	},
 	(table) => [
 		uniqueIndex("platform_task_runs_planned").on(table.task, table.plannedDate),
 		check(
 			"platform_task_runs_result",
-			sql`${table.result} IN ('ok', 'failed', 'cancelled', 'stuck', 'skipped')`,
+			sql`${table.result} IN ('ok', 'failed', 'cancelled', 'skipped')`,
 		),
 	],
 );

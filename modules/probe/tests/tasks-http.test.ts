@@ -226,31 +226,60 @@ describe("changing the scheduled tasks over HTTP", () => {
 		});
 	});
 
-	it("answers not found for a task the code does not declare, before asking for a proof", async () => {
+	it("answers not found for a task the code does not declare, once authorized and proven", async () => {
 		await using test = await household();
 		const paco = await signedIn(test, "paco");
 		const unknown = { task: "backup" };
+		const backupAtFive = { ...unknown, time: "05:00" };
 
 		await expect(
 			paco.tasks.launch(unknown, { context: { idempotencyKey: "t1" } }),
-		).rejects.toMatchObject({ code: "NOT_FOUND" });
+		).rejects.toMatchObject({ code: "STEP_UP_REQUIRED" });
 		await expect(
-			paco.tasks.setTime(
-				{ ...unknown, time: "05:00" },
-				{
-					context: {
-						idempotencyKey: "t2",
-						proof: await proofOf(paco, "pauseTask", unknown),
-					},
+			paco.tasks.launch(unknown, {
+				context: {
+					idempotencyKey: "t2",
+					proof: await proofOf(paco, "launchTask", unknown),
 				},
-			),
+			}),
 		).rejects.toMatchObject({ code: "NOT_FOUND" });
 		await expect(
-			paco.tasks.pause(unknown, { context: { idempotencyKey: "t3" } }),
+			paco.tasks.setTime(backupAtFive, {
+				context: {
+					idempotencyKey: "t3",
+					proof: await proofOf(paco, "setTaskTime", backupAtFive),
+				},
+			}),
 		).rejects.toMatchObject({ code: "NOT_FOUND" });
 		await expect(
-			paco.tasks.resume(unknown, { context: { idempotencyKey: "t4" } }),
+			paco.tasks.pause(unknown, {
+				context: { idempotencyKey: "t4", proof: await proofOf(paco, "pauseTask", unknown) },
+			}),
 		).rejects.toMatchObject({ code: "NOT_FOUND" });
+		await expect(
+			paco.tasks.resume(unknown, {
+				context: {
+					idempotencyKey: "t5",
+					proof: await proofOf(paco, "resumeTask", unknown),
+				},
+			}),
+		).rejects.toMatchObject({ code: "NOT_FOUND" });
+		expect(await paco.log.read()).toEqual([]);
+	});
+
+	it("answers a member not allowed whether the task exists or not", async () => {
+		await using test = await household();
+		const ana = await signedIn(test, "ana");
+		const unknown = { task: "backup" };
+
+		await expect(
+			ana.tasks.launch(unknown, { context: { idempotencyKey: "t1" } }),
+		).rejects.toMatchObject({ code: "FORBIDDEN" });
+		await expect(
+			ana.tasks.pause(unknown, {
+				context: { idempotencyKey: "t2", proof: await proofOf(ana, "pauseTask", unknown) },
+			}),
+		).rejects.toMatchObject({ code: "FORBIDDEN" });
 	});
 });
 

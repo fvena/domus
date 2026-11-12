@@ -38,7 +38,7 @@ export interface TaskRun {
 	readonly startedAt: number | null;
 	readonly finishedAt: number | null;
 	/** Null until it ends. */
-	readonly result: "ok" | "failed" | "cancelled" | "stuck" | "skipped" | null;
+	readonly result: "ok" | "failed" | "cancelled" | "skipped" | null;
 	readonly error: string | null;
 }
 
@@ -73,7 +73,9 @@ export interface Scheduler {
 	 */
 	launch(task: string): number;
 	/** The time the admin chose for a declared task and whether it is paused. Throws {@link UnknownTaskError}. */
-	state(task: string): { readonly time: string | null; readonly paused: boolean };
+	state(task: string): TaskSettings;
+	/** True when the code declares the task. Reads nothing. */
+	has(task: string): boolean;
 	/** Each declared task as the admin sees it, in the order of their declaration. Reads only. */
 	overview(): readonly TaskOverview[];
 }
@@ -113,6 +115,9 @@ export class UnknownTaskError extends Error {
 		this.name = "UnknownTaskError";
 	}
 }
+
+/** What the admin set on a scheduled task: the time it chose and whether it is paused. */
+export type TaskSettings = Pick<TaskState, "time" | "paused">;
 
 /** The state of a scheduled task, as its row keeps it across restarts. */
 export interface TaskState {
@@ -155,19 +160,17 @@ export function createScheduler({
 		`INSERT OR IGNORE INTO platform_task_runs (task, planned_date, planned_at, finished_at, result)
 			VALUES (?, ?, ?, ?, 'skipped')`,
 	);
+	/** Whether the task has a job in one of `states`. */
+	const jobOfTaskIn = (states: string) =>
+		connection
+			.prepare(
+				`SELECT 1 FROM platform_jobs JOIN platform_task_runs ON platform_task_runs.id = platform_jobs.task_run
+					WHERE platform_task_runs.task = ? AND platform_jobs.state IN (${states})`,
+			)
+			.pluck();
 	// A stuck job still runs: its task has a run in progress until it ends.
-	const inProgress = connection
-		.prepare(
-			`SELECT 1 FROM platform_jobs JOIN platform_task_runs ON platform_task_runs.id = platform_jobs.task_run
-				WHERE platform_task_runs.task = ? AND platform_jobs.state IN ('pending', 'running', 'stuck')`,
-		)
-		.pluck();
-	const stuckJob = connection
-		.prepare(
-			`SELECT 1 FROM platform_jobs JOIN platform_task_runs ON platform_task_runs.id = platform_jobs.task_run
-				WHERE platform_task_runs.task = ? AND platform_jobs.state = 'stuck'`,
-		)
-		.pluck();
+	const inProgress = jobOfTaskIn("'pending', 'running', 'stuck'");
+	const stuckJob = jobOfTaskIn("'stuck'");
 	const lastRun = connection.prepare<
 		[string],
 		{
@@ -254,6 +257,7 @@ export function createScheduler({
 
 		enqueueDue() {
 			const now = clock();
+			// Each row is read outside its transaction: on the one synchronous connection nothing writes in between.
 			for (const { task, row } of rows())
 				if (!row.paused && row.next_at <= now) runDue(task, row, now);
 		},
@@ -300,6 +304,8 @@ export function createScheduler({
 			const { row } = declared(id);
 			return { time: row.time, paused: row.paused === 1 };
 		},
+
+		has: (id) => tasks.some((task) => task.id === id),
 
 		overview() {
 			const now = clock();

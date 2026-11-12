@@ -9,6 +9,7 @@
 import type Database from "better-sqlite3";
 
 import type { Clock } from "../actions";
+import type { jobs } from "../schema";
 import type { Timer } from "./timer";
 
 export type Lane = "short" | "maintenance";
@@ -79,7 +80,8 @@ export interface JobSnapshot {
 	readonly id: number;
 	readonly kind: string;
 	readonly lane: Lane;
-	readonly state: "pending" | "running" | "done" | "failed" | "cancelled" | "stuck";
+	/** The states `platform_jobs` admits. */
+	readonly state: (typeof jobs.$inferSelect)["state"];
 	readonly attempts: number;
 	readonly runAt: number;
 	readonly error: string | null;
@@ -230,7 +232,7 @@ export function createEngine({
 		const timeout = kind?.timeout ?? LANE_TIMEOUT[lane];
 		const done = Promise.resolve()
 			.then(() => {
-				if (!kind) throw new PermanentJobError(`no job kind "${row.kind}" is declared`);
+				if (!kind) throw new PermanentJobError(undeclared(row.kind));
 				return kind.run({ signal: abort.signal, startedAt });
 			})
 			.then(
@@ -343,9 +345,14 @@ function afterPassingError(row: JobRow, error: string, now: number): End {
 	return { state: "retry", retryAt: now + FIRST_RETRY * 2 ** (row.attempts - 1), error };
 }
 
+/** The message of a job of a kind nobody declared. */
+function undeclared(kind: string): string {
+	return `no job kind "${kind}" is declared`;
+}
+
 function laneOf(kinds: ReadonlyMap<string, JobKind>, kind: string): Lane {
 	const found = kinds.get(kind);
-	if (!found) throw new Error(`no job kind "${kind}" is declared`);
+	if (!found) throw new Error(undeclared(kind));
 	return found.lane;
 }
 
