@@ -18,6 +18,8 @@ Read during review. Mechanical rules live in tooling and are not repeated here: 
 ## Tests
 
 - A guarantee that a spec or an ADR promises (ids never reused, migrations all or nothing, nothing new published) has a test that tries to break it at its narrowest grain: one statement, one migration, one request. A test that reaches the guarantee only across a wider boundary leaves the narrow case open, and that gap is a finding.
+- An undoable write has a test where a later write of what it touched makes its undo answer `changed-since`.
+- A record that passes through states (pending, running, retrying, stuck) is checked mid-way, not only once it ends: what a reader sees while it runs is part of its contract.
 - A variant the spec admits (a schema that transforms, an absent `via`, an error with data) is exercised by at least one test, even when the module under test does not need it. A guarantee carried by a type (it must reject something) has a `@ts-expect-error` test: a library's types can accept more than they read.
 
 ## Security

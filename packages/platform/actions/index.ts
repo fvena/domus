@@ -674,6 +674,9 @@ export function createActions({
 		const { result, touched, inverse } = outcome as Record<string, unknown>;
 
 		if (!Array.isArray(touched) || !touched.every(isTouchedRecord)) throw internalError();
+		// An undo is stopped by a later write of what this one touched (`changed-since`): an undoable write that
+		// declares nothing could be undone over any later change.
+		if (found.undoable && touched.length === 0) throw internalError();
 
 		const output = validate(found.outputSchema, result);
 		if (!output.ok || !isLosslessJson(output.value)) throw internalError();

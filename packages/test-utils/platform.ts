@@ -43,6 +43,7 @@ import {
 	backgroundSettled,
 	changeTask,
 	controlledTimer,
+	STOP_MARGIN,
 	enqueueJob,
 	type JobKind,
 	type JobSnapshot,
@@ -542,8 +543,14 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		log: () => readLog(platform),
 		pendingConfirmations: () => readPendingConfirmations(platform),
 		close,
+		// A job the test left held, often by a failed assertion before its release, would keep the stop waiting on
+		// a clock that only the test moves: disposing moves it past the stop margin, so the platform closes and the
+		// failure that shows is the test's own.
 		[Symbol.asyncDispose]: async () => {
-			await platform.stopBackground();
+			const stopping = platform.stopBackground();
+			await new Promise((resolve) => setImmediate(resolve));
+			clock.advance(STOP_MARGIN);
+			await stopping;
 			close();
 		},
 	};
