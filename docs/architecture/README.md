@@ -151,3 +151,4 @@ El plan por fases, con lo que incluye cada una, cuándo se da por terminada y su
 | [0021](adr/0021-datos-de-los-modulos-y-migraciones.md)                  | Datos de los módulos y migraciones                  |
 | [0022](adr/0022-acciones.md)                                            | Acciones                                            |
 | [0023](adr/0023-identidad-y-autorizacion.md)                            | Identidad y autorización                            |
+| [0024](adr/0024-bloqueo-referencial-al-borrar.md)                       | Bloqueo referencial al borrar                       |

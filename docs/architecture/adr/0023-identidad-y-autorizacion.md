@@ -4,6 +4,8 @@ Sustituye dos decisiones: Permix, del ADR 0002, y la devolución del resultado g
 
 Precisa los ADR 0002, 0006, 0007, 0008, 0009, 0010, 0021 y 0022: cómo entra cada persona, qué recibe la autorización y cómo decide permiso, delegación, visibilidad y confirmación.
 
+Precisado por el ADR 0024: un borrado puede decir que lo impiden registros dependientes ocultos solo a quien ya ve el registro padre y puede borrarlo, sin revelar nada más de ellos.
+
 **Sin Permix.** La decisión es una función pura y síncrona de `platform/authorization` sobre tres tablas de búsqueda: permisos, delegación y visibilidad. La web no decide nada. Pregunta a la API, y si un día necesita pintar permisos, lo hará con una consulta. Permix no añadía nada a esa función.
 
 **Acciones en HTTP.** La puerta monta las acciones de los módulos y las operaciones de la plataforma, solo con una sesión válida. Cada llamada sigue el recorrido único de `platform/actions`. La forma de la URL la da la composición de oRPC con `api-client`.

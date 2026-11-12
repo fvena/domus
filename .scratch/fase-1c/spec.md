@@ -201,6 +201,7 @@ Al escribir, los triggers temporales comprueban que nadie se salta las reglas de
 - `module-sdk/db` ofrece una forma de declarar una tabla con dueño: añade las columnas de dueño (la cuenta) y de visibilidad (`private` o `public`), y declara el tipo de registro y el área de la tabla. Una tabla con dueño tiene que usar la columna `id` entera de `module-sdk/db` como clave. No admite claves compuestas, y la plataforma rechaza al arrancar una tabla con dueño que no cumpla.
 - Un área `alwaysPrivate` pone en sus tablas un `CHECK` que rechaza `public`. Lo genera `drizzle-kit`.
 - El contexto del manejador da un predicado de visibilidad por tabla con dueño: «el dueño es la cuenta representada, o el registro es público». Se aplica en `where`, también en conteos y búsquedas.
+- Una sola excepción admitida, el bloqueo referencial ([ADR 0024](../../docs/architecture/adr/0024-bloqueo-referencial-al-borrar.md)): un borrado puede responder que lo impiden registros dependientes, aunque alguno quede oculto, solo cuando quien lo pide ya ve el registro padre y puede borrarlo; la respuesta no revela cuántos, ni ids, dueños, visibilidad o contenido. Para saber si puede borrarlo, el contexto da `editable(table)`, con la misma regla que la captura, y `forbidden()`. La comprobación sin predicado sirve solo para la integridad referencial; lecturas, búsquedas y conteos siguen con el predicado. Cada módulo que la quiera la justifica en su grilling.
 - En un join entre tablas con dueño del mismo módulo, cada tabla lleva su propio predicado. Las formas admitidas (consulta simple, conteo, búsqueda y join dentro del módulo) quedan escritas en el `AGENTS.md` de `modules/`. Lo demás es disciplina comprobada en la revisión.
 - Un registro que el predicado oculta se trata como inexistente: la acción responde «no encontrado».
 
@@ -389,7 +390,7 @@ Al escribir, los triggers temporales comprueban que nadie se salta las reglas de
 - **`createTestPlatform` con `probe`**, el punto principal:
     - **Permisos por nivel:** `member` con `write` lee y escribe; la cuenta de aparato con `read` no escribe; una fila que baja a ninguno deniega.
     - **Delegación:** vía Kira con `no` deniega, con `confirmar` pide confirmación, leer sí y escribir confirmar en la misma área; confirmar desde la app algo nacido vía Kira sigue aplicando la delegación del origen; quitar la delegación entre pedir y confirmar deniega al confirmar.
-    - **Visibilidad:** privado ajeno es «no encontrado» en lectura, conteo, búsqueda y join; público se ve; público ajeno no se edita en `probe` y sí en `probe.board`; crear deja dueño y visibilidad por defecto; cambiar la visibilidad solo el dueño; `probe.health` no admite público.
+    - **Visibilidad:** privado ajeno es «no encontrado» en lectura, conteo, búsqueda y join; público se ve; público ajeno no se edita en `probe` y sí en `probe.board`; crear deja dueño y visibilidad por defecto; cambiar la visibilidad solo el dueño; `probe.health` no admite público; borrar una nota con comentarios ocultos responde «tiene comentarios» sin más datos solo a quien la ve y puede borrarla, «no permitido» a quien la ve sin poder borrarla y «no encontrado» a quien no la ve.
     - **Confirmaciones:**
         - la misma escritura y la misma lectura repetidas devuelven la misma pendiente;
         - misma clave con otra entrada da `key-reused`;
