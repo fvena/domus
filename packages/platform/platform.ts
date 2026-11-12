@@ -167,6 +167,7 @@ export function openPlatform(
 	const db = openFile(databaseFile, lock);
 	let appliedMigrations: number;
 	let capture: Capture;
+	let background: Background;
 	try {
 		if (databaseFile !== IN_MEMORY) {
 			const mode = db.pragma("journal_mode = WAL", { simple: true });
@@ -181,30 +182,31 @@ export function openPlatform(
 		ensureDeviceAccount(db, areas, clock());
 		// After the migrations, which its triggers would stop from dropping a column, and before any action.
 		capture = installCapture(db, modules, areas);
+		// The backups load their marks now; the background checks its tasks and kinds.
+		background = createBackground({
+			connection: db,
+			clock,
+			timer,
+			...(backupConfig === undefined
+				? {}
+				: {
+						backups: createBackups({
+							connection: db,
+							clock,
+							config: backupConfig,
+							dataDir: dirname(databaseFile),
+							...(restic === undefined ? {} : { executable: restic }),
+						}),
+					}),
+			...(tasks === undefined ? {} : { extraTasks: tasks }),
+			...(jobs === undefined ? {} : { extraKinds: jobs }),
+		});
 	} catch (error) {
 		db.close();
 		lock?.release();
 		throw error;
 	}
 
-	const background = createBackground({
-		connection: db,
-		clock,
-		timer,
-		...(backupConfig === undefined
-			? {}
-			: {
-					backups: createBackups({
-						connection: db,
-						clock,
-						config: backupConfig,
-						dataDir: dirname(databaseFile),
-						...(restic === undefined ? {} : { executable: restic }),
-					}),
-				}),
-		...(tasks === undefined ? {} : { extraTasks: tasks }),
-		...(jobs === undefined ? {} : { extraKinds: jobs }),
-	});
 	const platform: Platform = {
 		appliedMigrations,
 		startBackground: () => background.start(),
