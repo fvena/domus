@@ -35,6 +35,11 @@
 - **1d. Segundo plano:** cola, tareas programadas ([ADR 0015](architecture/adr/0015-tareas-programadas-generales.md)), eventos en directo hacia la app, avisos al móvil y archivos.
 - **1e. Llaves de API.** La de Kira y las de otras apps, con «de parte de». Entre sus criterios de aceptación: el mismo cliente funciona con llave y da error sin ella ([ADR 0020](architecture/adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md)).
 
+Lo que Kira necesitará del núcleo, para el grilling de cada subfase:
+
+- **1b:** una acción no se repite si algo se reinicia a medias, y se puede deshacer.
+- **1c:** un «sí» solo confirma en el turno siguiente de la misma persona, en el mismo aparato y en un plazo corto (del orden de un minuto, ajustable). Pasado ese plazo, la confirmación sigue pendiente en la app y no la hereda otra sesión ni otro aparato; un «sí» sin una pregunta reciente no confirma nada. La salud no se lee ni se muestra en un aparato con la cuenta `device` salvo que su persona lo pida, y su persona la ve, la corrige y la borra. El admin no ve ni cambia los ajustes de la otra persona. Y se decide qué deja una voz no reconocida en la cuenta `device`: memoria, historial o nada.
+
 ## 2. Sistema de diseño
 
 **Estado:** pendiente.
@@ -63,19 +68,19 @@
 
 **Estado:** pendiente.
 
-- **5a. Puerta de la conversación:** entra texto con adjuntos (fotos, PDF, correos) y quién habla; sale la respuesta por trozos, y se puede cortar a medias ([ADR 0004](architecture/adr/0004-una-sola-puerta.md), [ADR 0012](architecture/adr/0012-lo-compartido-llega-a-kira.md)). Chat en la app y Telegram. Antes de la primera operación que dependa de la api, el seguimiento de la conexión de `assistant` entrega el cliente, y sus llamadas fallan al momento si no está listo ([ADR 0020](architecture/adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md)). Su grilling decide si Kira pide los turnos a la api, para que `assistant` no acepte conexiones.
-- **5b. Runtime** con dos motores (la suscripción de Claude y modelos por API), ventanilla única de tools, confirmaciones, skills, consumo por conversación y escenarios. Una sola configuración de IA en ajustes ([ADR 0011](architecture/adr/0011-una-configuracion-de-ia.md)).
-- **5c. Voz:** satélites, STT/TTS, reconocer quién habla y huellas.
+- **5a. Puerta de la conversación:** entra texto con adjuntos (fotos, PDF, correos) y quién habla; sale la respuesta por trozos, y se puede cortar a medias ([ADR 0004](architecture/adr/0004-una-sola-puerta.md), [ADR 0012](architecture/adr/0012-lo-compartido-llega-a-kira.md)). Chat en la app y Telegram. La conversación sigue de un aparato a otro sin que uno compartido lea nada privado. Antes de la primera operación que dependa de la api, el seguimiento de la conexión de `assistant` entrega el cliente, y sus llamadas fallan al momento si no está listo ([ADR 0020](architecture/adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md)). Su grilling decide si Kira pide los turnos a la api, para que `assistant` no acepte conexiones.
+- **5b. Runtime** con dos motores (la suscripción de Claude y modelos por API), ventanilla única de tools, confirmaciones, skills, consumo por turno (tokens, coste equivalente, latencia por fases y resultado) y escenarios. Una sola configuración de IA en ajustes ([ADR 0011](architecture/adr/0011-una-configuracion-de-ia.md)). Cambiar de motor conserva la personalidad y los recuerdos. Sin internet, lo local sigue funcionando y lo demás falla de forma controlada. Lo que tarda más de unos 15 s va en segundo plano y avisa al acabar. Las muletillas son pertinentes a la petición, nunca adelantan un resultado, no se repiten seguidas, no se dicen si la respuesta llega antes de unos 1,5 s y en texto no hay.
+- **5c. Voz:** satélites, STT/TTS, reconocer quién habla y huellas; con poca confianza, Kira pregunta «¿Paco o Rocío?». Su grilling decide si la misma voz llega al móvil y al navegador en esta fase o justo después.
 
-En esta fase se deciden la forma del agent, el vocabulario, los evals, los parámetros y el afinado de voz, y cómo llega la sesión de Claude al contenedor `assistant` sin montar datos ([ADR 0003](architecture/adr/0003-procesos-y-contenedores.md)).
+La fase empieza cerrando lo que quedó abierto del diseño de Kira con lo que ya fija Domus: la forma del agent (uno con skills o un equipo), el vocabulario, los evals, los parámetros, las trazas, el clasificador local y los modelos locales. También decide el afinado de voz y cómo llega la sesión de Claude al contenedor `assistant` sin montar datos ([ADR 0003](architecture/adr/0003-procesos-y-contenedores.md)).
 
-**Terminada cuando** «añade leche» dicho desde la cocina reconoce a quien habla, pide confirmación y aparece en el móvil.
+**Terminada cuando** «añade leche» dicho desde la cocina reconoce a quien habla, pide confirmación y aparece en el móvil. Las latencias medidas, de callar al primer audio, quedan cerca de los objetivos: nivel 0, p50 ≤ 1,2 s y p95 ≤ 1,5 s; conversación o una tool, p50 ≤ 2 s y p95 ≤ 3 s; en texto, el primer trozo ≤ 2 s. Son objetivos deseables, que se revisan al medir.
 
 ## 6. Los demás módulos, uno a uno
 
 **Estado:** pendiente.
 
-**Incluye:** calendario (con «compartir con Kira»), tareas de casa, cocina y menú, tablón, documentos, Home Assistant… El orden se decide al llegar.
+**Incluye:** calendario (con «compartir con Kira»), tareas de casa, cocina y menú, tablón, obligaciones, documentos, Home Assistant… El orden se decide al llegar.
 
 **Terminada:** cada módulo, cuando completa el ciclo de la fase 4. La lista de módulos de la fase se fija al empezarla, y la fase termina cuando están todos.
 
@@ -83,7 +88,7 @@ En esta fase se deciden la forma del agent, el vocabulario, los evals, los pará
 
 **Estado:** pendiente.
 
-**Incluye:** la memoria en Domus, privada de cada persona o pública de la casa, por área, y su revisión nocturna como tarea programada ([ADR 0014](architecture/adr/0014-memoria-en-domus.md)).
+**Incluye:** la memoria en Domus, privada de cada persona o pública de la casa, por área, y su revisión nocturna como tarea programada ([ADR 0014](architecture/adr/0014-memoria-en-domus.md)). Un recuerdo deducido es una hipótesis, con su fuente, hasta que su persona lo confirma. Lo privado de una persona no llega a la otra, ni siquiera por recuerdos derivados. El contexto de cada turno se monta bajo demanda y tiene un tope que no crece con el tiempo.
 
 **Terminada cuando** Kira guarda lo que aprende, responde a «¿qué sabes de mí?» y cumple «olvida…».
 
@@ -93,15 +98,27 @@ En esta fase se deciden la forma del agent, el vocabulario, los evals, los pará
 
 **Incluye:** el entrenador primero, con AimHarder; después la nutricionista y el coach.
 
+- Cada persona elige sus especialistas en sus ajustes. A uno se llega por el tema o nombrándolo; si la persona no lo tiene activo, responde Kira sin la memoria de ese especialista.
+- Las sesiones largas (la entrevista de la nutricionista, el plan de la semana) se retoman donde se dejaron, también desde otro canal, y lo largo se entrega en pantalla.
+- Se distingue lo previsto de lo hecho (una reserva no prueba que se entrenó), y se avisa cuando faltan datos.
+- Cada persona conecta su cuenta de AimHarder sin tocar el núcleo, y revocar una no afecta a la otra.
+- El entrenador cubre también lo que Paco y Rocío entrenan juntos para competir.
+- El consumo se ve también por persona y por especialista, con un aviso si un día se dispara.
+- La muletilla llega en ≤ 1,5 s y la respuesta completa en ≤ 8 s.
+
 **Terminada cuando** los tres funcionan. El entrenador, con los datos de AimHarder. Cada especialista se revisa en su propio grilling al llegar.
 
 ## 9. Iniciativa y domótica por voz
 
 **Estado:** pendiente.
 
-**Incluye:** la iniciativa de Kira con los avisos que aporta cada módulo ([ADR 0016](architecture/adr/0016-lo-que-un-modulo-aporta-a-kira.md)), con horas de silencio por persona, y la domótica por voz.
+**Incluye:** la iniciativa de Kira con los avisos que aporta cada módulo ([ADR 0016](architecture/adr/0016-lo-que-un-modulo-aporta-a-kira.md)), con horas de silencio y un límite diario por persona, y la domótica por voz. Lo privado va al móvil de su persona y lo de la casa, a la cocina. Cada persona ajusta o apaga su iniciativa.
 
-**Terminada cuando** Kira avisa por su cuenta con los avisos de los módulos, respeta las horas de silencio y la casa se maneja por voz.
+**Terminada cuando** Kira avisa por su cuenta con los avisos de los módulos, respeta las horas de silencio y el límite diario, y la casa se maneja por voz.
+
+## Después de la fase 9
+
+Sin fase todavía. No se construye, pero nada de lo anterior debe impedirlo: vehículos, mascotas, finanzas (solo lectura) y música; la voz desde el móvil fuera de casa; y que la conversación acepte audio directo (modelos de voz a voz). Al terminar la fase 9 se decide si entran y en qué orden.
 
 ## En paralelo, desde ya
 
