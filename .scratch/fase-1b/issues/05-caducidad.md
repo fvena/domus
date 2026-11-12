@@ -21,7 +21,7 @@ El contenido de cada entrada del registro (entrada, resultado e inversa) deja de
 
 ## Comments
 
-- Hecha en `HASH`.
+- Hecha en `a034197`.
 - El plazo es la opción `retention` de `createPlatform` (y de `createTestPlatform`), en milisegundos; sin ella, 30 días (`DEFAULT_RETENTION`, privado de `platform.ts`). La spec no fija qué valores valen: arrancar con un plazo que no sea un número entero positivo de milisegundos (0, negativo, decimal, `NaN`, infinito) falla al crear la plataforma, como una ruta relativa.
 - Caducado es `now >= expiresAt` con el reloj de la plataforma, en un solo sitio (`isExpired` de `platform/actions`). Repetir caducado: tras reautorizar, conflicto `result-expired`, en la sección idempotente que comparten escribir y deshacer, así que un reintento de `undo` cuya propia entrada caducó también responde `result-expired`. Deshacer una entrada caducada: `UNPROCESSABLE_CONTENT` con `{ reason: "expired" }`, después de `irreversible` y antes de `changed-since` y la autorización.
 - Una denegación gana a la caducidad: un reintento caducado y denegado responde no permitido.
