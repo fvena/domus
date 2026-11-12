@@ -130,6 +130,9 @@ jobs:
             - uses: actions/checkout@v4
             # An image can build and still crash at startup (a bundled native module, a missing setting, a
             # broken migration): start the three as on the Pi and wait for their health checks.
+            # The api refuses to start without its session secret; CI makes a throwaway one per run.
+            - name: A throwaway session secret
+              run: echo "DOMUS_AUTH_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
             - name: Start the three containers
               run: docker compose up --detach --build --wait --wait-timeout 240
             - name: Logs
