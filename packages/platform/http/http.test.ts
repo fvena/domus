@@ -2,6 +2,7 @@ import type { AddressInfo } from "node:net";
 
 import { clientFor } from "@domus/api-client";
 import { defineModule } from "@domus/module-sdk";
+import { readAction } from "@domus/module-sdk/contracts";
 import { id, moduleTables } from "@domus/module-sdk/db";
 import { serve } from "@hono/node-server";
 import { afterAll, describe, expect, it } from "vitest";
@@ -24,6 +25,8 @@ const notes = defineModule({
 			],
 		},
 	],
+	contract: { list: readAction() },
+	actions: { list: () => [] },
 });
 
 describe("http handler", () => {
@@ -63,8 +66,14 @@ describe("http handler", () => {
 		expect(response.status).toBe(404);
 	});
 
-	it("publishes nothing of the modules it receives", async () => {
-		for (const path of ["/api/rpc/notes", "/api/rpc/notes/items", "/api/notes"]) {
+	it("publishes nothing of the modules it receives, their actions included", async () => {
+		for (const path of [
+			"/api/rpc/notes",
+			"/api/rpc/notes/items",
+			"/api/rpc/notes/list",
+			"/api/rpc/notes.list",
+			"/api/notes",
+		]) {
 			const response = await handler.fetch(
 				new Request(`http://domus${path}`, { method: "POST" }),
 			);

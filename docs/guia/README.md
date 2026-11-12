@@ -6,7 +6,7 @@ Esta guía explica lo que ya está construido y cómo funciona, sin dar por hech
 
 ## Qué hay hoy
 
-Lo construido hasta hoy es la base de Domus. Tres programas arrancan en la Pi y comprueban que se entienden entre ellos, la base de datos se pone al día sola cada vez que Domus arranca, y hay una forma fija de añadir partes nuevas de la vida de casa, que llamamos módulos. Cada cambio pasa por una serie de comprobaciones automáticas antes de entrar.
+Lo construido hasta hoy es la base de Domus. Tres programas arrancan en la Pi y comprueban que se entienden entre ellos, la base de datos se pone al día sola cada vez que Domus arranca, y hay una forma fija de añadir partes nuevas de la vida de casa, que llamamos módulos. Un módulo solo lee y cambia sus datos con acciones, que pasan todas por el mismo camino; cada cambio en los datos queda anotado y se puede deshacer si el módulo lo permite. Y cada cambio en el código pasa unas comprobaciones automáticas antes de entrar.
 
 ## Temas
 
@@ -14,6 +14,7 @@ Lo construido hasta hoy es la base de Domus. Tres programas arrancan en la Pi y 
 - [Los programas y cómo hablan](programas.md): los tres programas, la web y cómo saben si pueden contar con los demás.
 - [Los datos](datos.md): dónde se guarda la información y cómo cambia de forma sin perder nada.
 - [Los módulos](modulos.md): qué es un módulo y qué reglas sigue.
+- [Las acciones](acciones.md): cómo se leen y se cambian los datos, y cómo se deshace un cambio.
 - [Seguridad y privacidad](seguridad.md): quién puede llegar a Domus y cómo se protege lo que guarda.
 - [Cómo se construye y se comprueba](como-se-construye.md): cómo trabajamos y qué se revisa en cada cambio.
 - [La Pi y el despliegue](la-pi.md): cómo corre Domus en casa y cómo le llegan los cambios.

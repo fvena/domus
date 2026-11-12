@@ -52,8 +52,19 @@ describe("the real modules", () => {
 				"SELECT module, tag FROM platform_migrations ORDER BY module, position",
 			)
 			.all();
-		expect(applied).toContainEqual({ module: "platform", tag: "0000_migration_history" });
 		expect(new Set(applied.map((row) => row.module))).toEqual(new Set(["platform", ...ids]));
+	});
+
+	it("apply platform/0001, the action log, right after platform/0000", () => {
+		const platform = db
+			.prepare<[], { position: number; tag: string }>(
+				"SELECT position, tag FROM platform_migrations WHERE module = 'platform' ORDER BY position",
+			)
+			.all();
+		expect(platform.slice(0, 2)).toEqual([
+			{ position: 0, tag: "0000_migration_history" },
+			{ position: 1, tag: "0001_action_log" },
+		]);
 	});
 
 	it("keep every table under platform_ or a registered module's prefix", () => {

@@ -29,3 +29,4 @@ Precisa los ADR 0017 y 0020: cómo guarda Domus sus datos, qué forma tiene un m
 **El hueco hasta la autorización.** Hasta la 1c, las acciones de los módulos no se montan en el router HTTP, y `status` sigue siendo la única RPC. La llamada desde la web con `clientFor` (1b) queda aplazada hasta que haya autorización. Cómo se cubre el hueco lo decide el grilling de la 1b, con una condición: ninguna acción se ejecuta sin pasar por la autorización.
 
 Fecha: 2026-11-12. Preguntas del grilling: Q1–Q24 de la fase 1a.
+Precisado por el ADR 0022: el código de producción de un módulo recibe su base de datos solo en el contexto de una acción; el hueco hasta la 1c lo cubre `platform/authorization`, que en producción lo deniega todo; y un registro mínimo de acciones se adelanta a la 1b, en `platform/0001`, escrita a mano y consultada con sentencias preparadas.

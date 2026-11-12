@@ -3,9 +3,104 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { defineModule } from "@domus/module-sdk";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { readAction, writeAction } from "@domus/module-sdk/contracts";
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it } from "vitest";
+import { z } from "zod";
 
-import { createTestPlatform } from "./platform";
+import { createTestPlatform, TEST_START } from "./platform";
+
+/** A module whose only read echoes the actor and the instant its handler receives. */
+const clockwork = defineModule({
+	id: "clockwork",
+	schema: {},
+	migrations: [],
+	contract: {
+		whoAndWhen: readAction().output(
+			z.object({
+				actor: z.object({ account: z.string(), via: z.string().optional() }),
+				now: z.number(),
+			}),
+		),
+		double: readAction()
+			.input(z.object({ value: z.number() }))
+			.output(z.number()),
+		/** A write that changes nothing but is logged. */
+		tick: writeAction({ undoable: false })
+			.input(z.object({ value: z.number() }))
+			.output(z.number()),
+	},
+	actions: {
+		whoAndWhen: ({ actor, now }) => ({ actor, now }),
+		double: ({ input }) => input.value * 2,
+		tick: ({ input }) => ({ result: input.value, touched: [] }),
+	},
+});
+
+describe("createTestPlatform with actions", () => {
+	it("hands handlers a clock that moves only when the test moves it", async () => {
+		await using test = createTestPlatform({ modules: [clockwork] });
+		const ana = test.actor("ana");
+		expect(test.invoke(ana, "clockwork.whoAndWhen").now).toBe(TEST_START);
+
+		test.clock.advance(1500);
+		expect(test.invoke(ana, "clockwork.whoAndWhen").now).toBe(TEST_START + 1500);
+
+		test.clock.set(Date.UTC(2027, 0, 1));
+		expect(test.invoke(ana, "clockwork.whoAndWhen").now).toBe(Date.UTC(2027, 0, 1));
+		expect(test.clock.now()).toBe(Date.UTC(2027, 0, 1));
+	});
+
+	it("makes actors of one account with and without via, and with different via", async () => {
+		await using test = createTestPlatform({ modules: [clockwork] });
+		const seen = (via?: string) =>
+			test.invoke(test.actor("ana", { via }), "clockwork.whoAndWhen").actor;
+
+		expect(seen()).toEqual({ account: "ana" });
+		expect(seen("kira")).toEqual({ account: "ana", via: "kira" });
+		expect(seen("panel")).toEqual({ account: "ana", via: "panel" });
+	});
+
+	it("types invoke with the names, inputs and outputs of the modules it receives", async () => {
+		await using test = createTestPlatform({ modules: [clockwork] });
+		const ana = test.actor("ana");
+
+		expectTypeOf(test.invoke(ana, "clockwork.double", { value: 2 })).toEqualTypeOf<number>();
+		expect(test.invoke(ana, "clockwork.double", { value: 2 })).toBe(4);
+		// @ts-expect-error: no module received declares this action.
+		expect(() => test.invoke(ana, "clockwork.triple", { value: 2 })).toThrow();
+		// @ts-expect-error: the input must match the contract.
+		expect(() => test.invoke(ana, "clockwork.double", { value: "2" })).toThrow();
+		// @ts-expect-error: an action with input needs it.
+		expect(() => test.invoke(ana, "clockwork.double")).toThrow();
+		// @ts-expect-error: a read takes no key.
+		test.invoke(ana, "clockwork.double", { value: 2 }, { idempotencyKey: "k1" });
+	});
+
+	it("types a write: it takes its key and returns its result and entry number", async () => {
+		await using test = createTestPlatform({ modules: [clockwork] });
+		const ana = test.actor("ana");
+
+		const written = test.invoke(ana, "clockwork.tick", { value: 7 }, { idempotencyKey: "k1" });
+
+		expectTypeOf(written).toEqualTypeOf<{ readonly result: number; readonly entry: number }>();
+		expect(written).toEqual({ result: 7, entry: 1 });
+		// @ts-expect-error: a write needs its key.
+		expect(() => test.invoke(ana, "clockwork.tick", { value: 7 })).toThrow();
+	});
+
+	it("gives a read-only snapshot of the action log that the test cannot change", async () => {
+		await using test = createTestPlatform({ modules: [clockwork] });
+		test.invoke(test.actor("ana"), "clockwork.tick", { value: 7 }, { idempotencyKey: "k1" });
+
+		const snapshot = test.log();
+		// @ts-expect-error: the snapshot is read-only.
+		snapshot[0]!.idempotencyKey = "changed";
+
+		expect(test.log()).toEqual([
+			expect.objectContaining({ entry: 1, idempotencyKey: "k1", result: 7 }),
+		]);
+	});
+});
 
 describe("createTestPlatform", () => {
 	it("runs in memory by default and answers through the door", async () => {
@@ -29,7 +124,8 @@ describe("createTestPlatform", () => {
 			],
 		});
 		await using test = createTestPlatform({ modules: [notes] });
-		expect(test.platform.appliedMigrations).toBe(2);
+		// platform/0000, platform/0001 and the module's.
+		expect(test.platform.appliedMigrations).toBe(3);
 	});
 
 	it("puts the file in a temporary folder it removes on close", () => {

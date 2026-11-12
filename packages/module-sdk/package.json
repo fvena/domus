@@ -4,7 +4,8 @@
 	"private": true,
 	"exports": {
 		".": "./index.ts",
-		"./db": "./db/index.ts"
+		"./db": "./db/index.ts",
+		"./contracts": "./contracts/index.ts"
 	},
 	"scripts": {
 		"clean": "git clean -xdf .cache .turbo dist node_modules",
@@ -12,12 +13,14 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
+		"@orpc/contract": "catalog:",
 		"drizzle-orm": "catalog:"
 	},
 	"devDependencies": {
 		"@domus/tsconfig": "workspace:*",
 		"@types/node": "catalog:",
 		"typescript": "catalog:",
-		"vitest": "catalog:"
+		"vitest": "catalog:",
+		"zod": "catalog:"
 	}
 }

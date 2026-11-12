@@ -1,8 +1,10 @@
 // Proves the rules in .dependency-cruiser.cjs fire: a fixture repository with allowed imports and at
 // least one forbidden import per rule, cruised with the real rules and options. A rule that stops
 // firing, or a new rule without a case here, fails this test.
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { cruise, type ICruiseResult } from "dependency-cruiser";
 import { describe, expect, it } from "vitest";
@@ -53,7 +55,12 @@ describe("dependency rules", () => {
 			"business-free-packages-stay-business-free: packages/i18n/index.ts -> packages/platform/http/index.ts",
 			"business-free-packages-stay-business-free: packages/ui/src/bad.ts -> packages/platform/src/index.ts",
 			"contracts-are-pure: modules/lists/contracts/node.ts -> path",
+			"contracts-are-pure: packages/module-sdk/contracts/bad.ts -> crypto",
 			"contracts-are-pure: packages/platform/contracts/bad.ts -> fs",
+			"module-contracts-reach-only-sdk-contracts: modules/lists/contracts/bad.ts -> packages/module-sdk/src/index.ts",
+			"module-contracts-reach-only-sdk-contracts: modules/lists/contracts/sdk.ts -> node_modules/better-sqlite3/index.js",
+			"module-contracts-reach-only-sdk-contracts: modules/lists/contracts/sdk.ts -> node_modules/drizzle-orm/index.js",
+			"module-contracts-reach-only-sdk-contracts: modules/lists/contracts/sdk.ts -> packages/module-sdk/db/index.ts",
 			"module-contracts-stand-alone: modules/lists/contracts/bad.ts -> modules/lists/server/index.ts",
 			"module-imports-only-contracts-of-others: modules/lists/server/bad.ts -> modules/calendar/server/index.ts",
 			"module-no-data-or-ai-libs: modules/lists/server/db.ts -> node_modules/better-sqlite3/index.js",
@@ -78,6 +85,8 @@ describe("dependency rules", () => {
 			"programs-never-reach-platform: apps/voice-gateway/src/indirect.ts -> packages/platform/http/index.ts",
 			"programs-never-reach-platform: apps/web/src/bad.ts -> packages/module-sdk/src/index.ts",
 			"programs-never-reach-platform: apps/web/src/bad.ts -> packages/platform/src/index.ts",
+			"sdk-contracts-stand-alone: packages/module-sdk/contracts/bad.ts -> node_modules/drizzle-orm/index.js",
+			"sdk-contracts-stand-alone: packages/module-sdk/contracts/bad.ts -> packages/module-sdk/db/index.ts",
 			"utils-imports-no-other-package: packages/utils/a/package-import.ts -> packages/i18n/index.ts",
 			"utils-topics-stand-alone: packages/utils/a/bad.ts -> packages/utils/b/index.ts",
 			"web-never-imports-the-server-side: apps/web/src/bad.ts -> packages/module-sdk/src/index.ts",
@@ -91,5 +100,49 @@ describe("dependency rules", () => {
 		const output = await cruiseWithRules(root, [API_MODULE_LIST]);
 		expect(output.modules.map((module) => module.source)).toContain(API_MODULE_LIST);
 		expect(output.summary.violations).toEqual([]);
+	});
+});
+
+// A module's production code gets its database only from the context of an action (ADR 0022). The rules keep
+// Drizzle and platform out of a module; this pins every entry and export of module-sdk, none of which opens or
+// hands out a database, so a new one is a deliberate change seen in review.
+describe("module-sdk", () => {
+	const sdk = join(root, "packages/module-sdk");
+
+	it("has only its main, db and contracts entries", () => {
+		const { exports } = JSON.parse(readFileSync(join(sdk, "package.json"), "utf8")) as {
+			exports: Record<string, string>;
+		};
+		expect(exports).toEqual({
+			".": "./index.ts",
+			"./db": "./db/index.ts",
+			"./contracts": "./contracts/index.ts",
+		});
+	});
+
+	it("exports no way to obtain a module's database", async () => {
+		const names = async (entry: string) =>
+			Object.keys(await import(pathToFileURL(join(sdk, entry)).href)).sort();
+
+		expect(await names("index.ts")).toEqual(["PLATFORM_ID", "checkModules", "defineModule"]);
+		expect(await names("contracts/index.ts")).toEqual(["readAction", "writeAction"]);
+		// Table declarations and query helpers; no drizzle() and no connection.
+		expect(await names("db/index.ts")).toEqual([
+			"blob",
+			"check",
+			"eq",
+			"foreignKey",
+			"id",
+			"index",
+			"integer",
+			"moduleTables",
+			"numeric",
+			"primaryKey",
+			"real",
+			"sql",
+			"text",
+			"unique",
+			"uniqueIndex",
+		]);
 	});
 });

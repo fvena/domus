@@ -11,6 +11,9 @@ const DATA_AND_AI_LIBS =
 /** The one part of platform that the browser, assistant and voice-gateway may import. */
 const PLATFORM_CONTRACTS = "packages/platform/contracts/";
 
+/** The pure entry of module-sdk that a module's contracts use (ADR 0022); the browser reaches it through them. */
+const SDK_CONTRACTS = "packages/module-sdk/contracts/";
+
 /** Packages that know nothing of the business, open to modules and to the HTTP-only apps. */
 const DOMAIN_FREE = "packages/(utils|i18n)/";
 
@@ -85,12 +88,12 @@ module.exports = {
 		{
 			name: "programs-never-reach-platform",
 			comment:
-				"The same rule through any chain of imports: production code of web, assistant and voice-gateway reaches no part of platform but its contracts. Tests may, through test-utils.",
+				"The same rule through any chain of imports: production code of web, assistant and voice-gateway reaches no part of platform but its contracts, and the contracts entry of module-sdk through a module's contracts. Tests may, through test-utils.",
 			severity: "error",
 			from: { path: "^apps/(web|assistant|voice-gateway)/", pathNot: "\\.test\\.ts$" },
 			to: {
 				path: "^packages/(platform|module-sdk)/",
-				pathNot: `^${PLATFORM_CONTRACTS}`,
+				pathNot: [`^${PLATFORM_CONTRACTS}`, `^${SDK_CONTRACTS}`],
 				reachable: true,
 			},
 		},
@@ -160,8 +163,30 @@ module.exports = {
 			comment:
 				"Contracts are imported by the browser, assistant and voice-gateway: no Node built-ins in them.",
 			severity: "error",
-			from: { path: ["^modules/[^/]+/contracts/", `^${PLATFORM_CONTRACTS}`] },
+			from: {
+				path: ["^modules/[^/]+/contracts/", `^${PLATFORM_CONTRACTS}`, `^${SDK_CONTRACTS}`],
+			},
 			to: { dependencyTypes: ["core"] },
+		},
+		{
+			name: "module-contracts-reach-only-sdk-contracts",
+			comment:
+				"A module's contracts reach, through any chain of imports, no Drizzle or data library and of module-sdk only its contracts entry (ADR 0022).",
+			severity: "error",
+			from: { path: "^modules/[^/]+/contracts/" },
+			to: {
+				path: ["^packages/module-sdk/", DATA_AND_AI_LIBS],
+				pathNot: `^${SDK_CONTRACTS}`,
+				reachable: true,
+			},
+		},
+		{
+			name: "sdk-contracts-stand-alone",
+			comment:
+				"The contracts entry of module-sdk imports no other part of the SDK, no other package and no data library (ADR 0022).",
+			severity: "error",
+			from: { path: `^${SDK_CONTRACTS}` },
+			to: { path: ["^packages/", DATA_AND_AI_LIBS], pathNot: `^${SDK_CONTRACTS}` },
 		},
 
 		// --- packages ---

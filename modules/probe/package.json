@@ -3,6 +3,7 @@
 	"version": "0.0.0",
 	"private": true,
 	"exports": {
+		"./contracts": "./contracts/index.ts",
 		"./server": "./server/index.ts"
 	},
 	"scripts": {
@@ -11,7 +12,8 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
-		"@domus/module-sdk": "workspace:*"
+		"@domus/module-sdk": "workspace:*",
+		"zod": "catalog:"
 	},
 	"devDependencies": {
 		"@domus/test-utils": "workspace:*",
