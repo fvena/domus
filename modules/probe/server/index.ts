@@ -110,11 +110,18 @@ export default defineModule({
 			};
 		},
 		deleteNote: (context) => {
-			const { db, input, errors, visible } = context;
+			const { db, input, errors, editable, forbidden } = context;
 			const found = findNote(context, input.id);
 			if (!found) throw errors.NOTE_NOT_FOUND();
-			// Any comment blocks it, seen or not: deleting would break the foreign key. The answer reveals only
-			// that the note, which the account sees, has comments.
+			const mayDelete = db
+				.select({ id: schema.notes.id })
+				.from(schema.notes)
+				.where(and(eq(schema.notes.id, input.id), editable(schema.notes)))
+				.get();
+			if (!mayDelete) throw forbidden();
+			// The referential block (ADR 0024): any comment blocks it, seen or not, since deleting would break the
+			// foreign key. Asked only once the account sees the note and may delete it, and the answer reveals
+			// nothing else of them.
 			const blocked = db
 				.select({ id: schema.comments.id })
 				.from(schema.comments)
@@ -122,7 +129,7 @@ export default defineModule({
 				.get();
 			if (blocked) throw errors.NOTE_HAS_COMMENTS();
 			db.delete(schema.notes)
-				.where(and(eq(schema.notes.id, input.id), visible(schema.notes)))
+				.where(and(eq(schema.notes.id, input.id), editable(schema.notes)))
 				.run();
 			return {
 				result: { id: found.id, body: found.body },

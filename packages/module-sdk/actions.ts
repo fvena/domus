@@ -90,6 +90,17 @@ export interface ActionContext<
 	 */
 	readonly visible: (table: OwnedTable) => SQL;
 	/**
+	 * The records of one of its module's owned tables that the represented account may edit or delete: the rule
+	 * the write capture checks, as a predicate. Only for a write that must know before it changes anything, such
+	 * as a referential block (ADR 0024); the capture checks every change anyway.
+	 */
+	readonly editable: (table: OwnedTable) => SQL;
+	/**
+	 * The platform's answer to a change the account may not make, the same the write capture gives: thrown when
+	 * `editable` leaves out a record that `visible` finds.
+	 */
+	readonly forbidden: () => Error;
+	/**
 	 * The owner and visibility of a new record of one of its module's owned tables: the represented account,
 	 * and the default visibility of the table's area. Spread into the values of an insert.
 	 */

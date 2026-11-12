@@ -277,3 +277,69 @@ describe("probe visibility on writes", () => {
 		expect(test.invoke(bea, "probe.getNote", { id: 1 })).not.toBeNull();
 	});
 });
+
+// The referential block (ADR 0024): a note with comments cannot be deleted, even when some of them are hidden
+// from the account. Only an account that sees the note and may delete it learns that something blocks it, and
+// nothing more; any other gets the answer it would get without comments.
+describe("probe referential block on delete", () => {
+	const forbidden = expect.objectContaining({ code: "FORBIDDEN" });
+
+	/** The household, plus Ana's public note 5, which carries only Bea's private comment. */
+	function blockedNote() {
+		const { test, ana, bea } = household();
+		const db = test.dbFor(probe);
+		db.insert(notes)
+			.values({ owner: "ana", visibility: "public", body: "cena del sábado" })
+			.run();
+		db.insert(comments)
+			.values({ owner: "bea", visibility: "private", noteId: 5, body: "yo llevo el postre" })
+			.run();
+		return { test, ana, bea };
+	}
+
+	it("tells the owner only that comments block it, even when it sees none of them", async () => {
+		const { test, ana } = blockedNote();
+		await using _ = test;
+
+		let thrown: unknown;
+		try {
+			test.invoke(ana, "probe.deleteNote", { id: 5 }, { idempotencyKey: "k1" });
+		} catch (error) {
+			thrown = error;
+		}
+		expect(thrown).toMatchObject({
+			code: "NOTE_HAS_COMMENTS",
+			message: "A note with comments cannot be deleted.",
+		});
+		expect((thrown as { data?: unknown }).data).toBeUndefined();
+		expect(test.invoke(ana, "probe.getNote", { id: 5 })).not.toBeNull();
+		expect(test.log()).toEqual([]);
+	});
+
+	it("answers forbidden, never the block, to one who sees the note but may not delete it", async () => {
+		const { test, bea } = blockedNote();
+		await using _ = test;
+
+		// Bea, who is not its owner, where probe is not publicEditable.
+		expect(() =>
+			test.invoke(bea, "probe.deleteNote", { id: 5 }, { idempotencyKey: "k1" }),
+		).toThrow(forbidden);
+		// Carmen, with only read in probe.
+		const carmen = test.member("carmen");
+		test.prepare.grant("carmen", "probe", "read");
+		expect(() =>
+			test.invoke(carmen, "probe.deleteNote", { id: 5 }, { idempotencyKey: "k2" }),
+		).toThrow(forbidden);
+		expect(test.log()).toEqual([]);
+	});
+
+	it("answers not found to one who does not see the note, whatever blocks it", async () => {
+		const { test, ana } = blockedNote();
+		await using _ = test;
+
+		// Bea's private note 3 carries her own comment.
+		expect(() =>
+			test.invoke(ana, "probe.deleteNote", { id: 3 }, { idempotencyKey: "k1" }),
+		).toThrow(expect.objectContaining({ code: "NOTE_NOT_FOUND" }));
+	});
+});

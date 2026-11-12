@@ -1,7 +1,12 @@
 // What a write may do to an owned record (ADR 0023), checked on each row transition the write capture saw. The
 // same rules as visibility on reads: the owner, or anyone with `write` on a public record where its area allows
-// it. Pure, like `decide`: the grant comes from the same view.
+// it. Pure, like `decide`: the grant comes from the same view. `editableTo` puts the same rule in a handler's
+// query, for the one case that must know before it writes (ADR 0024).
+import type { OwnedTable } from "@domus/module-sdk";
+import { eq, type SQL } from "drizzle-orm";
+
 import { type AccessView, type AreaPolicy, grantOf, reaches } from "./index";
+import { visibleTo } from "./visibility";
 
 /** One row transition of an owned table, as the capture saw it: `old*` is empty on insert, `new*` on delete. */
 export interface RowTransition {
@@ -58,7 +63,23 @@ function mayChange(
 ): TransitionCheck {
 	if (owner === account) return "allow";
 	if (visibility !== "public") return "invalid";
-	return area.policy.publicEditable && reaches(grantOf(view, account, area.id), "write")
-		? "allow"
-		: "forbidden";
+	return editsPublic(account, area, view) ? "allow" : "forbidden";
+}
+
+/** Whether `account` may edit or delete another's public record of `area`: its area allows it, and `write`. */
+function editsPublic(account: string, area: RecordArea, view: AccessView): boolean {
+	return area.policy.publicEditable && reaches(grantOf(view, account, area.id), "write");
+}
+
+/**
+ * The records of `table`, of `area`, that `account` may edit or delete: the rule {@link checkTransition} checks,
+ * as a predicate. Its own, and the public ones where {@link editsPublic}.
+ */
+export function editableTo(
+	table: OwnedTable,
+	account: string,
+	area: RecordArea,
+	view: AccessView,
+): SQL {
+	return editsPublic(account, area, view) ? visibleTo(table, account) : eq(table.owner, account);
 }

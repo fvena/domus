@@ -47,7 +47,7 @@ import {
 	type VerifiedContext,
 	visibleTo,
 } from "../authorization";
-import { checkTransition } from "../authorization/writes";
+import { checkTransition, editableTo } from "../authorization/writes";
 import { answeringWith, type ConfirmationCall } from "./answering";
 import type { Capture, CapturedTransition } from "./capture";
 import { type ConfirmationTimes, type Confirmations, type NewPending } from "./confirmations";
@@ -319,6 +319,7 @@ export function createActions({
 			if (!area) throw new Error("not an owned table of this module");
 			return area;
 		};
+		let denial: ORPCError<string, unknown> | undefined;
 		let outcome: unknown;
 		try {
 			outcome = parts.handler({
@@ -331,9 +332,15 @@ export function createActions({
 					areaOf(table);
 					return visibleTo(table, actor.account);
 				},
+				editable: (table) => {
+					const area = { id: ownedTableOf(table)?.area ?? "", policy: areaOf(table) };
+					return editableTo(table, actor.account, area, view);
+				},
+				forbidden: () => (denial = new ORPCError("FORBIDDEN")),
 				ownership: (table) => newOwnership(actor.account, areaOf(table).defaultVisibility),
 			});
 		} catch (error) {
+			if (denial !== undefined && error === denial) throw error;
 			throw declaredOrInternal(parts.errorMap, error);
 		}
 		// An async handler, which its type forbids: what it would do later falls outside the transaction.
