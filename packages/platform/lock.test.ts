@@ -14,8 +14,9 @@ import { join } from "node:path";
 import { defineModule } from "@domus/module-sdk";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import type { ScheduledTask } from "./background";
 import { LOCK_FILE, takeExclusiveLock } from "./lock";
-import { createPlatform } from "./platform";
+import { createPlatform, openPlatform } from "./platform";
 import { startChild } from "./testing";
 
 const IN_USE = "the database is in use: stop api and accounts first";
@@ -87,6 +88,23 @@ describe("the lock of the database", () => {
 			expect(() =>
 				createPlatform({ databaseFile: join(dir, "domus.db"), modules: [broken] }),
 			).toThrow();
+
+			takeExclusiveLock(dir).release();
+		});
+
+		it("on a background that cannot be built, such as a task declared twice", () => {
+			const twice: ScheduledTask = {
+				id: "cleanup",
+				frequency: { every: "day", at: "04:30" },
+				job: { lane: "maintenance", run: () => {} },
+			};
+
+			expect(() =>
+				openPlatform(
+					{ databaseFile: join(dir, "domus.db"), modules: [] },
+					{ clock: Date.now, tasks: [twice] },
+				),
+			).toThrow(/declared twice/);
 
 			takeExclusiveLock(dir).release();
 		});

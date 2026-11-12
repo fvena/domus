@@ -23,6 +23,7 @@ import {
 	type Timer,
 } from "./background";
 import { taskOperations } from "./background/operations";
+import { type BackupConfig, createBackups } from "./backups";
 import { accessView, registeredAreas } from "./identity/access";
 import { ensureDeviceAccount } from "./identity/accounts";
 import { platformOperations } from "./identity/operations";
@@ -48,6 +49,11 @@ export interface PlatformOptions {
 	 * instants it got when it was born, so a change applies only to new ones.
 	 */
 	readonly confirmation?: Partial<ConfirmationTimes>;
+	/**
+	 * Where the backups go and the file of their password (ADR 0026): unset, the backups are off and their tasks are
+	 * not declared. Only with a database on a file: their staging folder lives next to it.
+	 */
+	readonly backups?: BackupConfig;
 }
 
 /** The retention of the action log's content unless one is given: 30 days. */
@@ -92,6 +98,8 @@ export interface PlatformRuntime {
 	readonly tasks?: readonly ScheduledTask[];
 	/** Synthetic job kinds a test declares, by name, to enqueue them itself. */
 	readonly jobs?: Readonly<Record<string, JobKind>>;
+	/** The restic executable of the backups: `restic` from the `PATH` unless a test gives another. */
+	readonly restic?: string;
 }
 
 const IN_MEMORY = ":memory:";
@@ -119,13 +127,26 @@ export function createPlatform(options: PlatformOptions): Platform {
 
 /** createPlatform with a given runtime. Inside platform only; the testing entry hands test-utils its clock part. */
 export function openPlatform(
-	{ databaseFile, modules, retention = DEFAULT_RETENTION, confirmation = {} }: PlatformOptions,
-	{ clock, authorizer, timer = realTimer(clock), tasks, jobs }: PlatformRuntime,
+	{
+		databaseFile,
+		modules,
+		retention = DEFAULT_RETENTION,
+		confirmation = {},
+		backups: backupConfig,
+	}: PlatformOptions,
+	{ clock, authorizer, timer = realTimer(clock), tasks, jobs, restic }: PlatformRuntime,
 ): Platform {
 	if (databaseFile !== IN_MEMORY && !isAbsolute(databaseFile)) {
 		throw new Error(
 			`databaseFile must be an absolute path or ":memory:", got "${databaseFile}"`,
 		);
+	}
+	if (backupConfig) {
+		if (databaseFile === IN_MEMORY)
+			throw new Error("backups need a database on a file, not in memory");
+		for (const [name, path] of Object.entries(backupConfig))
+			if (!isAbsolute(path))
+				throw new Error(`backups.${name} must be an absolute path, got "${path}"`);
 	}
 	if (!Number.isSafeInteger(retention) || retention <= 0) {
 		throw new Error(
@@ -146,6 +167,7 @@ export function openPlatform(
 	const db = openFile(databaseFile, lock);
 	let appliedMigrations: number;
 	let capture: Capture;
+	let background: Background;
 	try {
 		if (databaseFile !== IN_MEMORY) {
 			const mode = db.pragma("journal_mode = WAL", { simple: true });
@@ -160,19 +182,31 @@ export function openPlatform(
 		ensureDeviceAccount(db, areas, clock());
 		// After the migrations, which its triggers would stop from dropping a column, and before any action.
 		capture = installCapture(db, modules, areas);
+		// The backups load their marks now; the background checks its tasks and kinds.
+		background = createBackground({
+			connection: db,
+			clock,
+			timer,
+			...(backupConfig === undefined
+				? {}
+				: {
+						backups: createBackups({
+							connection: db,
+							clock,
+							config: backupConfig,
+							dataDir: dirname(databaseFile),
+							...(restic === undefined ? {} : { executable: restic }),
+						}),
+					}),
+			...(tasks === undefined ? {} : { extraTasks: tasks }),
+			...(jobs === undefined ? {} : { extraKinds: jobs }),
+		});
 	} catch (error) {
 		db.close();
 		lock?.release();
 		throw error;
 	}
 
-	const background = createBackground({
-		connection: db,
-		clock,
-		timer,
-		...(tasks === undefined ? {} : { extraTasks: tasks }),
-		...(jobs === undefined ? {} : { extraKinds: jobs }),
-	});
 	const platform: Platform = {
 		appliedMigrations,
 		startBackground: () => background.start(),

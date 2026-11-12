@@ -43,15 +43,24 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
   CMD ["node", "-e", "fetch('http://127.0.0.1:' + process.env.PORT + '/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
 ENTRYPOINT ["node", "--enable-source-maps", "/app/main.mjs"]
 
-# The door: the API and the built web app. The only program with the data volume.
+# The door: the API and the built web app. The only program with the data volume and the backups' repository.
 FROM runtime AS api
-ENV PORT=3000 DOMUS_WEB_DIR=/app/web DOMUS_DATA_DIR=/data
+# restic for the backups (ADR 0026), from Debian's packages; the build fails if it does not answer.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends restic \
+  && rm -rf /var/lib/apt/lists/* \
+  && restic version
+# In the image the backups are on unless DOMUS_BACKUPS_OFF=1: the repository is the /backups mount and the password
+# the compose secret.
+ENV PORT=3000 DOMUS_WEB_DIR=/app/web DOMUS_DATA_DIR=/data \
+  DOMUS_BACKUP_REPOSITORY=/backups DOMUS_BACKUP_PASSWORD_FILE=/run/secrets/backup-password
 COPY --from=build /repo/apps/api/dist/ ./
 COPY --from=build /repo/apps/web/dist/ ./web/
 COPY --from=api-sqlite /out/node_modules/ ./node_modules/
 # Fails the build, not the first start on the Pi, if the binary does not load on this architecture.
 RUN node -e "new (require('better-sqlite3'))(':memory:').close()"
-RUN mkdir -p /data && chown node:node /data
+# A new named volume takes the owner of its folder from the image: `node` writes in both.
+RUN mkdir -p /data /backups && chown node:node /data /backups
 USER node
 VOLUME /data
 EXPOSE 3000

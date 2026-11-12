@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 
+import type { BackupConfig } from "@domus/platform";
 import { readPort } from "@domus/utils/program";
 
 export interface ApiConfig {
@@ -15,6 +17,11 @@ export interface ApiConfig {
 		/** `DOMUS_ORIGINS`: the origins the app is served from, separated by commas. */
 		origins: string[];
 	};
+	/**
+	 * Where the backups go and the file of their password (ADR 0026): `DOMUS_BACKUP_REPOSITORY` and
+	 * `DOMUS_BACKUP_PASSWORD_FILE`, both or neither. Unset: off, with neither or with `DOMUS_BACKUPS_OFF=1`.
+	 */
+	backups: BackupConfig | undefined;
 }
 
 const MIN_SECRET_LENGTH = 32;
@@ -28,7 +35,46 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
 			secret: readSecret(env.DOMUS_AUTH_SECRET),
 			origins: readOrigins(env.DOMUS_ORIGINS),
 		},
+		backups: readBackups(env),
 	};
+}
+
+/**
+ * The backups' configuration. With the switch they are off whatever else is set; with neither path, off; with one,
+ * api does not start. The repository's folder is checked by each backup, not here; the password file must be
+ * readable and not empty. Never echoes the password.
+ */
+function readBackups(env: NodeJS.ProcessEnv): BackupConfig | undefined {
+	const off = env.DOMUS_BACKUPS_OFF;
+	if (off === "1") return undefined;
+	if (off) throw new Error(`DOMUS_BACKUPS_OFF must be 1 or unset, got "${off}"`);
+
+	if (!env.DOMUS_BACKUP_REPOSITORY && !env.DOMUS_BACKUP_PASSWORD_FILE) return undefined;
+	const repository = backupPath(env, "DOMUS_BACKUP_REPOSITORY", "DOMUS_BACKUP_PASSWORD_FILE");
+	const passwordFile = backupPath(env, "DOMUS_BACKUP_PASSWORD_FILE", "DOMUS_BACKUP_REPOSITORY");
+
+	let password: string;
+	try {
+		password = readFileSync(passwordFile, "utf8");
+	} catch {
+		throw new Error(
+			`DOMUS_BACKUP_PASSWORD_FILE "${passwordFile}" cannot be read: it must be a file this process can read`,
+		);
+	}
+	if (password.trim() === "")
+		throw new Error(`DOMUS_BACKUP_PASSWORD_FILE "${passwordFile}" is empty`);
+	return { repository, passwordFile };
+}
+
+/** One of the two paths of the backups, once the other is set: required and absolute. */
+function backupPath(env: NodeJS.ProcessEnv, name: string, other: string): string {
+	const value = env[name];
+	if (!value)
+		throw new Error(
+			`${name} is required with ${other}: set both to turn the backups on, or neither (or DOMUS_BACKUPS_OFF=1) to leave them off`,
+		);
+	if (!isAbsolute(value)) throw new Error(`${name} must be an absolute path, got "${value}"`);
+	return value;
 }
 
 /** `domus.db` inside `DOMUS_DATA_DIR`: all `pnpm accounts` needs of the configuration. */

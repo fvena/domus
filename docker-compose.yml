@@ -25,6 +25,11 @@ services:
             - "3000:3000"
         volumes:
             - domus-data:/data
+            # The restic repository of the backups (ADR 0026), mounted only here: on the Pi the `.env` sets
+            # DOMUS_BACKUPS=/srv/backups/domus; elsewhere it is a named volume.
+            - ${DOMUS_BACKUPS:-domus-backups}:/backups
+        secrets:
+            - backup-password
         environment:
             TZ: ${TZ:-Europe/Madrid}
             # Both come from the `.env` next to this file, which is not in git (docs/despliegue.md).
@@ -62,3 +67,10 @@ services:
 
 volumes:
     domus-data:
+    domus-backups:
+
+secrets:
+    # The password of the backups' repository, at /run/secrets/backup-password in api: a file outside the
+    # repository, with permissions 600 and owned by uid 1000, the container's `node`.
+    backup-password:
+        file: ${DOMUS_BACKUP_PASSWORD:?set DOMUS_BACKUP_PASSWORD in .env to the file with the backups password}

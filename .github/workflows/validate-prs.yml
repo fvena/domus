@@ -99,7 +99,12 @@ jobs:
     unit:
         name: Run unit tests
         runs-on: ubuntu-latest
+        # Debian trixie, as the api image: its apt has the restic the backups' tests need (0.18), while the runner's
+        # Ubuntu has one older than the exit codes the backups read.
+        container: node:22-trixie
         steps:
+            - name: Install restic
+              run: apt-get update && apt-get install -y --no-install-recommends restic && restic version
             - uses: actions/checkout@v4
             - uses: actions/setup-node@v4
               with:
@@ -133,6 +138,15 @@ jobs:
             # The api refuses to start without its session secret; CI makes a throwaway one per run.
             - name: A throwaway session secret
               run: echo "DOMUS_AUTH_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+            # The backups' password is a compose secret from a file, mounted as it is: 600 and owned by uid 1000,
+            # the container's `node`, which the runner's user is not.
+            - name: A throwaway backups password
+              run: |
+                  file="$RUNNER_TEMP/backup-password"
+                  openssl rand -hex 32 > "$file"
+                  chmod 600 "$file"
+                  sudo chown 1000:1000 "$file"
+                  echo "DOMUS_BACKUP_PASSWORD=$file" >> "$GITHUB_ENV"
             - name: Start the three containers
               run: docker compose up --detach --build --wait --wait-timeout 240
             - name: Logs

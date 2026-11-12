@@ -99,6 +99,8 @@ export interface TestBackgroundRuntime {
 	readonly tasks?: readonly ScheduledTask[];
 	/** Synthetic job kinds of the test, by name, of either lane, that the test enqueues. Not a contract for modules. */
 	readonly jobs?: Readonly<Record<string, JobKind>>;
+	/** The restic executable of the backups, such as a fake one: `restic` from the `PATH` unless given. */
+	readonly restic?: string;
 }
 
 /**
@@ -108,13 +110,14 @@ export interface TestBackgroundRuntime {
 export function createPlatformWithClock(
 	options: PlatformOptions,
 	clock: Clock,
-	{ timer, tasks, jobs }: TestBackgroundRuntime = {},
+	{ timer, tasks, jobs, restic }: TestBackgroundRuntime = {},
 ): Platform {
 	return openPlatform(options, {
 		clock,
 		...(timer === undefined ? {} : { timer }),
 		...(tasks === undefined ? {} : { tasks }),
 		...(jobs === undefined ? {} : { jobs }),
+		...(restic === undefined ? {} : { restic }),
 	});
 }
 

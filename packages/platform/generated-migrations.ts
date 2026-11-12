@@ -107,4 +107,12 @@ export const generatedMigrations: readonly ModuleMigration[] = [
 			"\nCREATE UNIQUE INDEX `platform_task_runs_planned` ON `platform_task_runs` (`task`,`planned_date`);",
 		],
 	},
+	{
+		tag: "0010_numerous_bromley",
+		position: 11,
+		hash: "4031656eb81cf2c5a7c0aaf4db099fb8fbc2312b3f25ef2f24d20745f81ff0fe",
+		statements: [
+			'CREATE TABLE `platform_backup_marks` (\n\t`id` integer PRIMARY KEY NOT NULL,\n\t`saved_captured_at` integer,\n\t`saved_snapshot` text,\n\t`failed_at` integer,\n\t`retention_at` integer,\n\t`retention_result` text,\n\t`check_at` integer,\n\t`check_result` text,\n\t`restored_snapshot` text,\n\t`restored_captured_at` integer,\n\t`restored_at` integer,\n\tCONSTRAINT "platform_backup_marks_one_row" CHECK("platform_backup_marks"."id" = 1),\n\tCONSTRAINT "platform_backup_marks_retention_result" CHECK("platform_backup_marks"."retention_result" IN (\'ok\', \'failed\')),\n\tCONSTRAINT "platform_backup_marks_check_result" CHECK("platform_backup_marks"."check_result" IN (\'ok\', \'failed\'))\n);\n',
+		],
+	},
 ];

@@ -10,4 +10,5 @@ export {
 	parseAccountsArguments,
 	runAccounts,
 } from "./identity/command";
+export type { BackupConfig } from "./backups";
 export { createPlatform, type Platform, type PlatformOptions } from "./platform";
