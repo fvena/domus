@@ -21,6 +21,8 @@ export interface NewEntry {
 	readonly inverse: Inverse | undefined;
 	/** Records of `module`. */
 	readonly touched: readonly TouchedRecord[];
+	/** The entry this one undoes, when it is an undo. */
+	readonly undoes?: number;
 }
 
 /** One record a write touched, as the log keeps it: ids are text. */
@@ -58,11 +60,29 @@ export interface KeyedEntry {
 	readonly result: unknown;
 }
 
+/** An entry found by its number: what undo needs to decide whether it can undo it, and how. */
+export interface NumberedEntry {
+	readonly entry: number;
+	readonly module: string;
+	/** The full name, `<module>.<action>`. */
+	readonly action: string;
+	readonly actor: Actor;
+	readonly undoneBy: number | null;
+	/** Absent when its write cannot be undone. */
+	readonly inverse: Inverse | undefined;
+}
+
 export interface Audit {
 	/** Writes an entry and its touched records; returns its number. Only inside an open transaction. */
 	record(entry: NewEntry): number;
 	/** The entry of `actor` (its account and `via`) under `key`, if there is one. */
 	findByKey(actor: Actor, key: string): KeyedEntry | undefined;
+	/** The entry numbered `entry`, if there is one. */
+	find(entry: number): NumberedEntry | undefined;
+	/** True when an entry after `entry` touched any record `entry` touched, even if that later one was undone. */
+	touchedLater(entry: number): boolean;
+	/** Links `entry` to the entry that undid it. Only inside an open transaction, and only once per entry. */
+	markUndone(entry: number, by: number): void;
 	/** Every entry, in order, with its content even when expired. For the testing entry only. */
 	entries(): readonly LogEntry[];
 }
@@ -92,14 +112,26 @@ interface TouchedRow extends LoggedRecord {
 export function createAudit(connection: Database.Database): Audit {
 	const insertEntry = connection.prepare(
 		`INSERT INTO platform_action_log
-			(module, action, account, via, key, fingerprint, at, expires_at, input, result, inverse)
-			VALUES (@module, @action, @account, @via, @key, @fingerprint, @at, @expiresAt, @input, @result, @inverse)`,
+			(module, action, account, via, key, fingerprint, at, expires_at, undoes, input, result, inverse)
+			VALUES (@module, @action, @account, @via, @key, @fingerprint, @at, @expiresAt, @undoes, @input, @result, @inverse)`,
 	);
 	const insertTouched = connection.prepare(
 		"INSERT INTO platform_action_log_touched (entry, module, type, id) VALUES (?, ?, ?, ?)",
 	);
 	const selectByKey = connection.prepare(
 		"SELECT entry, fingerprint, result FROM platform_action_log WHERE account = ? AND via IS ? AND key = ?",
+	);
+	const selectByNumber = connection.prepare(
+		"SELECT entry, module, action, account, via, undone_by, inverse FROM platform_action_log WHERE entry = ?",
+	);
+	const selectTouchedLater = connection.prepare(
+		`SELECT 1 FROM platform_action_log_touched AS mine
+			JOIN platform_action_log_touched AS later
+				ON later.module = mine.module AND later.type = mine.type AND later.id = mine.id AND later.entry > mine.entry
+			WHERE mine.entry = ? LIMIT 1`,
+	);
+	const updateUndoneBy = connection.prepare(
+		"UPDATE platform_action_log SET undone_by = ? WHERE entry = ? AND undone_by IS NULL",
 	);
 	const selectEntries = connection.prepare("SELECT * FROM platform_action_log ORDER BY entry");
 	const selectTouched = connection.prepare(
@@ -120,6 +152,7 @@ export function createAudit(connection: Database.Database): Audit {
 					fingerprint: entry.fingerprint,
 					at: entry.at,
 					expiresAt: entry.expiresAt,
+					undoes: entry.undoes ?? null,
 					input: toJson(entry.input),
 					result: toJson(entry.result),
 					inverse: toJson(entry.inverse),
@@ -148,15 +181,42 @@ export function createAudit(connection: Database.Database): Audit {
 			);
 		},
 
+		find(entry) {
+			const row = selectByNumber.get(entry) as
+				| Pick<
+						EntryRow,
+						"entry" | "module" | "action" | "account" | "via" | "undone_by" | "inverse"
+				  >
+				| undefined;
+			return (
+				row && {
+					entry: row.entry,
+					module: row.module,
+					action: `${row.module}.${row.action}`,
+					actor: actorOf(row),
+					undoneBy: row.undone_by,
+					inverse: fromJson(row.inverse) as Inverse | undefined,
+				}
+			);
+		},
+
+		touchedLater(entry) {
+			return selectTouchedLater.get(entry) !== undefined;
+		},
+
+		markUndone(entry, by) {
+			if (!connection.inTransaction)
+				throw new Error("the action log is written only inside the action's transaction");
+			if (updateUndoneBy.run(by, entry).changes !== 1)
+				throw new Error(`entry ${entry} is missing or already undone`);
+		},
+
 		entries() {
 			const touched = selectTouched.all() as TouchedRow[];
 			return (selectEntries.all() as EntryRow[]).map((row) => ({
 				entry: row.entry,
 				action: `${row.module}.${row.action}`,
-				actor:
-					row.via === null
-						? { account: row.account }
-						: { account: row.account, via: row.via },
+				actor: actorOf(row),
 				key: row.key,
 				fingerprint: row.fingerprint,
 				at: row.at,
@@ -172,6 +232,10 @@ export function createAudit(connection: Database.Database): Audit {
 			}));
 		},
 	};
+}
+
+function actorOf(row: Pick<EntryRow, "account" | "via">): Actor {
+	return row.via === null ? { account: row.account } : { account: row.account, via: row.via };
 }
 
 /** SQL `NULL` stands for `undefined`, so a JSON `null` survives as itself. */

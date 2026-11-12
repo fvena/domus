@@ -3,11 +3,22 @@
 // and only the testing entry of platform can put another authorizer.
 import type { Actor } from "@domus/module-sdk";
 
-/** What an action asks before it runs: who, which action by its full name, and its validated input. */
+/**
+ * What an action asks before it runs: who, which action by its full name, and its validated input. When the
+ * action is the inverse an undo runs, `undoes` carries the context of the entry it undoes.
+ */
 export interface AuthorizationRequest {
 	readonly actor: Actor;
 	readonly action: string;
 	readonly input: unknown;
+	readonly undoes?: UndoContext;
+}
+
+/** The entry an undo undoes: its number, the action it logged by its full name, and who asked for it. */
+export interface UndoContext {
+	readonly entry: number;
+	readonly action: string;
+	readonly actor: Actor;
 }
 
 /** Phase 1c adds asking for confirmation. */

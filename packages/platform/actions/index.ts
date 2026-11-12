@@ -2,7 +2,8 @@
 // run its handler and validate its result. A read runs with `PRAGMA query_only` on, takes no idempotency key
 // and logs nothing. A write needs a key and runs in one better-sqlite3 transaction that this path opens and
 // commits: its handler, the checks of its result and inverse, and its entry in the action log. Any failure
-// inside rolls back both the change and the entry.
+// inside rolls back both the change and the entry. An undo takes the same path with the inverse its entry
+// stored: one transaction for the checks, the inverse, its one new entry and the undone-by link.
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
@@ -21,8 +22,8 @@ import { createORPCErrorConstructorMap, ORPCError } from "@orpc/server";
 import type Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 
-import type { Audit } from "../audit";
-import { type Authorizer, isAllowed } from "../authorization";
+import type { Audit, NumberedEntry } from "../audit";
+import { type AuthorizationRequest, type Authorizer, isAllowed } from "../authorization";
 
 /** The platform clock: instants in milliseconds since the epoch (ADR 0021). */
 export type Clock = () => number;
@@ -48,6 +49,19 @@ export interface Actions {
 	 * result; a write, a {@link WriteReceipt}. Synchronous, like the handlers.
 	 */
 	invoke(call: ActionCall): unknown;
+	/**
+	 * Undoes an entry with the inverse its write stored, never one the caller brings. Returns the inverse's
+	 * result and its one new entry, linked to the entry it undoes. Throws like a write, or a conflict or a
+	 * "cannot be undone" with its reason.
+	 */
+	undo(call: UndoCall): WriteReceipt;
+}
+
+/** An undo: who asks, the number of the entry to undo and the caller's own idempotency key. */
+export interface UndoCall {
+	readonly actor: Actor;
+	readonly entry: number;
+	readonly key: string;
 }
 
 export interface ActionsOptions {
@@ -134,36 +148,86 @@ export function createActions({
 		input: unknown,
 		key: string | undefined,
 	): WriteReceipt {
+		const print = fingerprint(action, input);
+		const request: AuthorizationRequest = { actor, action, input };
+
+		return once(actor, key, print, request, (fresh) => {
+			if (!isAllowed(authorizer, request)) throw new ORPCError("FORBIDDEN");
+			return perform(found, actor, input, { key: fresh, fingerprint: print });
+		});
+	}
+
+	function undo({ actor, entry: number, key }: UndoCall): WriteReceipt {
+		const print = undoFingerprint(number);
+
+		/** The inverse's request to authorization, with the context of the entry it undoes. */
+		const requestFor = (original: NumberedEntry, inverse: Inverse): AuthorizationRequest => ({
+			actor,
+			action: inverse.action,
+			input: inverse.input,
+			undoes: { entry: original.entry, action: original.action, actor: original.actor },
+		});
+
+		return once(
+			actor,
+			key,
+			print,
+			() => {
+				// A repeated undo: the entry it undid and that entry's inverse are in the log.
+				const original = audit.find(number);
+				if (!original?.inverse) throw internalError();
+				return requestFor(original, original.inverse);
+			},
+			(fresh) => {
+				const original = audit.find(number);
+				if (!original) throw new ORPCError("NOT_FOUND", { message: `no entry ${number}` });
+				if (original.undoneBy !== null) throw conflict("already-undone");
+				if (!original.inverse) throw notUndoable("irreversible");
+				if (audit.touchedLater(number)) throw conflict("changed-since");
+				if (!isAllowed(authorizer, requestFor(original, original.inverse)))
+					throw new ORPCError("FORBIDDEN");
+
+				// The inverse runs inside this operation, with its checks and its module's rules, without another
+				// idempotent operation or another transaction.
+				const inverse = checkInverse(original.module, original.inverse);
+				const target = registry.get(inverse.action);
+				if (!target) throw internalError();
+				const receipt = perform(target, actor, inverse.input, {
+					key: fresh,
+					fingerprint: print,
+					undoes: number,
+				});
+				audit.markUndone(number, receipt.entry);
+				return receipt;
+			},
+		);
+	}
+
+	/**
+	 * One idempotent operation under `key`, a write or an undo. Looking the key up, running and logging stay in
+	 * one synchronous section of one transaction, so no other operation with the same key can slip in between.
+	 * The same key under another fingerprint is a conflict. Under the same one, `repeated` is authorized anew
+	 * and the stored result and entry come back without running anything. A new key goes to `fresh`, which
+	 * authorizes, runs and logs.
+	 */
+	function once(
+		actor: Actor,
+		key: string | undefined,
+		print: string,
+		repeated: AuthorizationRequest | (() => AuthorizationRequest),
+		fresh: (key: string) => WriteReceipt,
+	): WriteReceipt {
 		if (typeof key !== "string" || key === "")
 			throw new ORPCError("BAD_REQUEST", { message: "a write needs an idempotency key" });
-		const print = fingerprint(action, input);
 
-		// Looking the key up, running and logging stay in one synchronous section of one transaction, so no other
-		// write with the same key can slip in between.
 		const transaction = connection.transaction((): WriteReceipt => {
 			const earlier = audit.findByKey(actor, key);
-			if (earlier && earlier.fingerprint !== print) throw conflict("key-reused");
-			if (!isAllowed(authorizer, { actor, action, input })) throw new ORPCError("FORBIDDEN");
-			// The same request again: its stored result and entry, without running the handler. Until expiry
-			// arrives, the stored content counts as always current.
-			if (earlier) return { result: earlier.result, entry: earlier.entry };
-
-			const now = clock();
-			const outcome = checkOutcome(found, run(found, actor, input, now));
-			const entry = audit.record({
-				module: found.module,
-				action: found.name,
-				actor,
-				key,
-				fingerprint: print,
-				at: now,
-				expiresAt: now + RETENTION,
-				input,
-				result: outcome.result,
-				inverse: outcome.inverse,
-				touched: outcome.touched,
-			});
-			return { result: outcome.result, entry };
+			if (!earlier) return fresh(key);
+			if (earlier.fingerprint !== print) throw conflict("key-reused");
+			const request = typeof repeated === "function" ? repeated() : repeated;
+			if (!isAllowed(authorizer, request)) throw new ORPCError("FORBIDDEN");
+			// Until expiry arrives, the stored content counts as always current.
+			return { result: earlier.result, entry: earlier.entry };
 		});
 
 		try {
@@ -174,6 +238,32 @@ export function createActions({
 			if (error instanceof ORPCError) throw error;
 			throw internalError();
 		}
+	}
+
+	/** Runs an authorized write's handler, checks what it returned and logs its entry. */
+	function perform(
+		found: RegisteredAction,
+		actor: Actor,
+		input: unknown,
+		log: { readonly key: string; readonly fingerprint: string; readonly undoes?: number },
+	): WriteReceipt {
+		const now = clock();
+		const outcome = checkOutcome(found, run(found, actor, input, now));
+		const entry = audit.record({
+			module: found.module,
+			action: found.name,
+			actor,
+			key: log.key,
+			fingerprint: log.fingerprint,
+			at: now,
+			expiresAt: now + RETENTION,
+			input,
+			result: outcome.result,
+			inverse: outcome.inverse,
+			touched: outcome.touched,
+			undoes: log.undoes,
+		});
+		return { result: outcome.result, entry };
 	}
 
 	/** A write's outcome as its contract and the log need it, or an internal error that rolls it back. */
@@ -232,15 +322,24 @@ export function createActions({
 				? write(found, actor, action, validated.value, key)
 				: read(found, actor, action, validated.value);
 		},
+		undo,
 	};
 }
 
 /** The reasons of a conflict the platform answers (ADR 0022). */
-type ConflictReason = "key-reused";
+type ConflictReason = "key-reused" | "already-undone" | "changed-since";
 
 /** A conflict, with its reason in `data.reason`. */
 function conflict(reason: ConflictReason) {
 	return new ORPCError("CONFLICT", { data: { reason } });
+}
+
+/** Why an entry cannot be undone (ADR 0022). */
+type NotUndoableReason = "irreversible";
+
+/** An entry that cannot be undone, with its reason in `data.reason`, as a conflict carries its own. */
+function notUndoable(reason: NotUndoableReason) {
+	return new ORPCError("UNPROCESSABLE_CONTENT", { data: { reason } });
 }
 
 /** Any unexpected failure: nothing of the original error, neither its message nor its stack, leaves. */
@@ -256,6 +355,14 @@ function isTouchedRecord(value: unknown): value is TouchedRecord {
 		type !== "" &&
 		(typeof id === "string" || (typeof id === "number" && Number.isFinite(id)))
 	);
+}
+
+/**
+ * The fingerprint of an undo: the operation and the entry's number. It never equals a write's, whose action
+ * name always holds a dot, so the inverse invoked directly with an undo's key is another request.
+ */
+function undoFingerprint(entry: number): string {
+	return `undo:${entry}`;
 }
 
 /**

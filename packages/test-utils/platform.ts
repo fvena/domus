@@ -21,6 +21,8 @@ import {
 	type ModuleDatabase,
 	moduleDatabase,
 	readLog,
+	undoEntry,
+	type WriteReceipt,
 } from "@domus/platform/testing";
 
 type AnyModule = ModuleDefinition;
@@ -122,6 +124,11 @@ export interface TestPlatform<
 		...args: InvokeArguments<ActionContractOf<TModules, TName>>
 	): InvokeResult<ActionContractOf<TModules, TName>>;
 	/**
+	 * Undoes the entry numbered `entry` through the platform's real path, with its own key: the inverse the
+	 * entry stored runs and logs one new entry. Returns the inverse's result and that entry's number.
+	 */
+	undo(actor: Actor, entry: number, options: WriteOptions): WriteReceipt;
+	/**
 	 * A read-only snapshot of the action log: every entry, in order, with its content even when expired. That
 	 * exception is only for tests.
 	 */
@@ -189,6 +196,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 			options?.via === undefined ? { account } : { account, via: options.via },
 		invoke: (actor, action, ...[input, options]) =>
 			invokeAction(platform, { actor, action, input, key: options?.key }) as never,
+		undo: (actor, entry, { key }) => undoEntry(platform, { actor, entry, key }),
 		log: () => readLog(platform),
 		close,
 		[Symbol.asyncDispose]: () => Promise.resolve(close()),

@@ -118,6 +118,54 @@ describe("the action log", () => {
 		]);
 	});
 
+	it("finds an entry by its number, and tells whether a later one touched the same record of its module", () => {
+		const audit = upgradedBase();
+		db.transaction(() => {
+			audit.record(entry({ key: "k1", touched: [{ type: "note", id: 1 }] }));
+			// The same type and id in another module, and another note: neither is the same record.
+			audit.record(entry({ key: "k2", module: "other", touched: [{ type: "note", id: 1 }] }));
+			audit.record(entry({ key: "k3", touched: [{ type: "note", id: 2 }] }));
+			audit.record(
+				entry({ key: "k4", inverse: undefined, touched: [{ type: "note", id: 2 }] }),
+			);
+		})();
+
+		expect(audit.find(1)).toEqual({
+			entry: 1,
+			module: "probe",
+			action: "probe.addNote",
+			actor: { account: "ana", via: "kira" },
+			undoneBy: null,
+			inverse: { action: "probe.deleteNote", input: { id: 1 } },
+		});
+		expect(audit.find(4)).toHaveProperty("inverse", undefined);
+		expect(audit.find(5)).toBeUndefined();
+		expect([1, 2, 3, 4].map((number) => audit.touchedLater(number))).toEqual([
+			false,
+			false,
+			true,
+			false,
+		]);
+	});
+
+	it("links an undo with the entry it undoes, once, inside a transaction", () => {
+		const audit = upgradedBase();
+		db.transaction(() => {
+			audit.record(entry({ key: "k1" }));
+			audit.record(entry({ key: "u1", undoes: 1 }));
+			audit.markUndone(1, 2);
+		})();
+
+		expect(audit.entries().map(({ undoes, undoneBy }) => ({ undoes, undoneBy }))).toEqual([
+			{ undoes: null, undoneBy: 2 },
+			{ undoes: 1, undoneBy: null },
+		]);
+		expect(audit.find(1)).toHaveProperty("undoneBy", 2);
+		expect(() => audit.markUndone(1, 2)).toThrow("only inside the action's transaction");
+		expect(() => db.transaction(() => audit.markUndone(1, 2))()).toThrow("already undone");
+		expect(() => db.transaction(() => audit.markUndone(9, 2))()).toThrow("missing");
+	});
+
 	it("numbers entries in a sequence that never reuses a number", () => {
 		const audit = upgradedBase();
 		db.transaction(() => audit.record(entry({ key: "k1" })))();
