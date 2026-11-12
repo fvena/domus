@@ -26,7 +26,15 @@ export type MigrationFile = ReturnType<typeof readMigrationFiles>[number];
 export function migrationsSource(folder: string): string {
 	const journal = JSON.parse(readFileSync(join(folder, "meta/_journal.json"), "utf8")) as Journal;
 	const files = readMigrationFiles({ migrationsFolder: folder });
-	return render(toModuleMigrations(journal, files), join(folder, "../migrations.ts"));
+	return renderMigrations(
+		{
+			comment:
+				"// Written by `pnpm db:generate` from `migrations/` (ADR 0021). Do not edit: change `schema.ts` and generate.",
+			name: "migrations",
+			migrations: toModuleMigrations(journal, files),
+		},
+		join(folder, "../migrations.ts"),
+	);
 }
 
 /**
@@ -134,13 +142,23 @@ function endOf(sql: string, close: string, from: number): number {
 	return found === -1 ? sql.length : found + close.length;
 }
 
+/** What a generated file of migrations holds: its opening comment, and the constant it exports. */
+export interface MigrationsFile {
+	readonly comment: string;
+	readonly name: string;
+	readonly migrations: readonly ModuleMigration[];
+}
+
 /** The source of `target`, formatted by the Oxfmt CLI with the repository's config, as `pnpm format` would. */
-function render(migrations: readonly ModuleMigration[], target: string): string {
+export function renderMigrations(
+	{ comment, name, migrations }: MigrationsFile,
+	target: string,
+): string {
 	const source = [
-		"// Written by `pnpm db:generate` from `migrations/` (ADR 0021). Do not edit: change `schema.ts` and generate.",
+		comment,
 		'import type { ModuleMigration } from "@domus/module-sdk";',
 		"",
-		`export const migrations: readonly ModuleMigration[] = ${JSON.stringify(migrations)};`,
+		`export const ${name}: readonly ModuleMigration[] = ${JSON.stringify(migrations)};`,
 		"",
 	].join("\n");
 	return formatWithOxfmt(source, target);

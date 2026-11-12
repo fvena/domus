@@ -1,0 +1,280 @@
+{
+	"version": "6",
+	"dialect": "sqlite",
+	"id": "8ed97540-1001-4903-b270-d2d854eea6fa",
+	"prevId": "00000000-0000-0000-0000-000000000000",
+	"tables": {
+		"platform_action_log": {
+			"name": "platform_action_log",
+			"columns": {
+				"entry": {
+					"name": "entry",
+					"type": "integer",
+					"primaryKey": true,
+					"notNull": true,
+					"autoincrement": true
+				},
+				"module": {
+					"name": "module",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"action": {
+					"name": "action",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"account": {
+					"name": "account",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"via": {
+					"name": "via",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"key": {
+					"name": "key",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"fingerprint": {
+					"name": "fingerprint",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"at": {
+					"name": "at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"expires_at": {
+					"name": "expires_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"undoes": {
+					"name": "undoes",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"undone_by": {
+					"name": "undone_by",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"input": {
+					"name": "input",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"result": {
+					"name": "result",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				},
+				"inverse": {
+					"name": "inverse",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false,
+					"autoincrement": false
+				}
+			},
+			"indexes": {
+				"platform_action_log_key_unique": {
+					"name": "platform_action_log_key_unique",
+					"columns": ["account", "\"via\" IS NULL", "ifnull(\"via\"", " '')", "key"],
+					"isUnique": true
+				}
+			},
+			"foreignKeys": {
+				"platform_action_log_undoes_platform_action_log_entry_fk": {
+					"name": "platform_action_log_undoes_platform_action_log_entry_fk",
+					"tableFrom": "platform_action_log",
+					"tableTo": "platform_action_log",
+					"columnsFrom": ["undoes"],
+					"columnsTo": ["entry"],
+					"onDelete": "no action",
+					"onUpdate": "no action"
+				},
+				"platform_action_log_undone_by_platform_action_log_entry_fk": {
+					"name": "platform_action_log_undone_by_platform_action_log_entry_fk",
+					"tableFrom": "platform_action_log",
+					"tableTo": "platform_action_log",
+					"columnsFrom": ["undone_by"],
+					"columnsTo": ["entry"],
+					"onDelete": "no action",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"checkConstraints": {}
+		},
+		"platform_action_log_touched": {
+			"name": "platform_action_log_touched",
+			"columns": {
+				"entry": {
+					"name": "entry",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"module": {
+					"name": "module",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"type": {
+					"name": "type",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"id": {
+					"name": "id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				}
+			},
+			"indexes": {
+				"platform_action_log_touched_record": {
+					"name": "platform_action_log_touched_record",
+					"columns": ["module", "type", "id", "entry"],
+					"isUnique": false
+				}
+			},
+			"foreignKeys": {
+				"platform_action_log_touched_entry_platform_action_log_entry_fk": {
+					"name": "platform_action_log_touched_entry_platform_action_log_entry_fk",
+					"tableFrom": "platform_action_log_touched",
+					"tableTo": "platform_action_log",
+					"columnsFrom": ["entry"],
+					"columnsTo": ["entry"],
+					"onDelete": "no action",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {
+				"platform_action_log_touched_entry_module_type_id_pk": {
+					"columns": ["entry", "module", "type", "id"],
+					"name": "platform_action_log_touched_entry_module_type_id_pk"
+				}
+			},
+			"uniqueConstraints": {},
+			"checkConstraints": {}
+		},
+		"platform_migrations": {
+			"name": "platform_migrations",
+			"columns": {
+				"module": {
+					"name": "module",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"position": {
+					"name": "position",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"tag": {
+					"name": "tag",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"hash": {
+					"name": "hash",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				},
+				"applied_at": {
+					"name": "applied_at",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"autoincrement": false
+				}
+			},
+			"indexes": {
+				"platform_migrations_module_tag_unique": {
+					"name": "platform_migrations_module_tag_unique",
+					"columns": ["module", "tag"],
+					"isUnique": true
+				}
+			},
+			"foreignKeys": {},
+			"compositePrimaryKeys": {
+				"platform_migrations_module_position_pk": {
+					"columns": ["module", "position"],
+					"name": "platform_migrations_module_position_pk"
+				}
+			},
+			"uniqueConstraints": {},
+			"checkConstraints": {}
+		}
+	},
+	"views": {},
+	"enums": {},
+	"_meta": {
+		"schemas": {},
+		"tables": {},
+		"columns": {}
+	},
+	"internal": {
+		"indexes": {
+			"platform_action_log_key_unique": {
+				"columns": {
+					"\"via\" IS NULL": {
+						"isExpression": true
+					},
+					"ifnull(\"via\"": {
+						"isExpression": true
+					},
+					" '')": {
+						"isExpression": true
+					}
+				}
+			}
+		}
+	}
+}

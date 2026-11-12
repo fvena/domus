@@ -1,5 +1,5 @@
 // The action log (ADR 0022): one entry per committed write, over the tables of platform/0001. Plain prepared
-// statements of better-sqlite3, without a Drizzle schema. It writes inside the transaction platform/actions
+// statements of better-sqlite3; `schema.ts` declares the same tables only for drizzle-kit (ADR 0023). It writes inside the transaction platform/actions
 // opens and never commits on its own.
 import type { Actor, Inverse, TouchedRecord } from "@domus/module-sdk";
 import type Database from "better-sqlite3";
