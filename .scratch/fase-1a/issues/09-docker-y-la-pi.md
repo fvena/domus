@@ -1,6 +1,6 @@
 # 09. El binario nativo en Docker y la comprobación en la Pi
 
-Status: ready-for-agent
+Status: ready-for-human
 Blocked by: 08
 
 Spec: [`../spec.md`](../spec.md), sección «Docker y la Pi».
@@ -20,3 +20,7 @@ La imagen `api` lleva `better-sqlite3` para su arquitectura, y la Pi demuestra q
 - `docker compose up -d --build` en local arranca los tres contenedores `healthy`, y el log de `api` dice `database at /data/domus.db: 1 migrations applied` en el primer arranque y `0` en los siguientes.
 - En la Pi (`ssh kira`), tras actualizar como dice `docs/despliegue.md`, la comprobación de persistencia da la misma fila en las tres lecturas. Esta parte la ejecuta o la confirma Paco.
 - Pasan `pnpm format:check`, `pnpm lint`, `pnpm type-check`, `pnpm test` y `pnpm build`.
+
+## Comments
+
+- Hecha en `b1ca928`: `better-sqlite3` fuera del bundle y en la imagen `api`, comprobado en local con arm64 y amd64. Falta la comprobación de persistencia en la Pi, que hace Paco con los pasos de `docs/despliegue.md`, sección «La base de datos», cuando la fase 1a esté en `main`.

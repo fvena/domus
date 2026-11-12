@@ -1,6 +1,6 @@
 # 01. ADR 0021 y documentos
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: —
 
 Spec: [`../spec.md`](../spec.md).
@@ -38,3 +38,7 @@ Deja escritas las decisiones de la 1a antes del código, para que las tareas sig
 - Pasa la comprobación del índice y los enlaces de los ADR y la del tamaño de los `AGENTS.md` (`pnpm test` en `tooling`).
 - No queda ninguna frase que diga que la lista se genera en el build.
 - `pnpm format:check` y `pnpm lint` pasan.
+
+## Comments
+
+- Hecha en `4c96238` (ADR 0021 y documentos). En la revisión (`d3e35fa`) el ADR 0021 pasó a decir qué decisión de los ADR 0017 y 0020 sustituye, la regla de `@domus/platform/testing` y que las migraciones de la plataforma se escriben a mano.

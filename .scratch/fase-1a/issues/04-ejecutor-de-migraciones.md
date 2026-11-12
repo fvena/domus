@@ -1,6 +1,6 @@
 # 04. Ejecutor de migraciones y `platform/0000`
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 02, 03
 
 Spec: [`../spec.md`](../spec.md), sección «Migraciones».
@@ -33,3 +33,7 @@ Pruebas en `packages/platform`:
 - un rechazo de las definiciones (tarea 03) desde `createPlatform`;
 - tras cualquier fallo, la conexión está cerrada y `foreign_keys` vuelve a `ON` en una conexión nueva;
 - pasan `pnpm format:check`, `pnpm lint`, `pnpm type-check` y `pnpm test`.
+
+## Comments
+
+- Hecha en `774b35a`. La revisión corrigió la reutilización de ids tras una reconstrucción: ahora las secuencias de `AUTOINCREMENT` se restauran después de cada sentencia (`527356f`, `fdc0c41`, `d24bccc`).

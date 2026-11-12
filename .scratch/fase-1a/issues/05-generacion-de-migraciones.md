@@ -1,6 +1,6 @@
 # 05. `pnpm db:generate` y `migrations.ts`
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 03
 
 Spec: [`../spec.md`](../spec.md), sección «Migraciones», apartados «Generación» y «CI».
@@ -27,3 +27,7 @@ Pruebas en `tooling/scripts`, sobre migraciones de fixture:
 - se rechaza `BEGIN;`, `COMMIT;`, `ROLLBACK;` y `SAVEPOINT x;`; se aceptan un comentario con «begin», una cadena con «COMMIT» y un trigger `BEGIN … END;`.
 
 Además, pasan `pnpm format:check`, `pnpm lint`, `pnpm type-check` y `pnpm test`.
+
+## Comments
+
+- Hecha en `d488c22`. En la revisión (`527356f`, `fdc0c41`) los generadores comparten `tooling/scripts/generated.ts`, y la CI cierra stdin y pone tiempo límite también a `modules:generate`. Riesgo abierto: los errores de `drizzle-kit` solo se detectan por el texto de stderr.

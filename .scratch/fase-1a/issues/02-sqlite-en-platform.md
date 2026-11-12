@@ -1,6 +1,6 @@
 # 02. SQLite en `platform` y `test-utils`
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01
 
 Spec: [`../spec.md`](../spec.md), secciones «Base de datos» y «Composición».
@@ -31,3 +31,7 @@ Pruebas en `packages/platform` y `packages/test-utils`:
 - `close()` dos veces no lanza;
 - `createTestPlatform` borra el directorio temporal que creó y conserva una ruta ajena;
 - pasan `pnpm format:check`, `pnpm lint`, `pnpm type-check` y `pnpm test`.
+
+## Comments
+
+- Hecha en `99e7c90`.

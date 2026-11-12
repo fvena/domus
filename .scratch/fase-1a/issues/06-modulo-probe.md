@@ -1,6 +1,6 @@
 # 06. El módulo `probe`
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 04, 05
 
 Spec: [`../spec.md`](../spec.md), secciones «Forma del módulo» y «Módulo de prueba».
@@ -21,3 +21,7 @@ El módulo de prueba de toda la fase 1. En la 1a solo guarda datos.
 - `probe` cumple todas las reglas de dependencias de un módulo (`pnpm lint`).
 - `pnpm db:generate` no cambia nada en `modules/probe`.
 - Pasan `pnpm format:check`, `pnpm lint`, `pnpm type-check` y `pnpm test`.
+
+## Comments
+
+- Hecha en `949fd7f`. En la revisión (`d3e35fa`) `moduleDatabase` pasó a `@domus/platform/testing`, que solo puede importar `test-utils`.

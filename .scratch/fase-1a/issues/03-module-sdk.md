@@ -1,6 +1,6 @@
 # 03. `defineModule` y tablas con prefijo en `module-sdk`
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01
 
 Spec: [`../spec.md`](../spec.md), sección «Forma del módulo».
@@ -29,3 +29,7 @@ La forma mínima de un módulo en la 1a, sin contexto ni cliente de base de dato
 - Pruebas en `packages/module-sdk` de cada rechazo y de que `moduleTables("probe").table("notes", …)` se llama `probe_notes`.
 - Un módulo solo necesita importar `@domus/module-sdk` y `@domus/module-sdk/db`; la regla de dependencias sigue impidiéndole importar `drizzle-orm` directamente.
 - Pasan `pnpm format:check`, `pnpm lint`, `pnpm type-check` y `pnpm test`.
+
+## Comments
+
+- Hecha en `0265729`; `406d6ee` añadió al Dockerfile lo que necesita `better-sqlite3` al instalarse. En la revisión (`fdc0c41`) el id reservado pasó a ser `PLATFORM_ID`, exportado una sola vez.

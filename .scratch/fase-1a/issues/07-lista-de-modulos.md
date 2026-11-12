@@ -1,6 +1,6 @@
 # 07. `pnpm modules:generate`, la lista y las pruebas de `tooling`
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 05, 06
 
 Spec: [`../spec.md`](../spec.md), sección «Lista de módulos».
@@ -28,3 +28,7 @@ La lista fija de módulos de `api`, generada y guardada en git, y las pruebas qu
 - Las pruebas anteriores pasan, y un id que no coincide con su carpeta hace fallar el generador.
 - `api-reaches-modules-through-server-entry` revisa la lista generada: una importación a algo interno de un módulo salta.
 - Pasan `pnpm format:check`, `pnpm lint`, `pnpm type-check` y `pnpm test`.
+
+## Comments
+
+- Hecha en `6932e65`. En la revisión (`d3e35fa`) el generador quedó fijo para la lista de `api`, sin `ModuleListOutput`.

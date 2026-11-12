@@ -1,6 +1,6 @@
 # 08. La puerta y `apps/api` componen `platform`
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 04, 07
 
 Spec: [`../spec.md`](../spec.md), secciones «Base de datos» y «Composición».
@@ -22,3 +22,7 @@ Spec: [`../spec.md`](../spec.md), secciones «Base de datos» y «Composición»
 - Prueba de la app sobre un fichero temporal: arranca, `/health` y `status` responden igual que antes, y ninguna otra ruta de `/api/rpc` responde.
 - `pnpm dev` arranca en un clon limpio sin tocar `.env.local` y crea `data/domus.db`.
 - Pasan `pnpm format:check`, `pnpm lint`, `pnpm type-check`, `pnpm test` y `pnpm build`.
+
+## Comments
+
+- Hecha en `971e5ca`.
