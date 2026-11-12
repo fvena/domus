@@ -1,6 +1,6 @@
 # 03. Fallos, cancelación y retención de la copia
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01
 
 Spec: [`../spec.md`](../spec.md), secciones «La tarea `backup`» (lo que sale de restic, retención, cancelación) y «Las marcas de las copias y el vigilante» (`backup-stale` y `backup-retention-failed`). ADR 0026.
@@ -21,14 +21,14 @@ La copia que se porta bien cuando algo sale mal: aplica la retención, distingue
 
 ## Criterios de aceptación
 
-- [ ] Con restic real, la retención deja 7 diarias, 4 semanales y 3 mensuales sobre instantáneas de días distintos.
-- [ ] Una copia parcial (código 3) no cuenta como guardada, no aplica la retención y falla sin reintentos.
-- [ ] Un destino con contenido, uno ausente y una contraseña incorrecta fallan sin reintentos, y el destino con contenido no se toca.
-- [ ] Un bloqueo vigente se reintenta y, cuando se libera, la copia se guarda.
-- [ ] Con la retención fallida, la copia queda guardada, la ejecución falla con su mensaje, `/health` dice `backup-retention-failed` y reintentar no crea otra instantánea; una retención buena después quita el motivo.
-- [ ] Un restic que ignora SIGTERM muere tras SIGKILL al agotar el tiempo máximo, y el carril queda libre solo entonces.
-- [ ] Abortar durante `db.backup()` cancela la ejecución y deja la preparación vacía.
-- [ ] La preparación queda vacía tras un fallo, una cancelación y una caída (al empezar la siguiente ejecución).
-- [ ] `backup-stale` no aparece justo antes de las 48 h ni exactamente a las 48 h desde la captura, y sí justo después.
-- [ ] Un primer intento fallido sin ninguna copia guardada da `backup-stale` y deja de dar `none-yet`.
-- [ ] `pnpm check` pasa.
+- [x] Con restic real, la retención deja 7 diarias, 4 semanales y 3 mensuales sobre instantáneas de días distintos.
+- [x] Una copia parcial (código 3) no cuenta como guardada, no aplica la retención y falla sin reintentos.
+- [x] Un destino con contenido, uno ausente y una contraseña incorrecta fallan sin reintentos, y el destino con contenido no se toca.
+- [x] Un bloqueo vigente se reintenta y, cuando se libera, la copia se guarda.
+- [x] Con la retención fallida, la copia queda guardada, la ejecución falla con su mensaje, `/health` dice `backup-retention-failed` y reintentar no crea otra instantánea; una retención buena después quita el motivo.
+- [x] Un restic que ignora SIGTERM muere tras SIGKILL al agotar el tiempo máximo, y el carril queda libre solo entonces.
+- [x] Abortar durante `db.backup()` cancela la ejecución y deja la preparación vacía.
+- [x] La preparación queda vacía tras un fallo, una cancelación y una caída (al empezar la siguiente ejecución).
+- [x] `backup-stale` no aparece justo antes de las 48 h ni exactamente a las 48 h desde la captura, y sí justo después.
+- [x] Un primer intento fallido sin ninguna copia guardada da `backup-stale` y deja de dar `none-yet`.
+- [x] `pnpm check` pasa.

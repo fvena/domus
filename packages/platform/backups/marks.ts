@@ -25,6 +25,10 @@ export interface MarkStore {
 	current(): BackupMarks;
 	/** Marks a saved backup: the instant its data was captured and its snapshot's id. */
 	saved(capturedAt: number, snapshot: string): void;
+	/** Marks a failed attempt at a backup, one that saved nothing. */
+	failed(at: number): void;
+	/** Marks the end of a retention and its result. */
+	retention(at: number, result: MarkResult): void;
 }
 
 interface MarksRow {
@@ -50,12 +54,29 @@ export function createMarkStore(connection: Database.Database): MarkStore {
 			ON CONFLICT (id) DO UPDATE SET saved_captured_at = excluded.saved_captured_at,
 				saved_snapshot = excluded.saved_snapshot`,
 	);
+	const writeFailed = connection.prepare<[number]>(
+		`INSERT INTO platform_backup_marks (id, failed_at) VALUES (1, ?)
+			ON CONFLICT (id) DO UPDATE SET failed_at = excluded.failed_at`,
+	);
+	const writeRetention = connection.prepare<[number, MarkResult]>(
+		`INSERT INTO platform_backup_marks (id, retention_at, retention_result) VALUES (1, ?, ?)
+			ON CONFLICT (id) DO UPDATE SET retention_at = excluded.retention_at,
+				retention_result = excluded.retention_result`,
+	);
 
 	return {
 		current: () => marks,
 		saved(capturedAt, snapshot) {
 			writeSaved.run(capturedAt, snapshot);
 			marks = { ...marks, saved: { capturedAt, snapshot } };
+		},
+		failed(at) {
+			writeFailed.run(at);
+			marks = { ...marks, failedAt: at };
+		},
+		retention(at, result) {
+			writeRetention.run(at, result);
+			marks = { ...marks, retention: { at, result } };
 		},
 	};
 }

@@ -1,14 +1,18 @@
 // The nightly backup (ADR 0026) with the real restic: createTestPlatform on a file, with a temporary repository and
-// password file, run by the test's clock. What a test checks is what restic lists, what the log of runs says and
-// what `/health` answers.
+// password file, run by the test's clock. Fake restic executables, shell scripts that hand what they do not fake to
+// the real one, give the exit codes and the stubborn process the real one gives only by chance. What a test checks
+// is what restic lists, what the log of runs and the jobs say and what `/health` answers.
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
+	chmodSync,
 	closeSync,
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	openSync,
 	readdirSync,
+	readFileSync,
 	rmSync,
 	statSync,
 	writeFileSync,
@@ -18,7 +22,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 
 import { defineModule } from "@domus/module-sdk";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createTestPlatform, TEST_ORIGIN, type TestPlatform } from "./platform";
 
@@ -48,6 +52,29 @@ const bulk = defineModule({
 		},
 	],
 });
+
+/** A module whose migration fills about 10 MB: `db.backup()` copies it in a few dozen steps. */
+const large = defineModule({
+	id: "large",
+	schema: {},
+	migrations: [
+		{
+			tag: "0000_large",
+			position: 0,
+			hash: "hash-of-0000_large",
+			statements: [
+				"CREATE TABLE `large_rows` (`id` integer PRIMARY KEY, `body` text NOT NULL);",
+				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000)
+					INSERT INTO large_rows (body) SELECT hex(randomblob(1000)) FROM n;`,
+			],
+		},
+	],
+});
+
+/** The maintenance lane's maximum time, the backup's. */
+const MAINTENANCE_TIMEOUT = 30 * 60 * 1000;
+/** How long a child process has after SIGTERM before SIGKILL. */
+const KILL_GRACE = 5000;
 
 /** SQLite's default page size, the one the platform uses. */
 const PAGE_SIZE = 4096;
@@ -101,6 +128,48 @@ function snapshots(target: BackupTarget) {
 	];
 	return list;
 }
+
+/**
+ * A fake restic: a shell script that answers the subcommands of `cases`, a `case` body each, and hands any other,
+ * or a body that falls through, to the real restic. `cases` gets the paths of the fake's own folder, for the flags
+ * and signs a body shares with its test. It notes each subcommand it gets in its call log, in order.
+ */
+function fakeRestic(cases: (path: (name: string) => string) => Readonly<Record<string, string>>) {
+	const dir = mkdtempSync(join(tmpdir(), "domus-fake-restic-"));
+	const path = (name: string) => join(dir, name);
+	const executable = path("restic");
+	const log = path("calls");
+	const branches = Object.entries(cases(path))
+		.map(([command, body]) => `\t${command})\n\t\t${body}\n\t\t;;`)
+		.join("\n");
+	writeFileSync(
+		executable,
+		`#!/bin/sh\necho "$1" >> '${log}'\ncase "$1" in\n${branches}\nesac\nexec restic "$@"\n`,
+	);
+	chmodSync(executable, 0o755);
+	return {
+		executable,
+		path,
+		/** The subcommands the fake got, in order. */
+		calls: (): string[] =>
+			existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [],
+		[Symbol.dispose]: () => rmSync(dir, { recursive: true, force: true }),
+	};
+}
+
+/** True while the process `pid` exists. */
+function isAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** The job of the backup task. */
+const backupJob = (test: TestPlatform) =>
+	test.background.jobs().find((job) => job.kind === "backup");
 
 /** The runs of the backup task, oldest first. */
 const backupRuns = (test: TestPlatform) =>
@@ -188,6 +257,58 @@ describe("the nightly backup", { timeout: RESTIC_TIMEOUT }, () => {
 		}
 	});
 
+	it(
+		"keeps 7 daily, 4 weekly and 3 monthly snapshots of host domus after a saved backup",
+		{ timeout: 4 * RESTIC_TIMEOUT },
+		async () => {
+			using target = backupTarget();
+			restic(target, "init");
+			// Snapshots of earlier days, before the backup of 2026-01-01; weeks start on Monday, 2025-12-29 among them.
+			const earlier = [
+				"2025-09-30",
+				"2025-10-31",
+				"2025-11-15",
+				"2025-11-29",
+				"2025-12-06",
+				"2025-12-13",
+				"2025-12-20",
+				"2025-12-24",
+				"2025-12-25",
+				"2025-12-26",
+				"2025-12-27",
+				"2025-12-28",
+				"2025-12-29",
+				"2025-12-30",
+				"2025-12-31",
+			];
+			const source = join(dirname(target.repository), "source");
+			writeFileSync(source, "an earlier day");
+			for (const day of earlier)
+				restic(target, "backup", "--host", "domus", "--time", `${day} 04:00:00`, source);
+			await using test = createTestPlatform({ modules: [], file: true, backups: target });
+			test.background.start();
+
+			test.clock.set(FIRST_BACKUP);
+			await test.background.settled();
+
+			expect(backupRuns(test).map((run) => run.result)).toEqual(["ok"]);
+			expect(snapshots(target).map((snapshot) => snapshot.time.slice(0, 10))).toEqual([
+				// Monthly: November's last; weekly: the last of the weeks of 13 and 20 December.
+				"2025-11-29",
+				"2025-12-13",
+				"2025-12-20",
+				// Daily: the last seven days; weekly and monthly count these too.
+				"2025-12-26",
+				"2025-12-27",
+				"2025-12-28",
+				"2025-12-29",
+				"2025-12-30",
+				"2025-12-31",
+				"2026-01-01",
+			]);
+		},
+	);
+
 	it("saves only the database, at the root of the snapshot, and leaves the staging folder empty", async () => {
 		using target = backupTarget();
 		await using test = createTestPlatform({ modules: [], file: true, backups: target });
@@ -201,6 +322,262 @@ describe("the nightly backup", { timeout: RESTIC_TIMEOUT }, () => {
 		);
 		expect(files).toEqual([expect.objectContaining({ path: "/domus.db", type: "file" })]);
 		expect(leftovers(test)).toEqual([]);
+	});
+});
+
+describe("a backup that goes wrong", { timeout: RESTIC_TIMEOUT }, () => {
+	it("does not count a partial snapshot (code 3): it fails at once, without retention, and /health says stale", async () => {
+		using target = backupTarget();
+		using fake = fakeRestic(() => ({ backup: "exit 3" }));
+		await using test = createTestPlatform({
+			modules: [],
+			file: true,
+			backups: { ...target, restic: fake.executable },
+		});
+		test.background.start();
+
+		test.clock.set(FIRST_BACKUP);
+		await test.background.settled();
+
+		expect(backupRuns(test)).toEqual([
+			expect.objectContaining({
+				result: "failed",
+				error: "PermanentJobError: restic backup exited with code 3",
+			}),
+		]);
+		expect(test.background.jobs().find((job) => job.kind === "backup")).toEqual(
+			expect.objectContaining({ state: "failed", attempts: 1 }),
+		);
+		expect(fake.calls()).not.toContain("forget");
+		expect(await health(test)).toEqual({
+			status: "ok",
+			background: { status: "degraded", reasons: ["backup-stale"], backups: "none" },
+		});
+		expect(leftovers(test)).toEqual([]);
+	});
+});
+
+describe("a destination that does not open", { timeout: 2 * RESTIC_TIMEOUT }, () => {
+	/** Runs the first backup on `backups` and returns its one job. */
+	async function firstBackup(backups: { repository: string; passwordFile: string }) {
+		await using test = createTestPlatform({ modules: [], file: true, backups });
+		test.background.start();
+		test.clock.set(FIRST_BACKUP);
+		await test.background.settled();
+		return {
+			runs: backupRuns(test),
+			job: test.background.jobs().find((job) => job.kind === "backup"),
+		};
+	}
+
+	it("fails at once, never initializing a destination with something in it", async () => {
+		using target = backupTarget();
+		writeFileSync(join(target.repository, "notes.txt"), "not a repository");
+
+		const { runs, job } = await firstBackup(target);
+
+		expect(runs).toEqual([
+			expect.objectContaining({
+				result: "failed",
+				error: "PermanentJobError: restic backup exited with code 10",
+			}),
+		]);
+		expect(job).toEqual(expect.objectContaining({ state: "failed", attempts: 1 }));
+		expect(readdirSync(target.repository)).toEqual(["notes.txt"]);
+	});
+
+	it("fails at once, creating nothing, when the destination is missing", async () => {
+		using target = backupTarget();
+		const repository = join(target.repository, "missing");
+
+		const { runs, job } = await firstBackup({ ...target, repository });
+
+		expect(runs).toEqual([
+			expect.objectContaining({
+				result: "failed",
+				error: "PermanentJobError: restic backup exited with code 10",
+			}),
+		]);
+		expect(job).toEqual(expect.objectContaining({ state: "failed", attempts: 1 }));
+		expect(existsSync(repository)).toBe(false);
+	});
+
+	it("fails at once with a wrong password, and the repository keeps its snapshots", async () => {
+		using target = backupTarget();
+		restic(target, "init");
+		const wrong = join(dirname(target.passwordFile), "wrong-password");
+		writeFileSync(wrong, "not the password", { mode: 0o600 });
+
+		const { runs, job } = await firstBackup({ ...target, passwordFile: wrong });
+
+		expect(runs).toEqual([
+			expect.objectContaining({
+				result: "failed",
+				error: "PermanentJobError: restic unlock exited with code 12",
+			}),
+		]);
+		expect(job).toEqual(expect.objectContaining({ state: "failed", attempts: 1 }));
+		expect(snapshots(target)).toEqual([]);
+	});
+});
+
+describe("a repository locked by another process", { timeout: RESTIC_TIMEOUT }, () => {
+	it("retries the backup, and saves it once the lock is gone", async () => {
+		using target = backupTarget();
+		using fake = fakeRestic((path) => ({ backup: `[ -e '${path("locked")}' ] && exit 11` }));
+		writeFileSync(fake.path("locked"), "");
+		await using test = createTestPlatform({
+			modules: [],
+			file: true,
+			backups: { ...target, restic: fake.executable },
+		});
+		test.background.start();
+
+		test.clock.set(FIRST_BACKUP);
+		await test.background.settled();
+
+		expect(test.background.jobs().find((job) => job.kind === "backup")).toEqual(
+			expect.objectContaining({
+				state: "pending",
+				attempts: 1,
+				error: "ResticLockedError backup-11",
+			}),
+		);
+		expect(backupRuns(test)).toEqual([expect.objectContaining({ result: null })]);
+
+		rmSync(fake.path("locked"));
+		test.clock.advance(30 * 1000);
+		await test.background.settled();
+
+		expect(backupRuns(test)).toEqual([expect.objectContaining({ result: "ok" })]);
+		expect(snapshots(target)).toHaveLength(1);
+	});
+});
+
+describe("a backup past its maximum time", { timeout: RESTIC_TIMEOUT }, () => {
+	it("kills a restic that ignores SIGTERM, and frees the lane only once it ended", async () => {
+		using target = backupTarget();
+		using fake = fakeRestic((path) => ({
+			// It ignores SIGTERM, then tells the test its pid; `sleep` holds no pipe of restic's.
+			backup: `trap '' TERM; echo $$ > '${path("pid.tmp")}'; mv '${path("pid.tmp")}' '${path("pid")}'; while :; do sleep 0.05 > /dev/null 2>&1; done`,
+		}));
+		await using test = createTestPlatform({
+			modules: [],
+			file: true,
+			backups: { ...target, restic: fake.executable },
+		});
+		// What a crash in the middle of a backup left in the staging folder.
+		const staging = join(dirname(test.databaseFile), "backup-staging");
+		mkdirSync(staging);
+		writeFileSync(join(staging, "domus.db"), "a snapshot a crash left behind");
+		writeFileSync(join(staging, "left-behind"), "");
+		test.background.start();
+
+		test.clock.set(FIRST_BACKUP);
+		await vi.waitFor(() => expect(existsSync(fake.path("pid"))).toBe(true), {
+			timeout: RESTIC_TIMEOUT,
+		});
+		const pid = Number(readFileSync(fake.path("pid"), "utf8"));
+		expect(readdirSync(staging)).not.toContain("left-behind");
+
+		test.clock.advance(MAINTENANCE_TIMEOUT);
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		expect(isAlive(pid)).toBe(true);
+		expect(backupJob(test)).toEqual(expect.objectContaining({ state: "running" }));
+
+		test.clock.advance(KILL_GRACE);
+		await test.background.settled();
+
+		expect(isAlive(pid)).toBe(false);
+		expect(backupJob(test)).toEqual(
+			expect.objectContaining({
+				state: "pending",
+				attempts: 1,
+				error: `timed out after ${MAINTENANCE_TIMEOUT} ms`,
+			}),
+		);
+		expect(leftovers(test)).toEqual([]);
+	});
+
+	it("aborts db.backup() while it copies, and leaves the staging folder empty", async () => {
+		using target = backupTarget();
+		using fake = fakeRestic(() => ({}));
+		const dir = mkdtempSync(join(tmpdir(), "domus-backups-data-"));
+		try {
+			const databaseFile = join(dir, "domus.db");
+			await using test = createTestPlatform({
+				modules: [large],
+				file: databaseFile,
+				backups: { ...target, restic: fake.executable },
+			});
+			test.background.start();
+
+			test.clock.set(FIRST_BACKUP);
+			const snapshot = join(dir, "backup-staging", "domus.db");
+			while (!existsSync(snapshot)) await new Promise((resolve) => setImmediate(resolve));
+			test.clock.advance(MAINTENANCE_TIMEOUT);
+			await test.background.settled();
+
+			expect(backupJob(test)).toEqual(
+				expect.objectContaining({
+					state: "pending",
+					attempts: 1,
+					error: `timed out after ${MAINTENANCE_TIMEOUT} ms`,
+				}),
+			);
+			expect(fake.calls()).toEqual([]);
+			expect(leftovers(test)).toEqual([]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("a failed retention", { timeout: 2 * RESTIC_TIMEOUT }, () => {
+	it("keeps the backup saved, fails the run with its own message and reason, and a good one clears it", async () => {
+		using target = backupTarget();
+		using fake = fakeRestic((path) => ({ forget: `[ -e '${path("failing")}' ] && exit 1` }));
+		const failing = fake.path("failing");
+		writeFileSync(failing, "");
+		await using test = createTestPlatform({
+			modules: [],
+			file: true,
+			backups: { ...target, restic: fake.executable },
+		});
+		test.background.start();
+
+		test.clock.set(FIRST_BACKUP);
+		await test.background.settled();
+
+		expect(backupRuns(test)).toEqual([
+			expect.objectContaining({
+				result: "failed",
+				error: "PermanentJobError: restic forget exited with code 1",
+			}),
+		]);
+		expect(await health(test)).toEqual({
+			status: "ok",
+			background: {
+				status: "degraded",
+				reasons: ["backup-retention-failed"],
+				backups: "saved",
+			},
+		});
+		// No retry repeats the backup.
+		test.clock.advance(60 * 60 * 1000);
+		await test.background.settled();
+		expect(snapshots(target)).toHaveLength(1);
+
+		rmSync(failing);
+		test.clock.set(FIRST_BACKUP + DAY);
+		await test.background.settled();
+
+		expect(backupRuns(test).map((run) => run.result)).toEqual(["failed", "ok"]);
+		expect(snapshots(target)).toHaveLength(2);
+		expect(await health(test)).toEqual({
+			status: "ok",
+			background: { status: "ok", backups: "saved" },
+		});
 	});
 });
 
@@ -220,6 +597,31 @@ describe("the backups in /health", { timeout: RESTIC_TIMEOUT }, () => {
 		expect(await health(test)).toEqual({
 			status: "ok",
 			background: { status: "ok", backups: "saved" },
+		});
+	});
+
+	it("say stale only once the last saved backup was captured more than 48 h ago", async () => {
+		using target = backupTarget();
+		await using test = createTestPlatform({ modules: [], file: true, backups: target });
+		test.background.start();
+		test.clock.set(FIRST_BACKUP);
+		await test.background.settled();
+		test.background.pause("backup");
+
+		test.clock.set(FIRST_BACKUP + 2 * DAY - 1);
+		expect(await health(test)).toEqual({
+			status: "ok",
+			background: { status: "ok", backups: "saved" },
+		});
+		test.clock.set(FIRST_BACKUP + 2 * DAY);
+		expect(await health(test)).toEqual({
+			status: "ok",
+			background: { status: "ok", backups: "saved" },
+		});
+		test.clock.set(FIRST_BACKUP + 2 * DAY + 1);
+		expect(await health(test)).toEqual({
+			status: "ok",
+			background: { status: "degraded", reasons: ["backup-stale"], backups: "saved" },
 		});
 	});
 
