@@ -8,7 +8,7 @@ Esta spec sale del grilling de la fase 1d ([`docs/plan.md`](../../docs/plan.md))
 
 Después de la 1c, todo lo que hace Domus ocurre dentro de una petición. Nada corre solo, a una hora, ni después de responder. Eso deja varias cosas sin hacer:
 
-- El contenido del registro de acciones (entradas e inversas) caduca a los 30 días, pero sigue guardado en la base. Hoy solo se oculta al consultarlo, aunque el ADR 0022 prometía borrarlo en la 1d. Pasa lo mismo con las confirmaciones pendientes y los comprobantes caducados.
+- El contenido del registro de acciones (entradas e inversas) caduca a los 30 días, pero sigue guardado en la base. Hoy solo se oculta al consultarlo, aunque el ADR 0022 prometía borrarlo en la 1d. Pasa lo mismo con la operación guardada de las confirmaciones pendientes y con los comprobantes que ya no sirven.
 - La 1d2 necesita hacer una copia de seguridad cada madrugada sin congelar la API, y las fases siguientes necesitan trabajos que corran después de una escritura (avisos) o tras una petición larga (Kira).
 - Si algo programado deja de correr, nadie se entera.
 
@@ -20,7 +20,7 @@ La casa necesita que Domus haga su propio mantenimiento a una hora fija, que no 
 
 Encima del motor, un planificador lanza las tareas programadas de la plataforma a una hora local de la casa (`Europe/Madrid`), cada día o cada semana, con `@domus/utils/date-time`, que tiene aquí su primer uso. Cada ejecución prevista ocurre una sola vez, con un registro de ejecuciones y un vigilante que informa en `/health`.
 
-El primer caso real es la limpieza: una tarea diaria borra el contenido caducado del registro de acciones (conservando sus anotaciones y sus claves de idempotencia), las confirmaciones pendientes y los comprobantes caducados, y los trabajos y ejecuciones antiguos.
+El primer caso real es la limpieza: una tarea diaria borra el contenido caducado del registro de acciones (conservando sus anotaciones y sus claves de idempotencia), la operación guardada de las confirmaciones caducadas, los comprobantes que ya no deciden ninguna respuesta, y los trabajos y ejecuciones antiguos. La limpieza nunca cambia lo que responde Domus.
 
 El admin lista las tareas y cambia su hora, las pausa o las lanza con operaciones del área de la plataforma servidas por HTTP. Las pantallas siguen siendo de la fase 3.
 
@@ -32,7 +32,7 @@ En la 1d1, todo trabajo es mantenimiento de la plataforma: no tiene actor ni pas
 2. Como miembro, quiero que repetir una escritura antigua siga sin ejecutarse dos veces después de la limpieza, para que borrar contenido no rompa la protección contra duplicados.
 3. Como miembro, quiero seguir leyendo las anotaciones de mis escrituras después de la limpieza, para saber qué hice aunque ya no se pueda deshacer.
 4. Como miembro, quiero que una entrada cuyo contenido se limpió responda igual que una caducada sin limpiar, para que la limpieza no cambie lo que veo.
-5. Como miembro, quiero que mis confirmaciones pendientes y mis comprobantes caducados se borren, para que no quede nada mío que ya no sirve.
+5. Como miembro, quiero que la operación guardada de mis confirmaciones caducadas y mis comprobantes inservibles se borren, para que no quede nada mío que ya no sirve, sin que cambie lo que Domus responde si repito algo.
 6. Como miembro, quiero que la limpieza nunca toque una entrada que todavía se puede deshacer, para no perder un deshacer que me corresponde.
 7. Como admin, quiero que el mantenimiento corra solo cada noche, para no tener que acordarme.
 8. Como admin, quiero que una tarea programada a las 02:30 corra a las 03:00 el día que se adelanta la hora, para que no se salte ese día.
@@ -113,7 +113,9 @@ En la 1d1, todo trabajo es mantenimiento de la plataforma: no tiene actor ni pas
 
 - **Limpieza** (`cleanup`), diaria, para empezar a las 04:30, en el carril de mantenimiento:
     - En el registro de acciones, borra el contenido (entrada e inversa) de las entradas cuyo `expiresAt` ya pasó. Conserva la anotación, la clave de idempotencia y la huella, así que repetir una escritura antigua sigue respondiendo como hoy a una caducada, y cada cuenta sigue leyendo sus anotaciones.
-    - Borra las confirmaciones pendientes caducadas o ya consumidas, y los comprobantes caducados o ya usados.
+    - **Regla general: la limpieza nunca cambia una respuesta.** Una fila que decide lo que se responde se conserva como marca mínima; solo se borra lo que no decide nada.
+    - **Confirmaciones pendientes.** Ninguna fila se borra: una consumida o rechazada responde «ya consumida», una terminada o caducada «caducada», y borrar la fila lo cambiaría a «no encontrado». Pasado su `expiresAt`, sea cual sea su estado, la limpieza vacía la operación guardada (la entrada de la acción) y conserva la marca: id, cuenta, `via`, tipo, huella, clave, origen, sesión, instantes, estado y entrada. Para eso la columna de la operación pasa a admitir vacío.
+    - **Comprobantes.** Se borran los que ya no deciden nada: los terminados y los emitidos sin usar pasada su caducidad, que hoy responden «no válido» igual que uno inexistente. Un comprobante usado se conserva, porque valida la repetición de la escritura que probó y su acuse. Solo guarda un hash y no lleva contenido.
     - Borra los trabajos terminados, fallidos o cancelados de más de 30 días y las ejecuciones de más de 90 días. Son valores iniciales.
     - Trabaja por lotes pequeños, cada uno en su propia transacción, y comprueba la señal de cancelación entre lotes. Así no bloquea la API y se puede cancelar. Si se corta a medias, la siguiente ejecución sigue donde quedó: limpiar dos veces no cambia nada.
 - La limpieza es mantenimiento: trabaja con la base sin acciones y sin actor. No deja entradas en el registro de acciones.
@@ -151,7 +153,7 @@ En la 1d1, todo trabajo es mantenimiento de la plataforma: no tiene actor ni pas
 ### Migraciones
 
 - Las tablas nuevas de la plataforma (trabajos, estado de las tareas y ejecuciones) llegan en una migración generada con `pnpm db:generate`, como las de la 1c.
-- La migración no toca las tablas existentes. La limpieza borra contenido con escrituras normales, no con cambios de esquema.
+- La migración solo cambia una tabla existente: la operación guardada de las confirmaciones pasa a admitir vacío. La limpieza borra contenido con escrituras normales, no con cambios de esquema.
 
 ### Arranque y parada en `apps/api`
 
@@ -187,7 +189,7 @@ En la 1d1, todo trabajo es mantenimiento de la plataforma: no tiene actor ni pas
     - los reintentos con espera creciente y su máximo, y el fallo definitivo sin reintento;
     - el tiempo máximo y la cancelación;
     - el estado atascado, sin solapamiento en su carril, y su liberación al terminar;
-    - la limpieza: contenido caducado borrado, entrada vigente intacta, repetir con la misma clave tras limpiar, anotaciones legibles, pendientes y comprobantes caducados borrados, trabajos y ejecuciones antiguos borrados, limpieza cortada a medias que sigue después, y limpiar dos veces;
+    - la limpieza: contenido caducado borrado, entrada vigente intacta, repetir con la misma clave tras limpiar, anotaciones legibles, operación de las confirmaciones caducadas vaciada y comprobantes inservibles borrados, y que confirmar otra vez una confirmación consumida, confirmar una caducada, repetir una escritura confirmada y repetir una escritura con su comprobante usado responden igual antes y después de limpiar, trabajos y ejecuciones antiguos borrados, limpieza cortada a medias que sigue después, y limpiar dos veces;
     - la parada ordenada.
 - **Persistencia.** Con `file`, cerrar la plataforma y abrirla de nuevo sobre el mismo fichero comprueba que el estado de las tareas, la hora elegida y la próxima ejecución sobreviven a un reinicio. Esto prueba la persistencia, no una caída.
 - **Pruebas internas de `platform`**, para lo que no se provoca desde fuera:
@@ -247,3 +249,15 @@ En la 1d1, todo trabajo es mantenimiento de la plataforma: no tiene actor ni pas
     Si la implementación muestra que alguna no encaja, se corrige aquí antes de seguir.
 
 - La limpieza cambia lo que guarda la base, no lo que responde la API: las pruebas de la caducidad de la 1b y la 1c tienen que seguir pasando sin cambios después de limpiar.
+
+## Tareas
+
+| Tarea                                                             | Qué                                              | Bloqueada por |
+| ----------------------------------------------------------------- | ------------------------------------------------ | ------------- |
+| [01](issues/01-limpieza-diaria-de-punta-a-punta.md)               | Limpieza diaria de punta a punta                 | —             |
+| [02](issues/02-programacion-completa-y-persistencia.md)           | Programación completa y persistencia             | 01            |
+| [03](issues/03-carriles-cancelacion-reintentos-y-recuperacion.md) | Carriles, cancelación, reintentos y recuperación | 01            |
+| [04](issues/04-limpieza-completa-por-lotes.md)                    | Limpieza completa por lotes                      | 03            |
+| [05](issues/05-ajustes-de-las-tareas-por-http.md)                 | Ajustes de las tareas por HTTP                   | 02, 03        |
+| [06](issues/06-vigilante-y-health.md)                             | Vigilante y `/health`                            | 03            |
+| [07](issues/07-la-pi-y-el-cierre.md)                              | La Pi y el cierre de la 1d1                      | todas         |
