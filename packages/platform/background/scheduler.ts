@@ -1,7 +1,12 @@
 // The scheduler (ADR 0025): the platform's scheduled tasks, at a local time of the house. Each planned run is
 // unique by its task and local planned date, and keeps its absolute instant. When a run is due, marking the task's
 // next run, recording the run and enqueuing its job happen in one transaction: nothing of it stays if one fails.
-import { localDate, nextDailyOccurrence } from "@domus/utils/date-time";
+import {
+	localDate,
+	nextDailyOccurrence,
+	nextWeeklyOccurrence,
+	type Weekday,
+} from "@domus/utils/date-time";
 import type Database from "better-sqlite3";
 
 import type { Clock } from "../actions";
@@ -10,11 +15,10 @@ import type { FinishedJob, JobKind, NewJob } from "./engine";
 /** The house's time zone: fixed here, never read from `TZ` or from the process. */
 export const HOUSE_ZONE = "Europe/Madrid";
 
-/** How often a task runs by default: every day at a local `HH:MM` of the house. */
-export interface Frequency {
-	readonly every: "day";
-	readonly at: string;
-}
+/** How often a task runs by default: every day, or every week on a weekday, at a local `HH:MM` of the house. */
+export type Frequency =
+	| { readonly every: "day"; readonly at: string }
+	| { readonly every: "week"; readonly on: Weekday; readonly at: string };
 
 /** A scheduled task the platform declares in its code: a stable id, its default frequency and its job. */
 export interface ScheduledTask {
@@ -57,6 +61,29 @@ export interface Scheduler {
 	nextDue(): number | undefined;
 	/** Records how a run ended, from its job's end. Runs inside the transaction that records the job's end. */
 	finish(job: FinishedJob): void;
+	/** Stops creating runs of the task. Pausing a paused task changes nothing. */
+	pause(task: string): void;
+	/** Creates runs again, the next one from now: what it skipped while paused is not caught up. */
+	resume(task: string): void;
+	/** Sets the time the admin chose, or none to go back to the default, and moves the next run from now. */
+	setTime(task: string, time: string | null): void;
+}
+
+/** A task the code does not declare, or not anymore: its row, if any, is kept but not touched. */
+export class UnknownTaskError extends Error {
+	constructor(readonly task: string) {
+		super(`no scheduled task is declared as "${task}"`);
+		this.name = "UnknownTaskError";
+	}
+}
+
+/** The state of a scheduled task, as its row keeps it across restarts. */
+export interface TaskState {
+	readonly id: string;
+	/** The local `HH:MM` the admin chose; null for the task's default. */
+	readonly time: string | null;
+	readonly paused: boolean;
+	readonly nextAt: number;
 }
 
 interface TaskRow {
@@ -80,17 +107,36 @@ export function createScheduler({
 	);
 	const selectTask = connection.prepare("SELECT * FROM platform_tasks WHERE id = ?");
 	const moveNext = connection.prepare("UPDATE platform_tasks SET next_at = ? WHERE id = ?");
+	const setState = connection.prepare(
+		"UPDATE platform_tasks SET time = ?, paused = ?, next_at = ? WHERE id = ?",
+	);
 	const insertRun = connection.prepare(
 		`INSERT OR IGNORE INTO platform_task_runs (task, planned_date, planned_at)
 			VALUES (?, ?, ?)`,
 	);
+	const insertSkipped = connection.prepare(
+		`INSERT OR IGNORE INTO platform_task_runs (task, planned_date, planned_at, finished_at, result)
+			VALUES (?, ?, ?, ?, 'skipped')`,
+	);
+	// A stuck job still runs: its task has a run in progress until it ends.
+	const inProgress = connection
+		.prepare(
+			`SELECT 1 FROM platform_jobs JOIN platform_task_runs ON platform_task_runs.id = platform_jobs.task_run
+				WHERE platform_task_runs.task = ? AND platform_jobs.state IN ('pending', 'running', 'stuck')`,
+		)
+		.pluck();
 	const endRun = connection.prepare(
 		`UPDATE platform_task_runs SET started_at = ?, finished_at = ?, result = ?, error = ?
 			WHERE id = ?`,
 	);
 
-	const nextAfter = (task: ScheduledTask, row: TaskRow | undefined, instant: number) =>
-		nextDailyOccurrence(instant, row?.time ?? task.frequency.at, zone);
+	/** The task's next run after `instant`, at the time the admin chose or else at its default time. */
+	const nextAfter = (task: ScheduledTask, row: TaskRow | undefined, instant: number) => {
+		const time = row?.time ?? task.frequency.at;
+		return task.frequency.every === "week"
+			? nextWeeklyOccurrence(instant, task.frequency.on, time, zone)
+			: nextDailyOccurrence(instant, time, zone);
+	};
 
 	/** The rows of the declared tasks; a declared task always has one after `sync`. */
 	const rows = () =>
@@ -99,13 +145,40 @@ export function createScheduler({
 			return row ? [{ task, row }] : [];
 		});
 
+	/** The most recent planned run due by `now`, from the task's next run: those before it were missed. */
+	const latestDue = (task: ScheduledTask, row: TaskRow, now: number) => {
+		let latest = row.next_at;
+		for (
+			let next = nextAfter(task, row, latest);
+			next <= now;
+			next = nextAfter(task, row, next)
+		)
+			latest = next;
+		return latest;
+	};
+
 	const runDue = connection.transaction((task: ScheduledTask, row: TaskRow, now: number) => {
+		const planned = latestDue(task, row, now);
 		moveNext.run(nextAfter(task, row, now), task.id);
+		const date = localDate(planned, zone);
+		// A task with a run in progress gets no other: this planned date stays in the log as skipped.
+		if (inProgress.get(task.id) !== undefined) {
+			insertSkipped.run(task.id, date, planned, now);
+			return;
+		}
 		// A run already recorded for this planned date is not created again.
-		const created = insertRun.run(task.id, localDate(row.next_at, zone), row.next_at);
+		const created = insertRun.run(task.id, date, planned);
 		if (created.changes !== 1) return;
 		enqueue({ kind: task.id, runAt: now, taskRun: Number(created.lastInsertRowid) });
 	});
+
+	/** A declared task and its row, created as `sync` would if the background has not started yet. */
+	const declared = (id: string) => {
+		const task = tasks.find((candidate) => candidate.id === id);
+		if (!task) throw new UnknownTaskError(id);
+		insertTask.run(id, nextAfter(task, undefined, clock()));
+		return { task, row: selectTask.get(id) as TaskRow };
+	};
 
 	return {
 		sync() {
@@ -137,7 +210,34 @@ export function createScheduler({
 				job.taskRun,
 			);
 		},
+
+		pause(id) {
+			const { row } = declared(id);
+			if (!row.paused) setState.run(row.time, 1, row.next_at, id);
+		},
+
+		resume(id) {
+			const { task, row } = declared(id);
+			if (row.paused) setState.run(row.time, 0, nextAfter(task, row, clock()), id);
+		},
+
+		setTime(id, time) {
+			const { task, row } = declared(id);
+			const chosen = { ...row, time };
+			// Computing the next run first refuses a time that is not HH:MM before anything is stored.
+			setState.run(time, row.paused, nextAfter(task, chosen, clock()), id);
+		},
 	};
+}
+
+/** The state of every task with a row, declared or not, by id. */
+export function readTaskStates(connection: Database.Database): readonly TaskState[] {
+	return connection
+		.prepare<[], { id: string; time: string | null; paused: number; nextAt: number }>(
+			"SELECT id, time, paused, next_at AS nextAt FROM platform_tasks ORDER BY id",
+		)
+		.all()
+		.map((row) => ({ ...row, paused: row.paused === 1 }));
 }
 
 /** Every run in the log, oldest first. */

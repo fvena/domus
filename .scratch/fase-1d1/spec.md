@@ -256,6 +256,14 @@ En la 1d1, todo trabajo es mantenimiento de la plataforma: no tiene actor ni pas
     - En `createTestPlatform` el segundo plano no arranca solo: la prueba llama a `background.start()`, como hace `apps/api`. Así las pruebas de la 1b y la 1c, que mueven el reloj días enteros, no ven limpiezas que no pidieron. La opción `tasks` declara tareas de prueba junto a las de la plataforma.
     - El planificador despierta como mucho cada minuto desde ya, aunque la señal de vida y `/health` son de la 06.
 
+- Decisiones de la tarea 02, tomadas al implementar:
+    - La frecuencia semanal se escribe `{ every: "week", on: "sunday", at: "02:30" }`, con el día de la semana en inglés.
+    - De lo perdido solo queda en el registro la ejecución que corre, la más reciente; las fechas intermedias no se anotan.
+    - Una fecha saltada porque la tarea tenía una ejecución pendiente, en curso o atascada queda con resultado «saltada», sin inicio y con su final en el instante en que se saltó.
+    - Pausar una tarea pausada o reanudar una que no lo está no cambia nada; en particular, reanudar no mueve la próxima ejecución. Volver a la hora por defecto es elegir «ninguna hora».
+    - Cambiar el estado de una tarea que el código no declara lanza `UnknownTaskError`, que la 05 traduce a «no encontrado». Si la tarea aún no tiene fila (el segundo plano no ha arrancado), cambiarla la crea como lo haría el arranque.
+    - Si cambia la hora por defecto de una tarea sin hora elegida, la próxima ejecución ya guardada se mantiene una vez; la siguiente ya usa la nueva hora.
+
 - Decisiones de la tarea 03, tomadas al implementar:
     - El margen antes de marcar un trabajo como atascado es de 10 s después de cancelarlo. El de la parada ordenada es de 5 s, por debajo de los 10 s que Docker espera antes de matar el contenedor.
     - Un error es definitivo si el trabajo lanza `PermanentJobError` o si su tipo no está declarado. En la 1d1 ningún trabajo tiene entrada ni actor; los trabajos que llamen a acciones (5b) traducirán sus errores a definitivos.

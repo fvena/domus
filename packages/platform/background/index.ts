@@ -42,6 +42,12 @@ export interface Background {
 	wake(): void;
 	/** Settles once no job is running, also those a job's end started. */
 	settled(): Promise<void>;
+	/** Pauses a declared task: it creates no run until it resumes. Throws {@link UnknownTaskError}. */
+	pause(task: string): void;
+	/** Resumes a declared task, its next run from now. Throws {@link UnknownTaskError}. */
+	resume(task: string): void;
+	/** Sets the local `HH:MM` the admin chose for a declared task, or null for its default. */
+	setTime(task: string, time: string | null): void;
 }
 
 export function createBackground({
@@ -125,6 +131,22 @@ export function createBackground({
 
 		wake,
 
+		// Each change wakes the background, so it waits for the task's new next run.
+		pause(task) {
+			scheduler.pause(task);
+			wake();
+		},
+
+		resume(task) {
+			scheduler.resume(task);
+			wake();
+		},
+
+		setTime(task, time) {
+			scheduler.setTime(task, time);
+			wake();
+		},
+
 		async settled() {
 			for (;;) {
 				const running = engine.inFlight();
@@ -136,7 +158,14 @@ export function createBackground({
 }
 
 export { controlledTimer, type ControlledTimer, realTimer, type Timer } from "./timer";
-export { readTaskRuns, type ScheduledTask, type TaskRun } from "./scheduler";
+export {
+	readTaskRuns,
+	readTaskStates,
+	type ScheduledTask,
+	type TaskRun,
+	type TaskState,
+	UnknownTaskError,
+} from "./scheduler";
 export {
 	type JobContext,
 	type JobKind,

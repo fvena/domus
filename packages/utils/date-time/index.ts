@@ -14,12 +14,61 @@ export function localDate(instant: number, zone: string): string {
 	return format(new TZDate(instant, zone), "yyyy-MM-dd");
 }
 
+/** A day of the week, as the clocks of a zone name it. */
+export type Weekday =
+	| "monday"
+	| "tuesday"
+	| "wednesday"
+	| "thursday"
+	| "friday"
+	| "saturday"
+	| "sunday";
+
+/** The weekdays in the order of `Date.getDay`: Sunday first. */
+const WEEKDAYS: readonly Weekday[] = [
+	"sunday",
+	"monday",
+	"tuesday",
+	"wednesday",
+	"thursday",
+	"friday",
+	"saturday",
+];
+
 /**
  * The first instant strictly after `after` when the clocks of `zone` show `time` (`HH:MM`), once per local day.
  * A time that does not exist that day (the clocks jump over it) is the first valid instant after it; a time that
  * happens twice (the clocks go back over it) is its first appearance.
  */
 export function nextDailyOccurrence(after: number, time: string, zone: string): number {
+	return nextOccurrence(after, time, zone, () => true);
+}
+
+/**
+ * The first instant strictly after `after` when the clocks of `zone` show `time` (`HH:MM`) on `day`, once per
+ * week, with the same rules as {@link nextDailyOccurrence} around a change of the clocks.
+ */
+export function nextWeeklyOccurrence(
+	after: number,
+	day: Weekday,
+	time: string,
+	zone: string,
+): number {
+	const weekday = WEEKDAYS.indexOf(day);
+	if (weekday === -1) throw new Error(`a day of the week is a weekday in English, got "${day}"`);
+	return nextOccurrence(after, time, zone, (date) => date.getUTCDay() === weekday);
+}
+
+/**
+ * The first instant strictly after `after` when the clocks of `zone` show `time` on a local day that `includes`,
+ * looking at most a week ahead. `includes` gets the local day at midnight, written as if it were UTC.
+ */
+function nextOccurrence(
+	after: number,
+	time: string,
+	zone: string,
+	includes: (day: Date) => boolean,
+): number {
 	const match = TIME.exec(time);
 	if (!match)
 		throw new Error(`a time of day is written HH:MM, from 00:00 to 23:59, got "${time}"`);
@@ -27,19 +76,23 @@ export function nextDailyOccurrence(after: number, time: string, zone: string): 
 	const minute = Number(match[2]);
 
 	const today = new TZDate(after, zone);
-	// The occurrence of the local day of `after` may have passed; the next day's never has.
-	for (let day = 0; day <= 1; day++) {
+	// The occurrence of the local day of `after` may have passed; one a week later never has.
+	for (let day = 0; day <= 7; day++) {
+		const date = new Date(
+			Date.UTC(today.getFullYear(), today.getMonth(), today.getDate() + day),
+		);
+		if (!includes(date)) continue;
 		const wall = Date.UTC(
-			today.getFullYear(),
-			today.getMonth(),
-			today.getDate() + day,
+			date.getUTCFullYear(),
+			date.getUTCMonth(),
+			date.getUTCDate(),
 			hour,
 			minute,
 		);
 		const instant = firstInstantAt(wall, zone);
 		if (instant > after) return instant;
 	}
-	throw new Error("unreachable: the next local day always has an occurrence");
+	throw new Error("unreachable: every week has an occurrence");
 }
 
 /**
