@@ -17,7 +17,7 @@ describe("api", () => {
 	it("passes the health check to the door", async () => {
 		const res = await app.request("/health");
 		expect(res.status).toBe(200);
-		expect(await res.json()).toEqual({ status: "ok" });
+		expect(await res.json()).toEqual({ status: "ok", background: { status: "ok" } });
 	});
 
 	it("passes RPC calls to the door", async () => {

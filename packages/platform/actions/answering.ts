@@ -91,6 +91,8 @@ export function answeringWith({
 						: { via: pending.origin.via }),
 				});
 				const { operation } = pending;
+				// Emptied only once it expired, which `reachable` already answered.
+				if (operation === undefined) throw internalError();
 				if ("undo" in operation) {
 					const outcome = undo(
 						{

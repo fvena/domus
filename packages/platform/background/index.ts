@@ -12,6 +12,16 @@ import type { Timer } from "./timer";
 
 /** The longest the background sleeps without waking, even with nothing due. */
 const HEARTBEAT = 60 * 1000;
+/** How long the scheduler may go without a sign of life before the watcher reports it. */
+export const SILENCE_THRESHOLD = 5 * 60 * 1000;
+
+/**
+ * What the watcher says of the background, for `/health`: only a state and its reason, nothing personal.
+ * `scheduler-silent`: no wake for more than {@link SILENCE_THRESHOLD}. `lane-stuck`: a lane holds a stuck job.
+ */
+export type BackgroundHealth =
+	| { readonly status: "ok" }
+	| { readonly status: "degraded"; readonly reason: "scheduler-silent" | "lane-stuck" };
 
 export interface BackgroundOptions {
 	readonly connection: Database.Database;
@@ -54,6 +64,8 @@ export interface Background {
 	state(task: string): { readonly time: string | null; readonly paused: boolean };
 	/** Each declared task as the admin sees it. Reads only. */
 	overview(): readonly TaskOverview[];
+	/** The watcher: degraded while the scheduler is silent past the threshold or a lane is stuck, else ok. */
+	health(): BackgroundHealth;
 }
 
 export function createBackground({
@@ -77,6 +89,9 @@ export function createBackground({
 
 	let state: "new" | "started" | "stopping" | "stopped" = "new";
 	let cancelWait: (() => void) | undefined;
+	// The scheduler's sign of life, in memory: the instant it last woke. It counts from the creation, so a
+	// background that never starts falls silent too.
+	let lastBeat = clock();
 
 	const engine = createEngine({
 		connection,
@@ -95,6 +110,7 @@ export function createBackground({
 
 	function wake(): void {
 		if (state !== "started") return;
+		lastBeat = clock();
 		cancelWait?.();
 		scheduler.enqueueDue();
 		engine.pump();
@@ -172,6 +188,13 @@ export function createBackground({
 		state: (task) => scheduler.state(task),
 
 		overview: () => scheduler.overview(),
+
+		health() {
+			if (clock() - lastBeat > SILENCE_THRESHOLD)
+				return { status: "degraded", reason: "scheduler-silent" };
+			if (engine.stuck()) return { status: "degraded", reason: "lane-stuck" };
+			return { status: "ok" };
+		},
 
 		async settled() {
 			for (;;) {

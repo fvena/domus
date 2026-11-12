@@ -273,6 +273,12 @@ En la 1d1, todo trabajo es mantenimiento de la plataforma: no tiene actor ni pas
     - Mientras un trabajo está atascado, su ejecución sigue sin resultado; al terminar recibe el suyo. Si un reinicio lo recupera, vuelve a pendiente como uno en ejecución.
     - Si un trabajo cancelado por la parada termina después del margen, su final no se escribe: queda en ejecución en la base hasta el siguiente arranque.
 
+- Decisiones de la tarea 04, tomadas al implementar:
+    - Un lote cambia como mucho 500 filas. Tras un lote lleno, la limpieza cede el turno al bucle de eventos antes del siguiente, así la API, el tiempo máximo y la parada llegan entre lotes; después comprueba la señal.
+    - La antigüedad de un trabajo y de una ejecución se mide desde su final (`finished_at`), y el límite entra: un trabajo que terminó hace justo 30 días se purga. Una ejecución sin resultado no se purga nunca, y una a la que aún apunta un trabajo espera a que se purgue ese trabajo.
+    - «Comprobantes terminados» son los de estado `ended` (cambio de contraseña, aparato revocado). Uno emitido cuya sesión se revocó se borra al pasar su caducidad, cinco minutos después como mucho.
+    - Una tarea pausada más de 90 días se queda sin ejecuciones en la lista: la purga no guarda la última de cada tarea.
+
 - Decisiones de la tarea 05, tomadas al implementar:
     - Las rutas son `tasks/list`, `tasks/setTime`, `tasks/pause`, `tasks/resume` y `tasks/launch`; en el camino de las acciones, `platform.listTasks`, `platform.setTaskTime`, `platform.pauseTask`, `platform.resumeTask` y `platform.launchTask`, que es lo que nombra un comprobante. La hora es `HH:MM`, y `null` vuelve a la de por defecto.
     - La última ejecución de la lista es la última que anotó el registro, sea cual sea su resultado (también «saltada»), con `manual`, sus instantes, su resultado (vacío mientras corre) y su mensaje de error para quien opera. La lista solo muestra las tareas que el código declara, en su orden.
@@ -281,6 +287,12 @@ En la 1d1, todo trabajo es mantenimiento de la plataforma: no tiene actor ni pas
     - Lanzar con una ejecución pendiente, en curso o atascada responde `CONFLICT` con el motivo `task-busy`.
     - Un cambio hecho dentro de la transacción de una acción despierta el segundo plano cuando esa transacción ha terminado: ningún trabajo empieza dentro de una transacción que aún puede revertirse.
     - Ninguna tarea declara todavía si se puede lanzar a mano: en la 1d1 todas se pueden. El campo llega con la primera que no deba.
+
+- Decisiones de la tarea 06, tomadas al implementar:
+    - `/health` responde `{ "status": "ok", "background": { "status": "ok" } }`, o `background` con `{ "status": "degraded", "reason": "scheduler-silent" | "lane-stuck" }`. El `status` de fuera sigue siendo el del proceso, y Docker solo mira el 200. Los motivos van en inglés, como códigos para herramientas de vigilancia. Si se dan los dos, se dice el del planificador.
+    - La señal de vida es el instante del último despertar. El umbral es de 5 minutos: degradado a partir de 5 min y 1 ms sin señal. La señal cuenta desde que se crea el segundo plano, así que uno que nunca arranca también acaba degradado.
+    - El carril atascado se lee del motor en memoria, no de `platform_jobs`: la respuesta no toca la base y deja de ser `degraded` en cuanto el trabajo termina.
+    - El mando simula un planificador callado moviendo el reloj sin despertar: `clock.advance(ms, { wake: false })` y `clock.set(instant, { wake: false })`. El siguiente movimiento que despierta trae la señal de vuelta.
 
 - La limpieza cambia lo que guarda la base, no lo que responde la API: las pruebas de la caducidad de la 1b y la 1c tienen que seguir pasando sin cambios después de limpiar.
 
