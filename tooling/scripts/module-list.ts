@@ -1,6 +1,6 @@
-// The fixed module lists of the programs (ADR 0021), written by `pnpm modules:generate` and kept in git. Each
-// list imports one entry of every module that is not testOnly, in the order of their ids. Only apps/api has
-// one today; the web's becomes a second `ModuleListOutput` with its first module screen.
+// The fixed module list of apps/api (ADR 0021), written by `pnpm modules:generate` and kept in git. It imports
+// the server entry of every module that is not testOnly, in the order of their ids. The web gets its own list
+// with its first module screen.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -10,25 +10,8 @@ import { checkModules, type ModuleDefinition } from "@domus/module-sdk";
 import { formatWithOxfmt } from "./format";
 import { moduleFolders } from "./generated";
 
-/** One list a program imports. */
-export interface ModuleListOutput {
-	/** Where it is written, from the repository root; never inside a `generated/` folder, which dependency-cruiser skips. */
-	readonly file: string;
-	/** The entry of each module it imports: `<package>/<entry>`. */
-	readonly entry: string;
-	/** The import of the list's type, and the type itself. */
-	readonly typeImport: string;
-	readonly type: string;
-}
-
-export const apiModuleList: ModuleListOutput = {
-	file: "apps/api/src/modules.ts",
-	entry: "server",
-	typeImport: 'import type { PlatformOptions } from "@domus/platform";',
-	type: 'PlatformOptions["modules"]',
-};
-
-export const moduleListOutputs: readonly ModuleListOutput[] = [apiModuleList];
+/** Where the list is written, from the repository root; never inside a `generated/` folder, which dependency-cruiser skips. */
+export const API_MODULE_LIST = "apps/api/src/modules.ts";
 
 /** A module found in `modules/`: its folder, its package and the definition its server entry exports. */
 export interface FoundModule {
@@ -59,13 +42,10 @@ export async function loadModules(root: string): Promise<FoundModule[]> {
 }
 
 /**
- * The source of one module list, formatted with Oxfmt. Throws when a module's id is not its folder's name,
- * or when the modules would not pass `checkModules`.
+ * The source of the module list of apps/api, formatted with Oxfmt. Throws when a module's id is not its
+ * folder's name, or when the modules would not pass `checkModules`.
  */
-export function moduleListSource(
-	modules: readonly FoundModule[],
-	output: ModuleListOutput,
-): string {
+export function moduleListSource(modules: readonly FoundModule[]): string {
 	for (const { folder, definition } of modules)
 		if (definition.id !== folder)
 			throw new Error(
@@ -80,13 +60,11 @@ export function moduleListSource(
 	const source = [
 		"// Written by `pnpm modules:generate` (ADR 0021). Do not edit: add or change a module and generate.",
 		"",
-		output.typeImport,
-		...listed.map(
-			(module) => `import ${name(module)} from "${module.packageName}/${output.entry}";`,
-		),
+		'import type { PlatformOptions } from "@domus/platform";',
+		...listed.map((module) => `import ${name(module)} from "${module.packageName}/server";`),
 		"",
-		`export const modules: ${output.type} = [${listed.map(name).join(", ")}];`,
+		`export const modules: PlatformOptions["modules"] = [${listed.map(name).join(", ")}];`,
 		"",
 	].join("\n");
-	return formatWithOxfmt(source, output.file);
+	return formatWithOxfmt(source, API_MODULE_LIST);
 }

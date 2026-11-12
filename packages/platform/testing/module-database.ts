@@ -3,7 +3,7 @@
 import type { ModuleDefinition, ModuleSchema } from "@domus/module-sdk";
 import { type BetterSQLite3Database, drizzle } from "drizzle-orm/better-sqlite3";
 
-import { connectionOf, modulesOf, type Platform } from "./platform";
+import { connectionOf, modulesOf, type Platform } from "../platform";
 
 export type ModuleDatabase<TSchema extends ModuleSchema> = BetterSQLite3Database<TSchema>;
 

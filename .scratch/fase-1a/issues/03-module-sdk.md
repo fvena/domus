@@ -13,6 +13,9 @@ La forma mínima de un módulo en la 1a, sin contexto ni cliente de base de dato
 - `@domus/module-sdk/db` (un punto de entrada aparte en `package.json`) reexporta de Drizzle lo que un módulo necesita para declarar tablas (columnas de `sqlite-core`, `sql`) y añade:
     - `moduleTables(id)`, que devuelve `{ table }` y pone el prefijo `<id>_` a cada tabla;
     - `id()`, la columna `INTEGER PRIMARY KEY AUTOINCREMENT`.
+
+    Nota de la revisión: la tarea 06 añadió `eq`, que ya usa una prueba de almacenamiento de `probe`; sin él, la prueba tendría que importar `drizzle-orm`, que la regla prohíbe. Se queda.
+
 - Una comprobación de definiciones que usarán `createPlatform` (tarea 04) y el generador de la lista (tarea 07). Rechaza, con un mensaje que nombra el módulo:
     - un id que no cumple `[a-z][a-z0-9]*`;
     - el id `platform`;

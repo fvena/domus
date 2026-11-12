@@ -202,6 +202,17 @@ module.exports = {
 			to: { path: "^packages/utils/", pathNot: "^packages/utils/$1/" },
 		},
 		{
+			name: "only-test-utils-reaches-platform-testing",
+			comment:
+				"@domus/platform/testing hands out a module's raw Drizzle client, outside authorization: only test-utils takes it, for dbFor (ADR 0021).",
+			severity: "error",
+			from: {
+				path: "^(apps|packages|modules)/",
+				pathNot: "^packages/(test-utils|platform)/",
+			},
+			to: { path: "^packages/platform/testing/" },
+		},
+		{
 			name: "only-tests-import-test-utils",
 			severity: "error",
 			from: {

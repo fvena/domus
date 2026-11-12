@@ -7,11 +7,10 @@ import {
 	createHttpHandler,
 	createPlatform,
 	type HttpHandler,
-	type ModuleDatabase,
-	moduleDatabase,
 	type Platform,
 	type PlatformOptions,
 } from "@domus/platform";
+import { type ModuleDatabase, moduleDatabase } from "@domus/platform/testing";
 
 export interface TestPlatformOptions {
 	/** The modules under test: tests import them and pass them here; test-utils imports none. */

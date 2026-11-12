@@ -12,7 +12,7 @@ La lista fija de módulos de `api`, generada y guardada en git, y las pruebas qu
 - `pnpm modules:generate` escribe la lista de `api`, por ejemplo `apps/api/src/modules.ts`, nunca dentro de una carpeta `generated/` (dependency-cruiser las excluye). Importa el `server/index.ts` de cada módulo de `modules/` y exporta las definiciones en un orden estable (alfabético por id).
 - Deja fuera los módulos `testOnly` antes de escribir las importaciones: `probe` no aparece en el fichero. Comprueba que el id de cada definición coincide con su carpeta.
 - Formateado con Oxfmt; generar dos veces no cambia nada.
-- Solo la lista de `api`, con el código escrito para que la de la web sea otra salida cuando llegue.
+- Solo la lista de `api`, con su fichero, su entrada y su tipo fijos en el código. El generador queda sencillo de ampliar cuando llegue la web, sin un sistema de salidas configurable antes de tiempo.
 - Añadir `pnpm modules:generate` al paso de la CI de la tarea 05, antes de `git status --porcelain`.
 - Pruebas de `tooling/scripts` sobre los módulos reales de `modules/`, `probe` incluido:
     - la lista regenerada en memoria es igual al fichero, sin escribirlo;

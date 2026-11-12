@@ -3,5 +3,4 @@
 // the platform and the modules (ADR 0021); the door takes the platform and the modules. Its contracts are
 // a separate entry: @domus/platform/contracts.
 export { createHttpHandler, type HttpHandler, type HttpHandlerOptions } from "./http";
-export { type ModuleDatabase, moduleDatabase } from "./module-database";
 export { createPlatform, type Platform, type PlatformOptions } from "./platform";

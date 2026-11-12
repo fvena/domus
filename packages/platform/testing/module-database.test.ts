@@ -2,8 +2,8 @@ import { defineModule } from "@domus/module-sdk";
 import { id, moduleTables, text } from "@domus/module-sdk/db";
 import { describe, expect, it } from "vitest";
 
+import { createPlatform } from "../platform";
 import { moduleDatabase } from "./module-database";
-import { createPlatform } from "./platform";
 
 const { table } = moduleTables("notes");
 const items = table("items", { id: id(), body: text().notNull() });

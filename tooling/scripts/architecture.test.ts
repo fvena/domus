@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { cruise, type ICruiseResult } from "dependency-cruiser";
 import { describe, expect, it } from "vitest";
 
-import { apiModuleList } from "./module-list";
+import { API_MODULE_LIST } from "./module-list";
 
 const require = createRequire(import.meta.url);
 const config = require("../../.dependency-cruiser.cjs");
@@ -69,6 +69,7 @@ describe("dependency rules", () => {
 			"only-package-exports: apps/api/src/bad.ts -> modules/lists/server/internal.ts",
 			"only-package-exports: apps/api/src/bad.ts -> packages/platform/src/internal.ts",
 			"only-package-exports: apps/api/src/modules.ts -> modules/lists/server/internal.ts",
+			"only-test-utils-reaches-platform-testing: apps/api/src/uses-platform-testing.ts -> packages/platform/testing/index.ts",
 			"only-tests-import-test-utils: apps/api/src/uses-test-utils.ts -> packages/test-utils/src/index.ts",
 			"packages-never-import-modules: packages/platform/src/bad.ts -> modules/lists/server/index.ts",
 			"platform-contracts-stand-alone: packages/platform/contracts/bad.ts -> packages/platform/http/index.ts",
@@ -87,8 +88,8 @@ describe("dependency rules", () => {
 	// The fixture's apps/api/src/modules.ts proves the rule fires on a list of that shape; this proves the
 	// real list is not excluded (it would be inside a generated/ folder) and so `pnpm lint` checks it.
 	it("check the committed module list of apps/api", async () => {
-		const output = await cruiseWithRules(root, [apiModuleList.file]);
-		expect(output.modules.map((module) => module.source)).toContain(apiModuleList.file);
+		const output = await cruiseWithRules(root, [API_MODULE_LIST]);
+		expect(output.modules.map((module) => module.source)).toContain(API_MODULE_LIST);
 		expect(output.summary.violations).toEqual([]);
 	});
 });
