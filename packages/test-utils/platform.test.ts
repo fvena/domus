@@ -3,9 +3,72 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { defineModule } from "@domus/module-sdk";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { readAction } from "@domus/module-sdk/contracts";
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it } from "vitest";
+import { z } from "zod";
 
-import { createTestPlatform } from "./platform";
+import { createTestPlatform, TEST_START } from "./platform";
+
+/** A module whose only read echoes the actor and the instant its handler receives. */
+const clockwork = defineModule({
+	id: "clockwork",
+	schema: {},
+	migrations: [],
+	contract: {
+		whoAndWhen: readAction().output(
+			z.object({
+				actor: z.object({ account: z.string(), via: z.string().optional() }),
+				now: z.number(),
+			}),
+		),
+		double: readAction()
+			.input(z.object({ value: z.number() }))
+			.output(z.number()),
+	},
+	actions: {
+		whoAndWhen: ({ actor, now }) => ({ actor, now }),
+		double: ({ input }) => input.value * 2,
+	},
+});
+
+describe("createTestPlatform with actions", () => {
+	it("hands handlers a clock that moves only when the test moves it", async () => {
+		await using test = createTestPlatform({ modules: [clockwork] });
+		const ana = test.actor("ana");
+		expect(test.invoke(ana, "clockwork.whoAndWhen").now).toBe(TEST_START);
+
+		test.clock.advance(1500);
+		expect(test.invoke(ana, "clockwork.whoAndWhen").now).toBe(TEST_START + 1500);
+
+		test.clock.set(Date.UTC(2027, 0, 1));
+		expect(test.invoke(ana, "clockwork.whoAndWhen").now).toBe(Date.UTC(2027, 0, 1));
+		expect(test.clock.now()).toBe(Date.UTC(2027, 0, 1));
+	});
+
+	it("makes actors of one account with and without via, and with different via", async () => {
+		await using test = createTestPlatform({ modules: [clockwork] });
+		const seen = (via?: string) =>
+			test.invoke(test.actor("ana", { via }), "clockwork.whoAndWhen").actor;
+
+		expect(seen()).toEqual({ account: "ana" });
+		expect(seen("kira")).toEqual({ account: "ana", via: "kira" });
+		expect(seen("panel")).toEqual({ account: "ana", via: "panel" });
+	});
+
+	it("types invoke with the names, inputs and outputs of the modules it receives", async () => {
+		await using test = createTestPlatform({ modules: [clockwork] });
+		const ana = test.actor("ana");
+
+		expectTypeOf(test.invoke(ana, "clockwork.double", { value: 2 })).toEqualTypeOf<number>();
+		expect(test.invoke(ana, "clockwork.double", { value: 2 })).toBe(4);
+		// @ts-expect-error: no module received declares this action.
+		expect(() => test.invoke(ana, "clockwork.triple", { value: 2 })).toThrow();
+		// @ts-expect-error: the input must match the contract.
+		expect(() => test.invoke(ana, "clockwork.double", { value: "2" })).toThrow();
+		// @ts-expect-error: an action with input needs it.
+		expect(() => test.invoke(ana, "clockwork.double")).toThrow();
+	});
+});
 
 describe("createTestPlatform", () => {
 	it("runs in memory by default and answers through the door", async () => {

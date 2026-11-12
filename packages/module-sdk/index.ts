@@ -1,10 +1,21 @@
-// The only part of platform a module may use (ADR 0021). Phase 1a brings defineModule and, in
-// @domus/module-sdk/db, prefixed tables over Drizzle; each later subphase adds its piece.
+// The only part of platform a module may use (ADR 0021, ADR 0022). defineModule takes the tables, migrations,
+// contract and actions of a module; @domus/module-sdk/db offers prefixed tables over Drizzle and
+// @domus/module-sdk/contracts the pure helpers of a contract. A handler's context is the only way a module gets
+// its database: nothing here hands one out. Each later subphase adds its piece.
+export type {
+	ActionContext,
+	ActionHandler,
+	ActionInput,
+	ActionOutput,
+	Actor,
+	ModuleActions,
+	ModuleDatabase,
+	ModuleSchema,
+} from "./actions";
 export {
 	checkModules,
 	defineModule,
 	type ModuleDefinition,
 	type ModuleMigration,
-	type ModuleSchema,
 	PLATFORM_ID,
 } from "./module";

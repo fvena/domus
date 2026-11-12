@@ -17,6 +17,7 @@
 		"@domus/tsconfig": "workspace:*",
 		"@types/node": "catalog:",
 		"typescript": "catalog:",
-		"vitest": "catalog:"
+		"vitest": "catalog:",
+		"zod": "catalog:"
 	}
 }

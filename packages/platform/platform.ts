@@ -1,10 +1,13 @@
-// The platform as a whole (ADR 0021): what createPlatform opens at start and close releases at stop.
-// It checks the module definitions, opens SQLite and brings its schema up to date before anything uses it.
+// The platform as a whole (ADR 0021, ADR 0022): what createPlatform opens at start and close releases at stop.
+// It checks the module definitions, opens SQLite and brings its schema up to date before anything uses it, and
+// runs the modules' actions with the production authorizer, which in phase 1b denies everything.
 import { isAbsolute } from "node:path";
 
 import { checkModules, type ModuleDefinition, PLATFORM_ID } from "@domus/module-sdk";
 import Database from "better-sqlite3";
 
+import { type Actions, type Clock, createActions } from "./actions";
+import { type Authorizer, denyEverything } from "./authorization";
 import { migrations } from "./migrations";
 import { migrate } from "./migrator";
 
@@ -22,16 +25,37 @@ export interface Platform {
 	close(): void;
 }
 
+/** What decides and what tells the time. Production fixes both; only the testing entry chooses them. */
+export interface PlatformRuntime {
+	readonly authorizer: Authorizer;
+	readonly clock: Clock;
+}
+
 const IN_MEMORY = ":memory:";
 
-/** The connection and modules behind each platform, kept out of its public shape: only platform reaches them. */
+/** The connection, modules and actions behind each platform, kept out of its public shape: only platform reaches them. */
 const internals = new WeakMap<
 	Platform,
-	{ readonly db: Database.Database; readonly modules: readonly ModuleDefinition[] }
+	{
+		readonly db: Database.Database;
+		readonly modules: readonly ModuleDefinition[];
+		readonly actions: Actions;
+	}
 >();
 
-/** Opens SQLite and applies the pending migrations. On any failure it closes the connection and throws. */
+/**
+ * Opens SQLite and applies the pending migrations. On any failure it closes the connection and throws. It
+ * takes no authorizer: in phase 1b every action is denied.
+ */
 export function createPlatform({ databaseFile, modules }: PlatformOptions): Platform {
+	return openPlatform({ databaseFile, modules }, { authorizer: denyEverything, clock: Date.now });
+}
+
+/** createPlatform with a given runtime. Inside platform only; the testing entry hands it to test-utils. */
+export function openPlatform(
+	{ databaseFile, modules }: PlatformOptions,
+	{ authorizer, clock }: PlatformRuntime,
+): Platform {
 	if (databaseFile !== IN_MEMORY && !isAbsolute(databaseFile)) {
 		throw new Error(
 			`databaseFile must be an absolute path or ":memory:", got "${databaseFile}"`,
@@ -63,7 +87,8 @@ export function createPlatform({ databaseFile, modules }: PlatformOptions): Plat
 			if (db.open) db.close();
 		},
 	};
-	internals.set(platform, { db, modules });
+	const actions = createActions({ connection: db, modules, authorizer, clock });
+	internals.set(platform, { db, modules, actions });
 	return platform;
 }
 
@@ -81,4 +106,9 @@ export function connectionOf(platform: Platform): Database.Database {
 /** The modules a platform received, in their order. Inside platform only. */
 export function modulesOf(platform: Platform): readonly ModuleDefinition[] {
 	return internalsOf(platform).modules;
+}
+
+/** The actions of a platform's modules. Inside platform only: no door serves them until phase 1c. */
+export function actionsOf(platform: Platform): Actions {
+	return internalsOf(platform).actions;
 }
