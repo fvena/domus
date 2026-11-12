@@ -12,18 +12,19 @@ The project is built in phases. `docs/plan.md` is the only source of the plan: w
 
 Node 22 (`.nvmrc`) with corepack, which installs the pnpm `packageManager` names. Copy `.env.local.example` to `.env.local`; the root scripts load it through dotenv-cli. `pnpm install` turns on the pre-commit hook (`.githooks/pre-commit`: secret scan with gitleaks, lint, format, types); if it is off, run `pnpm run prepare`. The repository is public: the secret scan needs `gitleaks` (`brew install gitleaks`) or Docker running, and blocks the commit otherwise.
 
-| Command                             | Purpose                                      |
-| ----------------------------------- | -------------------------------------------- |
-| `pnpm install`                      | Install; packages younger than one day wait  |
-| `pnpm dev`                          | Every program in watch mode (web on Vite)    |
-| `pnpm build`                        | Build the apps                               |
-| `pnpm lint` / `pnpm lint:fix`       | Oxlint with types, then the dependency rules |
-| `pnpm format` / `pnpm format:check` | Write / check Oxfmt formatting               |
-| `pnpm type-check`                   | tsc (tsgo) and vue-tsc in every package      |
-| `pnpm test`                         | Vitest in every package that has tests       |
-| `pnpm db:generate`                  | Migrations and `migrations.ts` of modules    |
-| `pnpm accounts`                     | Create an account or change its password     |
-| `docker compose up -d --build`      | The three containers as on the Pi            |
+| Command                             | Purpose                                       |
+| ----------------------------------- | --------------------------------------------- |
+| `pnpm install`                      | Install; packages younger than one day wait   |
+| `pnpm dev`                          | Every program in watch mode (web on Vite)     |
+| `pnpm build`                        | Build the apps                                |
+| `pnpm lint` / `pnpm lint:fix`       | Oxlint with types, then the dependency rules  |
+| `pnpm format` / `pnpm format:check` | Write / check Oxfmt formatting                |
+| `pnpm type-check`                   | tsc (tsgo) and vue-tsc in every package       |
+| `pnpm test`                         | Vitest in every package that has tests        |
+| `pnpm check`                        | Every gate, quietly; generators leave no diff |
+| `pnpm db:generate`                  | Migrations and `migrations.ts` of modules     |
+| `pnpm accounts`                     | Create an account or change its password      |
+| `docker compose up -d --build`      | The three containers as on the Pi             |
 
 Deploying to and checking the Raspberry Pi: `docs/despliegue.md`.
 
@@ -31,7 +32,7 @@ Required gates:
 
 1. After every meaningful change, run `pnpm format` and `pnpm lint`.
 2. Before every commit, run `pnpm type-check`.
-3. Run the tests before considering a change complete.
+3. A change is complete when `pnpm check` passes.
 
 ## Where a new feature goes
 
