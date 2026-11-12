@@ -1,15 +1,23 @@
 // The platform as a whole (ADR 0021): what createPlatform opens at start and close releases at stop.
-// Today it holds the SQLite connection; the migrations (phase 1a) and the modules come next.
+// It checks the module definitions, opens SQLite and brings its schema up to date before anything uses it.
 import { isAbsolute } from "node:path";
 
+import { checkModules, type ModuleDefinition } from "@domus/module-sdk";
 import Database from "better-sqlite3";
+
+import { migrations, PLATFORM_MODULE } from "./migrations";
+import { migrate } from "./migrator";
 
 export interface PlatformOptions {
 	/** An absolute path to the SQLite file, or `":memory:"` for tests. */
 	readonly databaseFile: string;
+	/** The modules, in the order their migrations run, after the platform's own. */
+	readonly modules: readonly ModuleDefinition[];
 }
 
 export interface Platform {
+	/** How many migrations this start applied, for the log of `apps/api`. */
+	readonly appliedMigrations: number;
 	/** Closes the SQLite connection. Safe to call more than once. */
 	close(): void;
 }
@@ -19,14 +27,17 @@ const IN_MEMORY = ":memory:";
 /** The connection behind each platform, kept out of its public shape: only platform reaches it. */
 const connections = new WeakMap<Platform, Database.Database>();
 
-export function createPlatform({ databaseFile }: PlatformOptions): Platform {
+/** Opens SQLite and applies the pending migrations. On any failure it closes the connection and throws. */
+export function createPlatform({ databaseFile, modules }: PlatformOptions): Platform {
 	if (databaseFile !== IN_MEMORY && !isAbsolute(databaseFile)) {
 		throw new Error(
 			`databaseFile must be an absolute path or ":memory:", got "${databaseFile}"`,
 		);
 	}
+	checkModules(modules);
 
 	const db = new Database(databaseFile);
+	let appliedMigrations: number;
 	try {
 		if (databaseFile !== IN_MEMORY) {
 			const mode = db.pragma("journal_mode = WAL", { simple: true });
@@ -34,12 +45,17 @@ export function createPlatform({ databaseFile }: PlatformOptions): Platform {
 				throw new Error(`could not turn on WAL for ${databaseFile}: ${String(mode)}`);
 		}
 		db.pragma("foreign_keys = ON");
+		appliedMigrations = migrate(db, [
+			{ module: PLATFORM_MODULE, migrations },
+			...modules.map((module) => ({ module: module.id, migrations: module.migrations })),
+		]);
 	} catch (error) {
 		db.close();
 		throw error;
 	}
 
 	const platform: Platform = {
+		appliedMigrations,
 		close: () => {
 			if (db.open) db.close();
 		},

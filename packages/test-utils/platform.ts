@@ -7,9 +7,12 @@ import {
 	createPlatform,
 	type HttpHandler,
 	type Platform,
+	type PlatformOptions,
 } from "@domus/platform";
 
 export interface TestPlatformOptions {
+	/** The modules under test: tests import them and pass them here; test-utils imports none. */
+	readonly modules: PlatformOptions["modules"];
 	/**
 	 * Where the database lives. Unset: in memory. `true`: a file in a temporary folder, removed on
 	 * close. A path: that file, kept on close, for tests that open the same data again.
@@ -27,8 +30,11 @@ export interface TestPlatform extends AsyncDisposable {
 	close(): void;
 }
 
-/** A real platform for tests: in memory by default, or on a file. Use it with `await using`. */
-export function createTestPlatform({ file }: TestPlatformOptions = {}): TestPlatform {
+/**
+ * A real platform for tests, with the migrations of the platform and of `modules` applied: in memory by
+ * default, or on a file. Use it with `await using`.
+ */
+export function createTestPlatform({ modules, file }: TestPlatformOptions): TestPlatform {
 	let tempDir: string | undefined;
 	let databaseFile = file ?? ":memory:";
 	if (databaseFile === true) {
@@ -38,7 +44,7 @@ export function createTestPlatform({ file }: TestPlatformOptions = {}): TestPlat
 
 	let platform: Platform;
 	try {
-		platform = createPlatform({ databaseFile });
+		platform = createPlatform({ databaseFile, modules });
 	} catch (error) {
 		if (tempDir) rmSync(tempDir, { recursive: true, force: true });
 		throw error;

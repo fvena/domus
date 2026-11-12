@@ -15,7 +15,7 @@ describe("createPlatform", () => {
 	afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 	it("opens a file in WAL mode with foreign keys on", () => {
-		const platform = createPlatform({ databaseFile: join(dir, "domus.db") });
+		const platform = createPlatform({ databaseFile: join(dir, "domus.db"), modules: [] });
 		const db = connectionOf(platform);
 		expect(db.pragma("journal_mode", { simple: true })).toBe("wal");
 		expect(db.pragma("foreign_keys", { simple: true })).toBe(1);
@@ -24,13 +24,13 @@ describe("createPlatform", () => {
 
 	it("keeps what was written after closing and opening the same file again", () => {
 		const databaseFile = join(dir, "domus.db");
-		const first = createPlatform({ databaseFile });
+		const first = createPlatform({ databaseFile, modules: [] });
 		connectionOf(first).exec(
 			"CREATE TABLE notes (body TEXT); INSERT INTO notes VALUES ('milk');",
 		);
 		first.close();
 
-		const second = createPlatform({ databaseFile });
+		const second = createPlatform({ databaseFile, modules: [] });
 		expect(connectionOf(second).prepare("SELECT body FROM notes").pluck().all()).toEqual([
 			"milk",
 		]);
@@ -38,14 +38,14 @@ describe("createPlatform", () => {
 	});
 
 	it("opens in memory with foreign keys on", () => {
-		const platform = createPlatform({ databaseFile: ":memory:" });
+		const platform = createPlatform({ databaseFile: ":memory:", modules: [] });
 		expect(connectionOf(platform).pragma("foreign_keys", { simple: true })).toBe(1);
 		platform.close();
 	});
 
 	it("fails on a file in a folder that does not exist, and creates nothing", () => {
 		const databaseFile = join(dir, "missing", "domus.db");
-		expect(() => createPlatform({ databaseFile })).toThrow();
+		expect(() => createPlatform({ databaseFile, modules: [] })).toThrow();
 		expect(existsSync(join(dir, "missing"))).toBe(false);
 	});
 
@@ -54,7 +54,7 @@ describe("createPlatform", () => {
 		writeFileSync(databaseFile, "not a database, but long enough to have a header ".repeat(4));
 		const close = vi.spyOn(Database.prototype, "close");
 		try {
-			expect(() => createPlatform({ databaseFile })).toThrow(/not a database/);
+			expect(() => createPlatform({ databaseFile, modules: [] })).toThrow(/not a database/);
 			expect(close).toHaveBeenCalledOnce();
 			expect(close.mock.contexts[0]).toHaveProperty("open", false);
 		} finally {
@@ -63,13 +63,15 @@ describe("createPlatform", () => {
 	});
 
 	it("can be closed more than once", () => {
-		const platform = createPlatform({ databaseFile: join(dir, "domus.db") });
+		const platform = createPlatform({ databaseFile: join(dir, "domus.db"), modules: [] });
 		platform.close();
 		expect(() => platform.close()).not.toThrow();
 		expect(connectionOf(platform).open).toBe(false);
 	});
 
 	it("rejects a relative path", () => {
-		expect(() => createPlatform({ databaseFile: "data/domus.db" })).toThrow(/absolute path/);
+		expect(() => createPlatform({ databaseFile: "data/domus.db", modules: [] })).toThrow(
+			/absolute path/,
+		);
 	});
 });

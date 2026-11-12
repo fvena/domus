@@ -466,6 +466,9 @@ importers:
 
   packages/platform:
     dependencies:
+      '@domus/module-sdk':
+        specifier: workspace:*
+        version: link:../module-sdk
       '@orpc/contract':
         specifier: 'catalog:'
         version: 1.16.2
@@ -510,6 +513,9 @@ importers:
         specifier: workspace:*
         version: link:../platform
     devDependencies:
+      '@domus/module-sdk':
+        specifier: workspace:*
+        version: link:../module-sdk
       '@domus/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/typescript
