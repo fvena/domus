@@ -294,3 +294,77 @@ export const proofs = sqliteTable(
 		check("platform_proofs_state", sql`${table.state} IN ('issued', 'used', 'ended')`),
 	],
 );
+
+// Background work (ADR 0025): the jobs of the engine, the state of each scheduled task and the log of their runs.
+// platform/background reads and writes them with prepared statements.
+
+/**
+ * A scheduled task's state, one row per task the platform ever declared: the time the admin chose, if any, whether
+ * it is paused, and the absolute instant of its next planned run. A row of a task the code no longer declares
+ * stays and is ignored.
+ */
+export const tasks = sqliteTable("platform_tasks", {
+	id: text().primaryKey(),
+	time: text(),
+	paused: integer({ mode: "boolean" }).notNull().default(false),
+	nextAt: integer("next_at").notNull(),
+});
+
+/**
+ * One run of a scheduled task. A planned run is unique by its task and local planned date (`YYYY-MM-DD` in the
+ * house's zone), and keeps its absolute instant; a manual run has no planned date. Its result is null until it
+ * ends; `error` is a message for whoever operates the system, in English and without personal data.
+ */
+export const taskRuns = sqliteTable(
+	"platform_task_runs",
+	{
+		id: integer().primaryKey({ autoIncrement: true }),
+		task: text().notNull(),
+		plannedDate: text("planned_date"),
+		plannedAt: integer("planned_at").notNull(),
+		startedAt: integer("started_at"),
+		finishedAt: integer("finished_at"),
+		result: text({ enum: ["ok", "failed", "cancelled", "stuck", "skipped"] }),
+		error: text(),
+	},
+	(table) => [
+		uniqueIndex("platform_task_runs_planned").on(table.task, table.plannedDate),
+		check(
+			"platform_task_runs_result",
+			sql`${table.result} IN ('ok', 'failed', 'cancelled', 'stuck', 'skipped')`,
+		),
+	],
+);
+
+/**
+ * A job of the background engine: its kind, its lane, its state and attempts, the instant from which it may run
+ * and, when it is a scheduled run, the run it belongs to. Claiming one moves it from `pending` to `running` in one
+ * transaction.
+ */
+export const jobs = sqliteTable(
+	"platform_jobs",
+	{
+		id: integer().primaryKey({ autoIncrement: true }),
+		kind: text().notNull(),
+		lane: text({ enum: ["short", "maintenance"] }).notNull(),
+		state: text({
+			enum: ["pending", "running", "done", "failed", "cancelled", "stuck"],
+		}).notNull(),
+		attempts: integer().notNull().default(0),
+		runAt: integer("run_at").notNull(),
+		taskRun: integer("task_run").references(() => taskRuns.id),
+		createdAt: integer("created_at").notNull(),
+		startedAt: integer("started_at"),
+		finishedAt: integer("finished_at"),
+		error: text(),
+	},
+	(table) => [
+		index("platform_jobs_due").on(table.lane, table.state, table.runAt),
+		index("platform_jobs_task_run").on(table.taskRun),
+		check("platform_jobs_lane", sql`${table.lane} IN ('short', 'maintenance')`),
+		check(
+			"platform_jobs_state",
+			sql`${table.state} IN ('pending', 'running', 'done', 'failed', 'cancelled', 'stuck')`,
+		),
+	],
+);

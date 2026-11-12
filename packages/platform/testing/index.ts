@@ -24,6 +24,7 @@ import {
 	sealContext,
 	type VerifiedContext,
 } from "../authorization";
+import { readTaskRuns, type ScheduledTask, type TaskRun, type Timer } from "../background";
 import {
 	ensureDeviceAccount,
 	insertAccount,
@@ -43,6 +44,7 @@ import {
 	actionLogOf,
 	actionsOf,
 	areasOf,
+	backgroundOf,
 	clockOf,
 	connectionOf,
 	openPlatform,
@@ -65,10 +67,46 @@ export type {
 	VerifiedContext,
 } from "../authorization";
 export { type ModuleDatabase, moduleDatabase } from "./module-database";
+export { controlledTimer, type ControlledTimer } from "../background";
+export type { JobContext, ScheduledTask, TaskRun } from "../background";
 
-/** A platform like createPlatform's, with the real authorization, and the clock the test gives it. */
-export function createPlatformWithClock(options: PlatformOptions, clock: Clock): Platform {
-	return openPlatform(options, { clock });
+/** What a test may give the background of its platform besides the clock. */
+export interface TestBackgroundRuntime {
+	/** How the background waits: a {@link controlledTimer} over the same clock, so no real timer runs. */
+	readonly timer?: Timer;
+	/** Scheduled tasks of the test, declared next to the platform's own. Not a contract for modules. */
+	readonly tasks?: readonly ScheduledTask[];
+}
+
+/**
+ * A platform like createPlatform's, with the real authorization, the clock the test gives it and, for its
+ * background, the timer and extra tasks the test gives it.
+ */
+export function createPlatformWithClock(
+	options: PlatformOptions,
+	clock: Clock,
+	{ timer, tasks }: TestBackgroundRuntime = {},
+): Platform {
+	return openPlatform(options, {
+		clock,
+		...(timer === undefined ? {} : { timer }),
+		...(tasks === undefined ? {} : { tasks }),
+	});
+}
+
+/** Wakes the platform's background now, as a due instant would: it enqueues the runs due and starts the jobs due. */
+export function wakeBackground(platform: Platform): void {
+	backgroundOf(platform).wake();
+}
+
+/** Settles once the platform's background runs no job, also those a job's end started. */
+export function backgroundSettled(platform: Platform): Promise<void> {
+	return backgroundOf(platform).settled();
+}
+
+/** Every run of a scheduled task, oldest first. Plain data: changing it changes nothing. */
+export function readRuns(platform: Platform): readonly TaskRun[] {
+	return readTaskRuns(connectionOf(platform));
 }
 
 /** Runs an action through the platform's one path: validation, authorization, handler, result and, for a write, its log entry. */

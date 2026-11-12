@@ -65,4 +65,17 @@ export const generatedMigrations: readonly ModuleMigration[] = [
 			"ALTER TABLE `platform_confirmations` ADD `context_only` integer DEFAULT false NOT NULL;",
 		],
 	},
+	{
+		tag: "0007_aspiring_kabuki",
+		position: 8,
+		hash: "68167f32d0e02d304f510bd74cb2eef7fc24de8c0122bf3f489c298ef95535a3",
+		statements: [
+			"CREATE TABLE `platform_jobs` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`kind` text NOT NULL,\n\t`lane` text NOT NULL,\n\t`state` text NOT NULL,\n\t`attempts` integer DEFAULT 0 NOT NULL,\n\t`run_at` integer NOT NULL,\n\t`task_run` integer,\n\t`created_at` integer NOT NULL,\n\t`started_at` integer,\n\t`finished_at` integer,\n\t`error` text,\n\tFOREIGN KEY (`task_run`) REFERENCES `platform_task_runs`(`id`) ON UPDATE no action ON DELETE no action,\n\tCONSTRAINT \"platform_jobs_lane\" CHECK(\"platform_jobs\".\"lane\" IN ('short', 'maintenance')),\n\tCONSTRAINT \"platform_jobs_state\" CHECK(\"platform_jobs\".\"state\" IN ('pending', 'running', 'done', 'failed', 'cancelled', 'stuck'))\n);\n",
+			"\nCREATE INDEX `platform_jobs_due` ON `platform_jobs` (`lane`,`state`,`run_at`);",
+			"\nCREATE INDEX `platform_jobs_task_run` ON `platform_jobs` (`task_run`);",
+			"\nCREATE TABLE `platform_task_runs` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`task` text NOT NULL,\n\t`planned_date` text,\n\t`planned_at` integer NOT NULL,\n\t`started_at` integer,\n\t`finished_at` integer,\n\t`result` text,\n\t`error` text,\n\tCONSTRAINT \"platform_task_runs_result\" CHECK(\"platform_task_runs\".\"result\" IN ('ok', 'failed', 'cancelled', 'stuck', 'skipped'))\n);\n",
+			"\nCREATE UNIQUE INDEX `platform_task_runs_planned` ON `platform_task_runs` (`task`,`planned_date`);",
+			"\nCREATE TABLE `platform_tasks` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`time` text,\n\t`paused` integer DEFAULT false NOT NULL,\n\t`next_at` integer NOT NULL\n);\n",
+		],
+	},
 ];

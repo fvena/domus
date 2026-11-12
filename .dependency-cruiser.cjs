@@ -227,6 +227,17 @@ module.exports = {
 			to: { path: "^packages/utils/", pathNot: "^packages/utils/$1/" },
 		},
 		{
+			name: "background-stays-in-platform",
+			comment:
+				"The background engine, the scheduler and the maintenance belong to platform (ADR 0025): module-sdk does not expose them and no module reaches them, through any chain of imports. Tests may, through test-utils.",
+			severity: "error",
+			from: {
+				path: "^(modules|packages/module-sdk)/",
+				pathNot: ["\\.test\\.ts$", "^modules/[^/]+/tests/"],
+			},
+			to: { path: "^packages/platform/background/", reachable: true },
+		},
+		{
 			name: "only-test-utils-reaches-platform-testing",
 			comment:
 				"@domus/platform/testing hands out a module's raw Drizzle client, outside authorization: only test-utils takes it, for dbFor (ADR 0021).",

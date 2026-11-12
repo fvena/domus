@@ -248,6 +248,14 @@ En la 1d1, todo trabajo es mantenimiento de la plataforma: no tiene actor ni pas
 
     Si la implementación muestra que alguna no encaja, se corrige aquí antes de seguir.
 
+- Decisiones de la tarea 01, tomadas al implementar:
+    - Deshacer una entrada caducada sin inversa responde «caducada» si su acción es deshacible según su contrato, e «irreversible» si no. Así la limpieza, que vacía la inversa, no cambia la respuesta: antes de limpiar ya decía «caducada».
+    - Una ejecución manual se distingue por no tener fecha prevista (`planned_date` vacío); guarda como instante el de su lanzamiento.
+    - Un trabajo que falla después de recibir la cancelación queda cancelado, y su ejecución también. Si termina bien aunque se le cancelara, queda terminado.
+    - `close()` de la plataforma lanza un error mientras el segundo plano está activo. La parada ordenada va antes.
+    - En `createTestPlatform` el segundo plano no arranca solo: la prueba llama a `background.start()`, como hace `apps/api`. Así las pruebas de la 1b y la 1c, que mueven el reloj días enteros, no ven limpiezas que no pidieron. La opción `tasks` declara tareas de prueba junto a las de la plataforma.
+    - El planificador despierta como mucho cada minuto desde ya, aunque la señal de vida y `/health` son de la 06.
+
 - La limpieza cambia lo que guarda la base, no lo que responde la API: las pruebas de la caducidad de la 1b y la 1c tienen que seguir pasando sin cambios después de limpiar.
 
 ## Tareas

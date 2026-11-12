@@ -14,6 +14,7 @@
 	},
 	"dependencies": {
 		"@domus/module-sdk": "workspace:*",
+		"@domus/utils": "workspace:*",
 		"@orpc/contract": "catalog:",
 		"@orpc/server": "catalog:",
 		"better-auth": "catalog:",

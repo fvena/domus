@@ -11,7 +11,9 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
+		"@date-fns/tz": "catalog:",
 		"@hono/node-server": "catalog:",
+		"date-fns": "catalog:",
 		"hono": "catalog:"
 	},
 	"devDependencies": {
