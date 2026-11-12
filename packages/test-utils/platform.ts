@@ -65,7 +65,7 @@ export function createTestPlatform({ modules, file }: TestPlatformOptions): Test
 
 	return {
 		platform,
-		door: createHttpHandler(),
+		door: createHttpHandler({ platform, modules }),
 		databaseFile,
 		dbFor: (module) => moduleDatabase(platform, module),
 		close,

@@ -293,6 +293,9 @@ importers:
         specifier: 'catalog:'
         version: 4.13.17
     devDependencies:
+      '@domus/test-utils':
+        specifier: workspace:*
+        version: link:../../packages/test-utils
       '@domus/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/typescript

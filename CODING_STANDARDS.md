@@ -24,5 +24,3 @@ The dependency rules force these; they are not findings while they stay this sma
 
 - `checkApi` and the connection wiring in `apps/assistant` and `apps/voice-gateway`: apps cannot import each other, and `utils` cannot import `platform/contracts`.
 - The `/api/rpc` prefix in `platform/http` and `api-client`: `api-client` may not import `platform`; `platform/http/http.test.ts` pins both together.
-- `createTestHttpHandler` only forwards to `createHttpHandler` until the in-memory platform exists (phase 1): it is the only path the rules give the tests of `assistant` and `voice-gateway` to the door.
-- `createHttpHandler()` takes no parameters until platform and the modules exist (phase 1a).
