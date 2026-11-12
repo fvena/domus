@@ -2,14 +2,16 @@
 // one exact sensitive operation and gets a proof bound to their account, session, device and that operation's
 // fingerprint, good once and for five minutes. Only an identity proven by password can ask, never one by voice
 // or by the device. The password is checked first, asynchronously, and the proof stored after, in one
-// synchronous transaction. Neither the password nor the proof is ever logged or echoed.
+// synchronous transaction that checks the password checked is still the current one. Neither the password nor
+// the proof is ever logged or echoed.
 import { ORPCError } from "@orpc/server";
+import { verifyPassword } from "better-auth/crypto";
 import type Database from "better-sqlite3";
 
 import type { Actions, Clock, ProvenOperation } from "../actions";
 import { type Proofs, sessionLives } from "../actions/proofs";
 import { isVerified, type VerifiedContext } from "../authorization";
-import { isCurrentPassword } from "./passwords";
+import { passwordHashOf } from "./passwords";
 
 export interface ProofIssuer {
 	readonly connection: Database.Database;
@@ -42,6 +44,8 @@ export class WrongPasswordError extends Error {
  * A step-up proof for `operation`, once `password` is the account's current one. Throws `FORBIDDEN` for an
  * identity not proven by password, the errors of an unknown or invalid operation or one that is not sensitive,
  * {@link WrongPasswordError}, and `UNAUTHORIZED` when the session ended while the password was being checked.
+ * A password changed while it was being checked is no longer the current one, so it is a wrong password too
+ * (ADR 0023: changing the password ends its proofs): the answer reveals no more than giving the new one wrong.
  */
 export async function requestProof(
 	{ connection, actions, proofs, clock }: ProofIssuer,
@@ -53,10 +57,12 @@ export async function requestProof(
 	const fingerprint = actions.fingerprintOf(operation);
 	const { session } = context;
 	const bound = session !== undefined && sessionLives(connection, session);
-	if (!(await isCurrentPassword(connection, context.account, password)))
+	const checked = passwordHashOf(connection, context.account);
+	if (checked === undefined || !(await verifyPassword({ hash: checked, password })))
 		throw new WrongPasswordError();
 	return connection.transaction(() => {
 		if (bound && !sessionLives(connection, session)) throw new ORPCError("UNAUTHORIZED");
+		if (passwordHashOf(connection, context.account) !== checked) throw new WrongPasswordError();
 		return proofs.issue(context, fingerprint, clock());
 	})();
 }

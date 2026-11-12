@@ -95,7 +95,7 @@ describe("an undo", () => {
 			repeated: true,
 		});
 		// The inverse, with the permission of its own contract and the context of the entry it undoes: the
-		// same request the first time and on the retry.
+		// same request the first time and on the retry, where only the confirmation counts as given.
 		const request = {
 			context: ana,
 			action: "shelf.remove",
@@ -104,7 +104,7 @@ describe("an undo", () => {
 			input: { id: 1 },
 			undoes: { entry: 1, action: "shelf.add", actor: { account: "ana", via: "kira" } },
 		};
-		expect(requests).toEqual([request, request]);
+		expect(requests).toEqual([request, { ...request, confirmed: true }]);
 	});
 
 	it("reauthorizes a retry whose own entry expired without the inverse's input, its expired content", () => {
@@ -143,6 +143,7 @@ describe("an undo", () => {
 				permission: { area: "shelf", level: "write" },
 				input: undefined,
 				undoes: { entry: 1, action: "shelf.add", actor: { account: "ana", via: "kira" } },
+				confirmed: true,
 			},
 		]);
 	});

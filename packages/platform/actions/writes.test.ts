@@ -320,7 +320,8 @@ describe("a write", () => {
 			permission: { area: "ledger", level: "write" },
 			input: {},
 		};
-		expect(requests).toEqual([request, request]);
+		// On the retry only the confirmation counts as given.
+		expect(requests).toEqual([request, { ...request, confirmed: true }]);
 
 		answer = () => {
 			throw new Error("authorizer down");
