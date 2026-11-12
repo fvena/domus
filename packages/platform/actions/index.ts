@@ -26,7 +26,6 @@ import {
 	type ModuleSchema,
 	type OwnedTable,
 	ownedTableOf,
-	PLATFORM_ID,
 	type TouchedRecord,
 } from "@domus/module-sdk";
 import type { ActionContract } from "@domus/module-sdk/contracts";
@@ -45,21 +44,18 @@ import {
 	decisionOf,
 	isVerified,
 	newOwnership,
-	type RequiredPermission,
-	sealContext,
-	type SensitiveOperation,
 	type VerifiedContext,
 	visibleTo,
 } from "../authorization";
 import { checkTransition } from "../authorization/writes";
+import { answeringWith, type ConfirmationCall } from "./answering";
 import type { Capture, CapturedTransition } from "./capture";
-import {
-	type ConfirmationTimes,
-	type Confirmations,
-	type NewPending,
-	type PendingConfirmation,
-} from "./confirmations";
+import { type ConfirmationTimes, type Confirmations, type NewPending } from "./confirmations";
+import { conflict, internalError, notUndoable, stepUpRequired } from "./failures";
+import { type PlatformOperation, platformActions } from "./platform-operations";
 import type { ProofCheck, Proofs } from "./proofs";
+import { provingWith } from "./proving";
+import type { RegisteredAction } from "./registry";
 
 /** The platform clock: instants in milliseconds since the epoch (ADR 0021). */
 export type Clock = () => number;
@@ -132,42 +128,6 @@ export type ProvenOperation =
 	| { readonly action: string; readonly input?: unknown }
 	| { readonly undo: number };
 
-/**
- * An operation of the platform (ADR 0023) on the path of the actions. A read of the platform's area, or a write
- * of it: with a key, logged without touched records and never undoable. A sensitive one is a write that needs a
- * step-up proof.
- */
-export interface PlatformOperation {
-	/** Its name after `platform.`. */
-	readonly name: string;
-	/** A write unless it says it is a read. */
-	readonly kind?: "read" | "write";
-	readonly sensitive?: SensitiveOperation;
-	readonly inputSchema: AnySchema;
-	/** The account whose settings or data it reads or changes, read inside its read or write. */
-	readonly subject: (input: unknown, context: VerifiedContext) => string | undefined;
-	/**
-	 * For a write, on a new request and before authorization: throws `NOT_FOUND` when what its input names does
-	 * not exist for who asks, so one out of reach answers as one that does not exist, whatever proof it brings.
-	 * Not asked on a repeat, which answers its acknowledgement.
-	 */
-	readonly find?: (input: unknown, context: VerifiedContext) => void;
-	/** Reads or changes it, once authorized; returns its result. */
-	readonly run: (input: unknown, context: VerifiedContext) => unknown;
-}
-
-/**
- * Confirming or rejecting a pending confirmation: who asks, through which channel, and its id. By the app, the
- * same account without via, from any of its sessions; in context, the same account on the same device in the
- * same conversation while the window is open.
- */
-export interface ConfirmationCall {
-	readonly context: VerifiedContext;
-	readonly confirmation: string;
-	/** The step-up proof of the pending operation, when it is sensitive: it is asked for when confirming. */
-	readonly proof?: string;
-}
-
 /** An undo: the verified context of who asks, the number of the entry to undo and the caller's own idempotency key. */
 export interface UndoCall {
 	readonly context: VerifiedContext;
@@ -199,30 +159,8 @@ export interface ActionsOptions {
 	readonly operations?: readonly PlatformOperation[];
 }
 
-export type { ConfirmationTimes };
-
-/** One action as its contract declared it, read once at registration. */
-interface RegisteredAction {
-	readonly module: string;
-	/** Its name inside its module. */
-	readonly name: string;
-	readonly kind: "read" | "write";
-	/** Only a write can be undoable. */
-	readonly undoable: boolean;
-	/** What its contract asks for, with the module's own area when it names none. */
-	readonly permission: RequiredPermission;
-	readonly inputSchema: AnySchema | undefined;
-	/** Checks a read's result, or a write's result inside what `execute` returns. */
-	readonly outputSchema: AnySchema | undefined;
-	/** For a sensitive operation of the platform: which one. */
-	readonly sensitive?: SensitiveOperation;
-	/** For an operation of the platform on one account's own settings or data: that account. */
-	readonly subject?: (input: unknown, context: VerifiedContext) => string | undefined;
-	/** For a write of the platform: what its input names must exist for who asks, else `NOT_FOUND`. */
-	readonly find?: (input: unknown, context: VerifiedContext) => void;
-	/** Runs it with its validated input, and returns what a module's handler would. */
-	readonly execute: (context: VerifiedContext, input: unknown, now: number) => unknown;
-}
+export type { ConfirmationCall, ConfirmationTimes, PlatformOperation };
+export { READ_DELEGATION, READ_LOG } from "./platform-operations";
 
 /** The actions of `modules`, which `checkModules` has already accepted, on one connection. */
 export function createActions({
@@ -264,44 +202,24 @@ export function createActions({
 			});
 		}
 	}
-	for (const operation of operations) {
-		const kind = operation.kind ?? "write";
-		registry.set(`${PLATFORM_ID}.${operation.name}`, {
-			module: PLATFORM_ID,
-			name: operation.name,
-			kind,
-			undoable: false,
-			permission: { area: PLATFORM_ID, level: kind },
-			inputSchema: operation.inputSchema,
-			outputSchema: undefined,
-			...(operation.sensitive === undefined ? {} : { sensitive: operation.sensitive }),
-			subject: operation.subject,
-			...(operation.find === undefined ? {} : { find: operation.find }),
-			execute:
-				kind === "read"
-					? (context, input) => operation.run(input, context)
-					: (context, input) => ({ result: operation.run(input, context), touched: [] }),
-		});
-	}
-	// Reading the log, a read of the platform's area about one's own entries: on this path, so via Kira it goes
-	// through the delegation, and a delegation that asks leaves it waiting as any other read.
-	registry.set(READ_LOG, {
-		module: PLATFORM_ID,
-		name: "readLog",
-		kind: "read",
-		undoable: false,
-		permission: { area: PLATFORM_ID, level: "read" },
-		inputSchema: undefined,
-		outputSchema: undefined,
-		subject: (_input, context) => context.account,
-		execute: (context) => actionLog.annotationsOf(context.account),
+	for (const [name, registered] of platformActions(operations, actionLog))
+		registry.set(name, registered);
+	const proven = provingWith(proofs, clock, authorize);
+	const answering = answeringWith({
+		connection,
+		confirmations,
+		clock,
+		registry,
+		read,
+		write,
+		undo: undoEntry,
 	});
 
 	return {
 		invoke: (call) => guarded(() => invoke(call)),
 		undo: (call) => guarded(() => undo(call)),
-		confirm: (call) => guarded(() => confirm(call)),
-		reject: (call) => guarded(() => reject(call)),
+		confirm: (call) => guarded(() => answering.confirm(call)),
+		reject: (call) => guarded(() => answering.reject(call)),
 		fingerprintOf: (operation) => guarded(() => fingerprintOf(operation)),
 	};
 
@@ -518,27 +436,6 @@ export function createActions({
 		);
 	}
 
-	/**
-	 * Checks the proof a write brings and authorizes the request with what it is worth; when it is valid, uses it
-	 * before the write runs and links it to its entry after. All inside the write's transaction, so a write that
-	 * rolls back leaves it unused.
-	 */
-	function proven(
-		proof: string | undefined,
-		context: VerifiedContext,
-		fingerprint: string,
-		requestWith: (checked: ProofCheck | undefined) => AuthorizationRequest,
-		operation: () => WriteReceipt,
-	): WriteReceipt {
-		const checked = proofs.check(proof, context, fingerprint, clock());
-		authorize(requestWith(checked));
-		if (proof === undefined || checked !== "valid") return operation();
-		proofs.use(proof);
-		const receipt = operation();
-		proofs.link(proof, receipt.entry);
-		return receipt;
-	}
-
 	function undo(call: UndoCall): WriteOutcome {
 		if (!isVerified(call.context)) throw internalError();
 		return undoEntry(call);
@@ -634,96 +531,6 @@ export function createActions({
 					},
 				),
 		);
-	}
-
-	/**
-	 * Confirms a pending confirmation and runs its operation on the path of the actions, in one transaction
-	 * with consuming it: a write logs its entry with the key it was asked with and the confirmation links to
-	 * it; a read runs with `query_only` and only then, outside that stretch, is the confirmation consumed. It is
-	 * evaluated again with the account, via and delegation of its origin and the rest of the context of now; the
-	 * requirement to confirm counts as met, and nothing else does.
-	 */
-	function confirm({ context, confirmation, proof }: ConfirmationCall): unknown {
-		if (!isVerified(context)) throw internalError();
-		return connection.transaction(() => {
-			const pending = reachable(context, confirmation);
-			const asked = sealContext({
-				...context,
-				account: pending.origin.account,
-				...(pending.origin.via === undefined
-					? { via: undefined }
-					: { via: pending.origin.via }),
-			});
-			const { operation } = pending;
-			if ("undo" in operation) {
-				const outcome = undoEntry(
-					{
-						context: asked,
-						entry: operation.undo,
-						idempotencyKey: pending.key ?? "",
-						...(proof === undefined ? {} : { proof }),
-					},
-					true,
-				);
-				confirmations.consume(pending.id, outcome.entry);
-				return outcome;
-			}
-			const found = registry.get(operation.action);
-			if (!found || found.kind !== pending.kind) throw internalError();
-			if (found.kind === "read") {
-				const result = read(found, asked, operation.action, operation.input, {
-					proof,
-					confirmed: true,
-				});
-				confirmations.consume(pending.id, undefined);
-				return result;
-			}
-			const outcome = write(found, asked, operation.action, operation.input, {
-				idempotencyKey: pending.key,
-				proof,
-				confirmed: true,
-			});
-			confirmations.consume(pending.id, outcome.entry);
-			return outcome;
-		})();
-	}
-
-	function reject({ context, confirmation }: ConfirmationCall): void {
-		if (!isVerified(context)) throw internalError();
-		connection.transaction(() => {
-			confirmations.reject(reachable(context, confirmation).id);
-		})();
-	}
-
-	/**
-	 * The pending confirmation `context` may answer, still waiting. Another account's, or one out of reach of
-	 * this channel, is not found: by the app, only the account itself without via; in context, only the same
-	 * device and the same, not empty, conversation.
-	 */
-	function reachable(context: VerifiedContext, id: string): PendingConfirmation {
-		const pending = confirmations.find(id);
-		const { origin } = pending ?? {};
-		const inReach =
-			pending !== undefined &&
-			origin !== undefined &&
-			pending.account === context.account &&
-			(context.channel === "app"
-				? context.via === undefined
-				: context.device === origin.device &&
-					context.conversation !== undefined &&
-					context.conversation !== "" &&
-					context.conversation === origin.conversation);
-		if (!inReach || pending === undefined)
-			throw new ORPCError("NOT_FOUND", { message: `no pending confirmation "${id}"` });
-
-		const now = clock();
-		if (pending.state === "consumed" || pending.state === "rejected")
-			throw conflict("confirmation-consumed");
-		if (pending.state === "ended" || now >= pending.expiresAt)
-			throw conflict("confirmation-expired");
-		if (context.channel === "contexto" && now >= pending.windowClosesAt)
-			throw conflict("window-closed");
-		return pending;
 	}
 
 	/**
@@ -933,52 +740,8 @@ function guarded<T>(operation: () => T): T {
 	}
 }
 
-/** Reading the action log, by its full name: what a pending confirmation of it keeps. */
-export const READ_LOG = `${PLATFORM_ID}.readLog`;
-
-/** Reading an account's delegation, by its full name, one of the platform's operations. */
-export const READ_DELEGATION = `${PLATFORM_ID}.readDelegation`;
-
-/** The reasons of a conflict the platform answers (ADR 0022, ADR 0023). */
-type ConflictReason =
-	| "key-reused"
-	| "already-undone"
-	| "changed-since"
-	| "window-closed"
-	| "confirmation-expired"
-	| "confirmation-consumed";
-
 /** Authorization asked for confirmation: whatever was opened rolls back and the operation waits. */
 class ConfirmationNeeded extends Error {}
-
-/**
- * The operation is sensitive and the request brings no step-up proof of it, or one that does not match: another
- * operation, session or device, expired, already used, or one it does not need. Nothing of the proof leaves.
- */
-function stepUpRequired() {
-	return new ORPCError("STEP_UP_REQUIRED", {
-		status: 403,
-		message: "this operation needs a step-up proof of it",
-	});
-}
-
-/** A conflict, with its reason in `data.reason`. */
-function conflict(reason: ConflictReason) {
-	return new ORPCError("CONFLICT", { data: { reason } });
-}
-
-/** Why an entry cannot be undone (ADR 0022). */
-type NotUndoableReason = "irreversible" | "expired";
-
-/** An entry that cannot be undone, with its reason in `data.reason`, as a conflict carries its own. */
-function notUndoable(reason: NotUndoableReason) {
-	return new ORPCError("UNPROCESSABLE_CONTENT", { data: { reason } });
-}
-
-/** Any unexpected failure: nothing of the original error, neither its message nor its stack, leaves. */
-function internalError() {
-	return new ORPCError("INTERNAL_SERVER_ERROR");
-}
 
 function isThenable(value: unknown): value is PromiseLike<unknown> {
 	return (
