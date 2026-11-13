@@ -45,9 +45,12 @@ const HOST = "domus";
 const STALE_AFTER = 48 * 60 * 60 * 1000;
 /**
  * What the retention keeps of host `domus`, as one group whatever path the snapshots had (restic groups by host and
- * paths unless told), and the prune of what it forgets.
+ * paths unless told), and the prune of what it forgets. It waits up to 10 min for a lock another process holds, such
+ * as the shared one of the rehearsal's restore: only a lock still held after that fails it.
  */
 const RETENTION = [
+	"--retry-lock",
+	"10m",
 	"--group-by",
 	"host",
 	"--keep-daily",

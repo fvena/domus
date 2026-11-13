@@ -82,7 +82,7 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
     3. Un proceso hijo de Node abre la instantánea en solo lectura y pasa `PRAGMA quick_check`. Si no da `ok`, la ejecución falla sin reintentos y no sube nada.
     4. `restic unlock` quita solo los bloqueos viejos.
     5. `restic backup` de la carpeta de preparación, con host fijo `domus` y el instante de captura como hora de la instantánea, para que la antigüedad la lea quien restaure.
-    6. Si la copia quedó guardada, anota la marca de copia guardada y, después, `restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 3 --prune` con el mismo host, y anota la marca de retención.
+    6. Si la copia quedó guardada, anota la marca de copia guardada y, después, `restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 3 --prune --retry-lock 10m` con el mismo host, y anota la marca de retención. Si otro proceso tiene un bloqueo del repositorio, como la restauración del ensayo, espera hasta 10 min a que lo suelte.
     7. Vacía la carpeta de preparación, también si algo falló o se canceló.
 - restic corre siempre como proceso hijo, con `--no-cache`, y recibe el repositorio y el fichero de la contraseña por su entorno, nunca por argumentos.
 - **Lo que sale de restic:**
@@ -91,7 +91,7 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
     - `10` (el repositorio no existe): si la carpeta del repositorio existe y está vacía, `restic init` y se sigue. Si no existe o tiene algo, la ejecución falla sin reintentos: nunca se reinicializa un destino con contenido.
     - `11` (no pudo bloquear el repositorio): error pasajero, que el motor reintenta.
     - `12` (contraseña incorrecta) y cualquier otro: la ejecución falla sin reintentos.
-- **Una retención fallida no repite la copia.** Si `forget --prune` falla después de una copia guardada, la ejecución termina como fallida sin reintentos y con el mensaje de la retención. La copia sigue guardada y su marca, anotada. La próxima noche se vuelve a intentar.
+- **Una retención fallida no repite la copia.** Si `forget --prune` falla después de una copia guardada, la ejecución termina como fallida sin reintentos y con el mensaje de la retención. Un bloqueo que sigue ahí tras los 10 min de espera (el código `11`) también es una retención fallida. La copia sigue guardada y su marca, anotada. La próxima noche se vuelve a intentar.
 - **Cancelación.** Si se agota el tiempo máximo, `db.backup()` se aborta lanzando un error desde su callback de progreso. Un proceso hijo recibe SIGTERM y, si no termina en unos segundos, SIGKILL. El carril se libera solo cuando el hijo ha terminado de verdad.
 - El tiempo máximo es el del carril de mantenimiento (30 min), revisable con la medición.
 - El mensaje de error de una ejecución sigue la regla de la 1d1: en inglés, sin datos personales y con 200 caracteres como mucho. La salida de restic no se copia entera: solo el paso y el código.
@@ -368,6 +368,7 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
 - Decisiones tomadas en la revisión del código:
     - La regla `backups-stay-in-platform` cubre también `packages/platform/lock.ts`: `module-sdk` no puede ofrecer el cerrojo de la base, tampoco a través de una cadena de importaciones.
     - Restaurar comprueba la lista de módulos con `checkModules`, como abrir la plataforma, antes de tomar el cerrojo y de tocar la carpeta de datos.
+    - `forget` lleva `--retry-lock 10m`, para que «si coincide espera» valga en los dos sentidos: la restauración del ensayo tiene el bloqueo compartido de restic a las 05:00 y la retención espera a que termine, igual que el ensayo espera a un `prune`. Solo un bloqueo que sigue tras la espera cuenta como retención fallida, sin reintento. Los 10 min caben en los 30 min del carril de mantenimiento junto a la copia.
 - La copia necesita en el NVMe un espacio libre del tamaño de la base, para la instantánea, además del repositorio.
 - Al repartir las tareas se acordó que la fila de las marcas y la forma de `/health` nacen completas en la 01, que la 05 entrega el procedimiento entero de restaurar (retomar y la marca al abrir incluidos) y que la 06 lo demuestra con procesos cortados y casos de desastre.
 
