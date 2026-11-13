@@ -347,6 +347,10 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
     - Cualquier intento de copia que no llegó a guardarla (fallo, bloqueo, tiempo agotado o parada) anota el intento fallido. La retención no lo anota: la copia está guardada.
     - Al hijo que no termina tras SIGTERM le llega SIGKILL a los 5 s, contados con el reloj y el temporizador de la plataforma: antes de los 10 s en que un trabajo cuenta como atascado. El hijo de `quick_check` recibe el mismo trato que restic.
     - Un trabajo de copia que agota su tiempo se reintenta como cualquier otro (ADR 0025). Si el tiempo se agota durante `forget`, el reintento repite la copia; con 30 min de tiempo máximo no se espera, y la medición lo revisará.
+- Decisiones tomadas al implementar la 04:
+    - Un tipo de trabajo puede declarar `failed`, que el motor llama dentro de la transacción que anota su fin definitivo como fallido: al momento con un error permanente, o al agotar los reintentos de uno pasajero (también un tiempo agotado o una ejecución que un reinicio dejó a medias en su último intento). `backup-check` anota ahí el «check fallido»: el trabajo no sabe cuál es su último intento.
+    - Un `check` que una parada cancela no cambia su marca: no ha fallado, y un falso «check fallido» avisaría de un repositorio dañado hasta el domingo siguiente.
+    - Un `unlock` que falla (una contraseña incorrecta, por ejemplo) cuenta como `check` fallido. El código `10` en `unlock` o en `check` termina bien sin tocar la marca.
 - Decisiones tomadas al implementar la 05:
     - Restaurar vive en `packages/platform/backups/` (`restore.ts`, y el núcleo del comando en `command.ts`), así que la regla `backups-stay-in-platform` lo cubre. La carpeta de preparación de restaurar es `restore-staging/` en la carpeta de datos, y la copia preparada se llama `domus.db`.
     - Si preparar falla (restic, `quick_check`, migraciones), la carpeta de preparación se vacía: no queda una copia en claro. Todavía no hay marca, así que no rompe la invariante.

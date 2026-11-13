@@ -288,6 +288,13 @@ describe("restoring a backup", { timeout: RESTIC_TIMEOUT }, () => {
 		expect(test.background.tasks()).toEqual([
 			// 05:00 in Madrid, the day after the restore.
 			{ id: "backup", time: null, paused: false, nextAt: Date.parse("2026-01-06T04:00:00Z") },
+			// 05:30 in Madrid, the Sunday after the restore, a Monday.
+			{
+				id: "backup-check",
+				time: null,
+				paused: false,
+				nextAt: Date.parse("2026-01-11T04:30:00Z"),
+			},
 			paused,
 		]);
 		test.background.start();

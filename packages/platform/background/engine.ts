@@ -42,6 +42,11 @@ export interface JobKind {
 	/** Milliseconds from its start until its signal is aborted. Unset: {@link LANE_TIMEOUT} of its lane. */
 	readonly timeout?: number;
 	run(context: JobContext): Promise<void> | void;
+	/**
+	 * Runs inside the transaction that records the job's end for good when it failed: at once for a permanent error,
+	 * or once a passing error used up its attempts. Not for a job that stopping cancelled.
+	 */
+	failed?(at: number): void;
 }
 
 /**
@@ -214,6 +219,7 @@ export function createEngine({
 		}
 		const error = end.state === "done" ? null : end.error;
 		markEnded.run(end.state, finishedAt, error, row.id);
+		if (end.state === "failed") kinds.get(row.kind)?.failed?.(finishedAt);
 		onFinish?.({
 			id: row.id,
 			kind: row.kind,

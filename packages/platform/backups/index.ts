@@ -2,8 +2,9 @@
 // The `backup` task takes a snapshot of the database into a fixed staging folder of the data folder, checks it in a
 // child process, saves it with restic into an encrypted repository and marks it saved, then applies the retention
 // and marks its result. A failed attempt is marked too. A cancelled job aborts the snapshot or ends the child that
-// runs, and the staging folder is emptied at the start and at the end of every run. The marks feed the watcher of
-// `/health`. module-sdk offers none of this, and a dependency rule keeps modules out.
+// runs, and the staging folder is emptied at the start and at the end of every run. The weekly `backup-check` reads
+// the whole repository and marks its result. The marks feed the watcher of `/health`. module-sdk offers none of
+// this, and a dependency rule keeps modules out.
 import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
@@ -32,6 +33,7 @@ export type { BackupConfig } from "./restic";
 export type { BackupMarks } from "./marks";
 
 export const BACKUP_TASK = "backup";
+export const BACKUP_CHECK_TASK = "backup-check";
 
 /** The staging folder of the backups, inside the data folder. */
 const STAGING = "backup-staging";
@@ -129,29 +131,56 @@ export function createBackups({
 		},
 	};
 
+	/**
+	 * The weekly check, on Sunday at 05:30 in the maintenance lane: restic reads the whole repository. A repository
+	 * that does not exist yet has nothing to check, and its mark stays. A live lock is retried; any failure for good,
+	 * also one that used up its attempts, marks the check failed.
+	 */
+	const checkTask: ScheduledTask = {
+		id: BACKUP_CHECK_TASK,
+		frequency: { every: "week", on: "sunday", at: "05:30" },
+		job: {
+			lane: "maintenance",
+			async run({ signal }) {
+				if (!(await unlock(repository, signal))) return;
+				const { code } = await repository.run(["check", "--read-data"], signal);
+				if (code === REPOSITORY_MISSING) return;
+				if (code !== 0) throw resticFailure("check", code);
+				marks.check(clock(), "ok");
+			},
+			failed: (at) => marks.check(at, "failed"),
+		},
+	};
+
 	return {
-		tasks: [backupTask],
+		tasks: [backupTask, checkTask],
 		health: () => watch(marks.current(), clock()),
 	};
 }
 
 /** What the watcher reads of the marks at `now`. */
 function watch(
-	{ saved, failedAt, retention }: BackupMarks,
+	{ saved, failedAt, retention, check }: BackupMarks,
 	now: number,
 ): ReturnType<BackupsWatch["health"]> {
 	const reasons: BackupReason[] = [];
 	if (saved === null ? failedAt !== null : now - saved.capturedAt > STALE_AFTER)
 		reasons.push("backup-stale");
 	if (retention?.result === "failed") reasons.push("backup-retention-failed");
+	if (check?.result === "failed") reasons.push("backup-check-failed");
 	const state = saved !== null ? "saved" : failedAt === null ? "none-yet" : "none";
 	return { state, reasons };
 }
 
-/** Removes the repository's stale locks, never a live one. A repository that does not exist yet is `save`'s case. */
-async function unlock(repository: Restic, signal: AbortSignal): Promise<void> {
+/**
+ * Removes the repository's stale locks, never a live one, and tells whether the repository exists. One that does
+ * not exist yet is for the caller to decide: `save` may initialize it, and the check has nothing to read.
+ */
+async function unlock(repository: Restic, signal: AbortSignal): Promise<boolean> {
 	const { code } = await repository.run(["unlock"], signal);
-	if (code !== 0 && code !== REPOSITORY_MISSING) throw resticFailure("unlock", code);
+	if (code === REPOSITORY_MISSING) return false;
+	if (code !== 0) throw resticFailure("unlock", code);
+	return true;
 }
 
 /**

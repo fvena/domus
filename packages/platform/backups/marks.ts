@@ -29,6 +29,8 @@ export interface MarkStore {
 	failed(at: number): void;
 	/** Marks the end of a retention and its result. */
 	retention(at: number, result: MarkResult): void;
+	/** Marks the end of a check of the repository and its result. */
+	check(at: number, result: MarkResult): void;
 	/**
 	 * Marks where a restore came from: its snapshot, the instant its data was captured and the instant of restoring.
 	 * The saved backup becomes that snapshot only when its capture is newer than the one the copy had: restoring
@@ -69,6 +71,11 @@ export function createMarkStore(connection: Database.Database): MarkStore {
 			ON CONFLICT (id) DO UPDATE SET retention_at = excluded.retention_at,
 				retention_result = excluded.retention_result`,
 	);
+	const writeCheck = connection.prepare<[number, MarkResult]>(
+		`INSERT INTO platform_backup_marks (id, check_at, check_result) VALUES (1, ?, ?)
+			ON CONFLICT (id) DO UPDATE SET check_at = excluded.check_at,
+				check_result = excluded.check_result`,
+	);
 	const writeRestored = connection.prepare<[string, number, number]>(
 		`INSERT INTO platform_backup_marks (id, restored_snapshot, restored_captured_at, restored_at)
 			VALUES (1, ?, ?, ?)
@@ -89,6 +96,10 @@ export function createMarkStore(connection: Database.Database): MarkStore {
 		retention(at, result) {
 			writeRetention.run(at, result);
 			marks = { ...marks, retention: { at, result } };
+		},
+		check(at, result) {
+			writeCheck.run(at, result);
+			marks = { ...marks, check: { at, result } };
 		},
 		restored(snapshot, capturedAt, at) {
 			writeRestored.run(snapshot, capturedAt, at);
