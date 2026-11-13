@@ -281,6 +281,25 @@ describe("the cleanup of files without a row", () => {
 		expect(stored(test)).toEqual([sha256(PNG)]);
 	});
 
+	it("deletes any file of a content folder past the hour, whatever its name, and keeps a younger one", async () => {
+		await using test = await household();
+		const hash = sha256(JPEG);
+		const folder = join(test.filesDirectory, "contents", hash.slice(0, 2));
+		mkdirSync(folder, { recursive: true });
+		const left = (name: string, at: number) => {
+			writeFileSync(join(folder, name), JPEG);
+			utimesSync(join(folder, name), new Date(at), new Date(at));
+		};
+		// What a system or a cut install may leave: no name of a content of that folder.
+		left(".DS_Store", nightOf(1) - 2 * HOUR);
+		left(`${hash}.tmp`, nightOf(1) - 2 * HOUR);
+		left("young.tmp", nightOf(1) - HOUR);
+
+		await cleanOn(test, 1);
+
+		expect(stored(test)).toEqual(["young.tmp"]);
+	});
+
 	it("keeps one an upload reuses while the cleanup waits for its hash, published with its row", async () => {
 		const gate = holdAt("published");
 		await using test = await household({ interleave: gate.interleave });

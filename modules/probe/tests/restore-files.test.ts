@@ -250,7 +250,7 @@ describe("restoring a backup with files", { timeout: RESTIC_TIMEOUT }, () => {
 		expect(staging(target)).toEqual([]);
 	});
 
-	it("brings back the photo of a deletion the backup could still undo, and undoing it hangs the photo again", async () => {
+	it("brings back the photo of a deletion the backup could still undo, and undoing it reattaches the photo", async () => {
 		using target = restoreTarget();
 		const fridge = photo("nevera");
 		let file: string;

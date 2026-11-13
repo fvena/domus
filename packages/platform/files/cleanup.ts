@@ -12,13 +12,16 @@
 // A file of the store without a row (an orphan) is what a cut leaves between publishing a file and writing its row,
 // or a restore cut after installing its contents. Publishing reuses it; past an hour, the cleanup deletes it. Both
 // go under the lock of its hash, which the cleanup holds from checking that it still has no row and is that old
-// until the file is gone, so a publication either finds it and writes its row first or writes its own after.
+// until the file is gone, so a publication either finds it and writes its row first or writes its own after. Any
+// other file in a folder of the contents (one the system or a cut left there, whatever its name) is no content's:
+// past an hour, the cleanup deletes it by its own path, without a lock.
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import type Database from "better-sqlite3";
 
 import type { CleanupSweep } from "../background/cleanup";
+import { CONTENT_HASH } from "./needed";
 import type { FileStore, HashLocks } from "./store";
 import { syncToDisk } from "./store";
 
@@ -66,11 +69,26 @@ export function contentSweeps({
 		"SELECT 1 AS found FROM platform_file_contents WHERE hash = ?",
 	);
 
-	/** Whether the file of `hash` has no row and was last modified more than an hour before `now`. */
-	function orphaned(hash: string, now: number): boolean {
-		if (hasRow.get(hash) !== undefined) return false;
-		const modified = statSync(store.contentPath(hash), { throwIfNoEntry: false })?.mtimeMs;
+	/** The hash a file of the store holds the content of, when it is named and placed as one; else `undefined`. */
+	function contentAt(path: string): string | undefined {
+		const name = basename(path);
+		return CONTENT_HASH.test(name) && store.contentPath(name) === path ? name : undefined;
+	}
+
+	/**
+	 * Whether the file at `path` is left over: not the file of a content with a row, and last modified more than an
+	 * hour before `now`.
+	 */
+	function leftOver(path: string, now: number): boolean {
+		const hash = contentAt(path);
+		if (hash !== undefined && hasRow.get(hash) !== undefined) return false;
+		const modified = statSync(path, { throwIfNoEntry: false })?.mtimeMs;
 		return modified !== undefined && now - modified > ORPHAN_AGE;
+	}
+
+	function removeLeftOver(path: string): void {
+		rmSync(path, { force: true });
+		syncToDisk(dirname(path));
 	}
 
 	/** Removes the file of a claimed content, if it still has one, and then its row. */
@@ -102,19 +120,21 @@ export function contentSweeps({
 			for (const { hash } of found) await finish(hash);
 			return found.length;
 		},
-		// The files without a row older than an hour: each checked again and deleted under its lock.
+		// The files without a row older than an hour, by their own path: one named as a content is checked again and
+		// deleted under the lock of its hash; any other name is no content's, which no publication touches.
 		async (now, batchSize) => {
 			const found = store
 				.stored()
-				.filter((hash) => orphaned(hash, now))
+				.filter((path) => leftOver(path, now))
 				.slice(0, batchSize);
-			for (const hash of found)
-				await locks.hold(hash, async () => {
-					if (!orphaned(hash, now)) return;
-					const path = store.contentPath(hash);
-					rmSync(path, { force: true });
-					syncToDisk(dirname(path));
-				});
+			for (const path of found) {
+				const hash = contentAt(path);
+				if (hash === undefined) removeLeftOver(path);
+				else
+					await locks.hold(hash, async () => {
+						if (leftOver(path, now)) removeLeftOver(path);
+					});
+			}
 			return found.length;
 		},
 		// The temporary files of `incoming/` no upload in progress holds: what a failed one left behind.

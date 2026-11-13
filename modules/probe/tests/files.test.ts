@@ -392,7 +392,7 @@ describe("taking a file off and undoing", () => {
 		expect(await downloaded(phone, "probe.getNote", { id: 1 }, photo)).toBe(sha256(JPEG));
 	});
 
-	it("rolls an undo back when it fails after hanging the file again, and the next undo brings it", async () => {
+	it("rolls an undo back when it fails after reattaching the file, and the next undo brings it", async () => {
 		failOnceAfter("restoreNote");
 		await using test = await household();
 		const phone = await signedIn(test, "ana");
@@ -483,7 +483,7 @@ describe("undoing with files", () => {
 		const undone = written(test.undo(ana, detached.entry, { idempotencyKey: "u1" }));
 		const redone = written(test.undo(ana, undone.entry, { idempotencyKey: "u2" }));
 		expect(test.invoke(ana, "probe.getNote", { id: 1 })?.files).toEqual([]);
-		// Released again by the redo: the entry that first released it no longer hangs it back.
+		// Released again by the redo: the entry that first released it no longer reattaches it.
 		expect(() =>
 			test.invoke(
 				ana,

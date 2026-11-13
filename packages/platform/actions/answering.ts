@@ -82,6 +82,23 @@ export interface Download {
 	readonly size: number;
 }
 
+/**
+ * Runs `work` in a transaction of `connection`, which opens a download's file through `opened` and may go on after
+ * it: if the transaction rolls back once the file is open, the file is closed, since nobody sends it.
+ */
+export function openingDownload(
+	connection: Database.Database,
+	work: (opened: (download: Download) => Download) => Download,
+): Download {
+	let open: Download | undefined;
+	try {
+		return connection.transaction(() => work((download) => (open = download)))();
+	} catch (error) {
+		open?.content.close();
+		throw error;
+	}
+}
+
 export interface Answering {
 	confirm(call: ConfirmationCall): unknown;
 	/** Confirms a pending download and returns its file, open, for the caller to send after the transaction. */
@@ -155,29 +172,24 @@ export function answeringWith({
 		 */
 		confirmDownload: ({ context, confirmation, proof }) => {
 			if (!isVerified(context)) throw internalError();
-			let opened: Download | undefined;
-			try {
-				return connection.transaction((): Download => {
-					const pending = reachable(context, confirmation);
-					const operation = operationOf(pending);
-					if (!isDownload(operation))
-						throw new ORPCError("NOT_FOUND", {
-							message: `no pending download "${confirmation}"`,
-						});
-					const found = registry.get(operation.action);
-					if (!found || found.kind !== "read") throw internalError();
-					opened = download(found, askedBy(context, pending), operation, {
+			return openingDownload(connection, (opened) => {
+				const pending = reachable(context, confirmation);
+				const operation = operationOf(pending);
+				if (!isDownload(operation))
+					throw new ORPCError("NOT_FOUND", {
+						message: `no pending download "${confirmation}"`,
+					});
+				const found = registry.get(operation.action);
+				if (!found || found.kind !== "read") throw internalError();
+				const ready = opened(
+					download(found, askedBy(context, pending), operation, {
 						...(proof === undefined ? {} : { proof }),
 						confirmed: true,
-					});
-					confirmations.consume(pending.id, undefined);
-					return opened;
-				})();
-			} catch (error) {
-				// Rolled back after the file opened: nobody sends it.
-				opened?.content.close();
-				throw error;
-			}
+					}),
+				);
+				confirmations.consume(pending.id, undefined);
+				return ready;
+			});
 		},
 		reject: ({ context, confirmation }) => {
 			if (!isVerified(context)) throw internalError();

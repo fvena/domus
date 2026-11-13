@@ -16,6 +16,8 @@
 import type Database from "better-sqlite3";
 
 import type { Clock } from "../actions";
+import { RELEASES_ENDED } from "../files/needed";
+import { sessionLivesWhere } from "../identity/sessions";
 import type { ScheduledTask, TaskSchedule } from "./scheduler";
 
 export const CLEANUP_TASK = "cleanup";
@@ -95,17 +97,12 @@ const STEPS: readonly StatementStep[] = [
 		sql: `DELETE FROM platform_prepared_files WHERE id IN (
 			SELECT id FROM platform_prepared_files AS prepared
 			WHERE expires_at <= ? OR consumed = 1
-				OR NOT EXISTS (SELECT 1 FROM platform_session
-					WHERE id = prepared.session AND user_id = prepared.account)
+				OR NOT ${sessionLivesWhere("prepared.session", "prepared.account")}
 			LIMIT ?)`,
 	},
 	// A released reference protects its content only while the entry that released it can still be undone.
 	{
-		sql: `DELETE FROM platform_file_references WHERE id IN (
-			SELECT reference.id FROM platform_file_references AS reference
-				JOIN platform_action_log AS released ON released.entry = reference.released_by
-			WHERE released.expires_at <= ? OR released.undone_by IS NOT NULL
-			LIMIT ?)`,
+		sql: `DELETE FROM platform_file_references WHERE id IN (${RELEASES_ENDED} LIMIT ?)`,
 	},
 ];
 

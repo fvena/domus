@@ -27,7 +27,10 @@ export interface FileStore {
 	 * new folder's parent, so the new entry outlives a power cut. Returns the content's folder.
 	 */
 	ensureContentFolder(hash: string): string;
-	/** The name of every file in the folders of the contents, whether it has a row or not. */
+	/**
+	 * The path of every file in the folders of the contents (those named by the first characters of a hash), whatever
+	 * its name and whether it has a row or not.
+	 */
 	stored(): string[];
 	/** Empties the uploads in progress: what `api` does before it admits requests. */
 	clearIncoming(): void;
@@ -59,11 +62,11 @@ export function createFileStore(directory: string): FileStore {
 		stored: () =>
 			existsSync(contents)
 				? readdirSync(contents, { withFileTypes: true })
-						.filter((folder) => folder.isDirectory())
+						.filter((folder) => folder.isDirectory() && folder.name.length === SPREAD)
 						.flatMap((folder) =>
 							readdirSync(join(contents, folder.name), { withFileTypes: true })
 								.filter((entry) => entry.isFile())
-								.map((entry) => entry.name),
+								.map((entry) => join(contents, folder.name, entry.name)),
 						)
 				: [],
 		clearIncoming: () => {

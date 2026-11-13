@@ -467,7 +467,7 @@ export const preparedFiles = sqliteTable(
 /**
  * A file reference: a content hung from a record of a module (its module, table and id), with the name its uploader
  * gave it, by an opaque id that is not the hash. A released one keeps the entry of the action log that released it,
- * whose undo may hang it again; a live one has none.
+ * whose undo may reattach it; a live one has none.
  */
 export const fileReferences = sqliteTable(
 	"platform_file_references",

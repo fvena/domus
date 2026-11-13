@@ -303,70 +303,74 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 		return answer;
 	});
 
-	// Uploading a file: only with a session; who may upload, authorization decides. The answer is the prepared file,
-	// or the error of the spec's table as the JSON of ORPCError without the RPC envelope.
-	app.post(FILES_PATH, async (c) => {
-		const responseHeaders = new Headers();
-		let answer: Response;
-		try {
-			const verified = await contextOf(c.req.raw, responseHeaders);
-			if (!verified?.session) throw new ORPCError("UNAUTHORIZED");
+	/**
+	 * A route of files (ADR 0028), only with a session: what `answer` gives, or the error of the spec's table as the
+	 * JSON of ORPCError without the RPC envelope; either way with the cookies that reading the session set.
+	 */
+	const fileRoute =
+		(answer: (verified: VerifiedContext, request: Request) => Promise<Response>) =>
+		async (c: { readonly req: { readonly raw: Request } }): Promise<Response> => {
+			const responseHeaders = new Headers();
+			let response: Response;
+			try {
+				const verified = await contextOf(c.req.raw, responseHeaders);
+				if (!verified?.session) throw new ORPCError("UNAUTHORIZED");
+				response = await answer(verified, c.req.raw);
+			} catch (error) {
+				response = errorResponse(error);
+			}
+			for (const cookie of responseHeaders.getSetCookie())
+				response.headers.append("set-cookie", cookie);
+			return response;
+		};
+
+	// Uploading a file: who may upload, authorization decides. The answer is the prepared file.
+	app.post(
+		FILES_PATH,
+		fileRoute(async (verified, request) => {
 			if (!files) throw internalError();
-			answer = Response.json(await files.upload(verified, c.req.raw));
-		} catch (error) {
-			answer = errorResponse(error);
-		}
-		for (const cookie of responseHeaders.getSetCookie())
-			answer.headers.append("set-cookie", cookie);
-		return answer;
-	});
+			return Response.json(await files.upload(verified, request));
+		}),
+	);
 
 	// Downloading a file: a read of a module on the path of the actions, which must return the file at a position
 	// marked with `fileRef()`. The input never goes in the URL. The bytes go after its transaction, never cached.
 	// A download whose read asks for confirmation waits, and is confirmed here alone, with `{ confirmation }`.
-	app.post(DOWNLOAD_PATH, async (c) => {
-		const responseHeaders = new Headers();
-		let answer: Response;
-		try {
-			const verified = await contextOf(c.req.raw, responseHeaders);
-			if (!verified?.session) throw new ORPCError("UNAUTHORIZED");
-			const request = downloadRequest(await c.req.json().catch(() => undefined));
-			const proof = c.req.header(PROOF_HEADER);
-			const found =
-				"confirmation" in request
+	app.post(
+		DOWNLOAD_PATH,
+		fileRoute(async (verified, request) => {
+			const body = downloadRequest(await request.json().catch(() => undefined));
+			const proof = request.headers.get(PROOF_HEADER) ?? undefined;
+			const download =
+				"confirmation" in body
 					? actions.confirmDownload({
 							context: verified,
-							confirmation: request.confirmation,
+							confirmation: body.confirmation,
 							...(proof === undefined ? {} : { proof }),
 						})
 					: actions.download({
 							context: verified,
-							...request,
+							...body,
 							...(proof === undefined ? {} : { proof }),
 						});
 			// Only a test waits here: the file open, the transaction ended, no byte sent.
 			try {
 				await files?.opened();
 			} catch (error) {
-				found.content.close();
+				download.content.close();
 				throw error;
 			}
-			answer = new Response(found.content.stream(), {
+			return new Response(download.content.stream(), {
 				headers: {
 					"cache-control": "no-store",
 					"x-content-type-options": "nosniff",
-					"content-type": found.type,
-					"content-length": String(found.size),
-					"content-disposition": contentDisposition(found.name),
+					"content-type": download.type,
+					"content-length": String(download.size),
+					"content-disposition": contentDisposition(download.name),
 				},
 			});
-		} catch (error) {
-			answer = errorResponse(error);
-		}
-		for (const cookie of responseHeaders.getSetCookie())
-			answer.headers.append("set-cookie", cookie);
-		return answer;
-	});
+		}),
+	);
 
 	/**
 	 * The verified context of a request, from its session alone. Over HTTP, in phase 1c, the account is the
