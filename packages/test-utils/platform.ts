@@ -177,6 +177,13 @@ export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	 * `published`, a publication with its file in place and its rows not yet written. Only for tests.
 	 */
 	readonly interleave?: (point: InterleavePoint) => Promise<void> | void;
+	/**
+	 * The free bytes of the volume of the uploads, as the test wants them at each upload. Unset: what `statfs`
+	 * tells of the folder of contents.
+	 */
+	readonly freeSpace?: () => number;
+	/** Whether the next write of an upload's temporary file fails with `ENOSPC`, asked at each write. Only for tests. */
+	readonly diskFull?: () => boolean;
 }
 
 /** The backups of a test platform. */
@@ -421,6 +428,8 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 	backups,
 	files,
 	interleave,
+	freeSpace,
+	diskFull,
 }: TestPlatformOptions<TModules>): TestPlatform<TModules> {
 	let tempDir: string | undefined;
 	let databaseFile = file ?? ":memory:";
@@ -480,6 +489,8 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 				...(backups?.restic === undefined ? {} : { restic: backups.restic }),
 				...(backups?.node === undefined ? {} : { node: backups.node }),
 				...(interleave === undefined ? {} : { interleave }),
+				...(freeSpace === undefined ? {} : { freeSpace }),
+				...(diskFull === undefined ? {} : { diskFull }),
 			},
 		);
 	} catch (error) {

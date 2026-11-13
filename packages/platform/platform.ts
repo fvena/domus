@@ -25,7 +25,7 @@ import {
 import { taskOperations } from "./background/operations";
 import { type BackupConfig, createBackups } from "./backups";
 import { refuseWhileRestorePending } from "./backups/restore";
-import { createFiles, type Files, type Interleave } from "./files";
+import { createFiles, type Files, type FreeSpace, type Interleave } from "./files";
 import { accessView, registeredAreas } from "./identity/access";
 import { ensureDeviceAccount } from "./identity/accounts";
 import { platformOperations } from "./identity/operations";
@@ -111,6 +111,10 @@ export interface PlatformRuntime {
 	readonly node?: string;
 	/** Only from the testing entry: where the platform tells a test it got to a point and waits until it lets go. */
 	readonly interleave?: Interleave;
+	/** The free space of the uploads' volume: what `statfs` tells unless a test gives another. */
+	readonly freeSpace?: FreeSpace;
+	/** Only from the testing entry: whether the next write of an upload's temporary file fails with `ENOSPC`. */
+	readonly diskFull?: () => boolean;
 }
 
 const IN_MEMORY = ":memory:";
@@ -156,6 +160,8 @@ export function openPlatform(
 		restic,
 		node,
 		interleave,
+		freeSpace,
+		diskFull,
 	}: PlatformRuntime,
 ): Platform {
 	if (databaseFile !== IN_MEMORY && !isAbsolute(databaseFile)) {
@@ -244,9 +250,12 @@ export function openPlatform(
 			: createFiles({
 					connection: db,
 					clock,
+					timer,
 					view,
 					directory: filesFolder,
 					...(interleave === undefined ? {} : { interleave }),
+					...(freeSpace === undefined ? {} : { freeSpace }),
+					...(diskFull === undefined ? {} : { diskFull }),
 				});
 	const platform: Platform = {
 		appliedMigrations,
