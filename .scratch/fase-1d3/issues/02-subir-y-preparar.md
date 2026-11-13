@@ -1,6 +1,6 @@
 # 02. Subir y preparar
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01
 
 Spec: [`../spec.md`](../spec.md), secciones «Almacén de contenidos», «Subir» (sin los límites), «Errores de las rutas de archivos» (las filas de subir que no son de límites), «Publicar sin perder bytes», «Archivo preparado» y «Reglas y documentación». ADR 0028.
@@ -19,13 +19,24 @@ El trazador de la 1d3: una persona con sesión sube una foto por `POST /api/file
 
 ## Criterios de aceptación
 
-- [ ] Por `browser()`, una sesión de persona sube un JPEG y recibe su archivo preparado; el fichero está en el almacén con su hash como nombre y `incoming/` queda vacía.
-- [ ] Sin sesión responde `UNAUTHORIZED`, y con la cuenta `device`, `FORBIDDEN`, sin dejar nada en disco.
-- [ ] Cada error de subir de esta tarea responde su código y su estado de la tabla, sin restos en `incoming/`.
-- [ ] Dos subidas del mismo contenido, en secuencia, comparten un solo fichero y dan dos archivos preparados.
-- [ ] Con el punto de intercalación, dos subidas simultáneas del mismo hash dejan un fichero, una fila de contenido y dos archivos preparados.
-- [ ] Una sesión revocada justo antes de crear las filas responde `UNAUTHORIZED` y no deja archivo preparado.
-- [ ] Al arrancar sobre una carpeta de datos con restos en `incoming/`, `api` los borra antes de admitir peticiones.
-- [ ] La carpeta de contenidos del arnés desaparece al cerrar, y la de la prueba se conserva para reabrir.
-- [ ] `architecture.test.ts` prueba que un módulo no puede importar el almacén.
-- [ ] `pnpm check` pasa.
+- [x] Por `browser()`, una sesión de persona sube un JPEG y recibe su archivo preparado; el fichero está en el almacén con su hash como nombre y `incoming/` queda vacía.
+- [x] Sin sesión responde `UNAUTHORIZED`, y con la cuenta `device`, `FORBIDDEN`, sin dejar nada en disco.
+- [x] Cada error de subir de esta tarea responde su código y su estado de la tabla, sin restos en `incoming/`.
+- [x] Dos subidas del mismo contenido, en secuencia, comparten un solo fichero y dan dos archivos preparados.
+- [x] Con el punto de intercalación, dos subidas simultáneas del mismo hash dejan un fichero, una fila de contenido y dos archivos preparados.
+- [x] Una sesión revocada justo antes de crear las filas responde `UNAUTHORIZED` y no deja archivo preparado.
+- [x] Al arrancar sobre una carpeta de datos con restos en `incoming/`, `api` los borra antes de admitir peticiones.
+- [x] La carpeta de contenidos del arnés desaparece al cerrar, y la de la prueba se conserva para reabrir.
+- [x] `architecture.test.ts` prueba que un módulo no puede importar el almacén.
+- [x] `pnpm check` pasa.
+
+## Comments
+
+- Hecho en `1bd944a`. Costuras para las tareas que siguen:
+    - **Carpeta de contenidos.** `PlatformOptions.filesDirectory` (absoluta); sin ella, `files` junto a la base; en memoria no hay y subir responde `INTERNAL_SERVER_ERROR`. `createTestPlatform` gana la opción `files`: sin valor, una carpeta temporal del arnés (también con `file: true` o una ruta de base) que se borra al cerrar, después de que `platform.close()` cierre los descriptores y cancele la lectura de cada subida en curso; con una ruta, se conserva. `test.filesDirectory` dice cuál es. Para reabrir, procesos hijos o restaurar, la prueba pasa la misma ruta en `files`. Dentro: `contents/<2 primeros del hash>/<hash>` e `incoming/`, creadas cuando hacen falta.
+    - **Punto de intercalación.** Una sola función: `createTestPlatform({ interleave })`, que llega como `PlatformRuntime.interleave` (`TestBackgroundRuntime.interleave` en la entrada de pruebas). Recibe un `InterleavePoint` y devuelve la promesa que lo retiene. El de la publicación es `published`: salta con el cerrojo del hash tomado y el fichero en su sitio, en los tres casos (nuevo, huérfano reutilizado, presente), antes de la transacción de las filas. La 06 y la 04 añaden sus nombres al mismo tipo.
+    - **Errores de las rutas.** `ORPCError`, con `fileError(code)` de `packages/platform/files/failures.ts` para los códigos que oRPC no conoce (tabla `STATUS`, ahí se añaden los de la 03); `errorResponse(error)` responde el JSON de `toJSON()` con su estado, `Retry-After: 1` para `CONTENT_BUSY`, y cualquier otro error como `INTERNAL_SERVER_ERROR`. La descarga de la 04 puede usar el mismo `errorResponse`.
+    - **Sesión de un `browser()`.** No hay helper todavía. La 04 lo necesita para `attach` con `invoke`: un `test.contextOf(browser)` que lea la cookie `better-auth.session_token`, tome el token (lo de antes del primer `.`, tras decodificarla), busque su fila en `platform_session` desde la entrada de pruebas y selle el contexto como la puerta (`deviceAccount` = la cuenta, canal `app`, `password`).
+    - **Dónde va cada cosa.** `packages/platform/files/index.ts` (`createFiles`: recibir y publicar; `filesOf(platform)` lo da dentro de platform), `store.ts` (rutas, `syncFolder` y `createHashLocks`, que la limpieza de la 06 debe compartir: el cerrojo está en `createFiles` y aún no se expone), la ruta en `http/index.ts`. Quién sube lo decide `mayUpload` en `platform/authorization`. La regla `files-stay-in-platform` cubre `packages/platform/files/`: las rutas de la puerta viven en `http/`, que los módulos ya no alcanzan.
+    - **Para la 03.** `declaredSize` ya da el tamaño declarado sin usarlo; la recepción lee el cuerpo con `getReader()` y escribe con `writeSync`, comprobando `upload.open` antes de tocar el descriptor. Faltan la discrepancia de longitud, el minuto sin bytes, las reservas y la señal de cancelación de la petición.
+    - Decisiones tomadas sin preguntar, también en la spec: `incoming/` se vacía al crear la puerta y no al abrir la plataforma, porque `pnpm accounts` la abre con `api` en marcha y borraría sus subidas; respuesta 200; orden sesión, autorización, `Content-Length`, nombre, bytes; 25 MB = 25 × 1024 × 1024; un `Content-Length` no decimal es `LENGTH_REQUIRED`; Kira (`via`) no sube; las tablas guardan el nombre SQL de la tabla y el id entero del registro, `released_by` con clave ajena al registro de acciones, y el archivo preparado sin clave ajena a su sesión. `CONTENT_BUSY` está programado y sin probar hasta la 06.

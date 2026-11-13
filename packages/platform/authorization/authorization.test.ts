@@ -10,6 +10,7 @@ import {
 	type Delegated,
 	type Grant,
 	isAllowed,
+	mayUpload,
 	type PermissionLevel,
 	type Role,
 	sealContext,
@@ -484,5 +485,18 @@ describe("the production authorizer", () => {
 		);
 
 		expect(isAllowed(authorizer, request("ana", "notes", "write", "kira"))).toBe(false);
+	});
+});
+
+describe("who may upload a file", () => {
+	const view = viewOf({ ana: "member", paco: "admin", kitchen: "device" });
+
+	it("is a person by itself, never the device account nor Kira on a person's behalf", () => {
+		const uploads = (account: string, via?: string) =>
+			mayUpload(view, request(account, "notes", "write", via).context);
+
+		expect([uploads("ana"), uploads("paco"), uploads("kitchen")]).toEqual([true, true, false]);
+		expect(uploads("ana", "kira")).toBe(false);
+		expect(uploads("nobody")).toBe(false);
 	});
 });

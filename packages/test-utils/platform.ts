@@ -58,6 +58,7 @@ import {
 	type VerifiedContext,
 	type WriteOutcome,
 	type BackupMarks,
+	type InterleavePoint,
 	listSnapshotsOf,
 	readBackupMarks,
 	runRestore,
@@ -165,6 +166,17 @@ export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	 * `file`. Unset: the backups are off.
 	 */
 	readonly backups?: TestBackups;
+	/**
+	 * The `files` folder of the store of file contents, also with the database in memory. Unset: a temporary
+	 * folder, removed on close once the uploads in progress are cancelled. A path: that folder, absolute, kept on
+	 * close, for tests that open the same data again.
+	 */
+	readonly files?: string;
+	/**
+	 * Where the platform tells the test it got to a point, and waits until the promise the test returns settles:
+	 * `published`, a publication with its file in place and its rows not yet written. Only for tests.
+	 */
+	readonly interleave?: (point: InterleavePoint) => Promise<void> | void;
 }
 
 /** The backups of a test platform. */
@@ -273,6 +285,8 @@ export interface TestPlatform<
 	readonly door: HttpHandler;
 	/** `":memory:"` or the path of the file in use. */
 	readonly databaseFile: string;
+	/** The `files` folder of the store: `contents/` by hash and `incoming/`, the uploads in progress. */
+	readonly filesDirectory: string;
 	/** A new browser, without cookies, on {@link door}. */
 	browser(): TestBrowser;
 	/**
@@ -405,6 +419,8 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 	tasks,
 	jobs,
 	backups,
+	files,
+	interleave,
 }: TestPlatformOptions<TModules>): TestPlatform<TModules> {
 	let tempDir: string | undefined;
 	let databaseFile = file ?? ":memory:";
@@ -412,6 +428,17 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		tempDir = mkdtempSync(join(tmpdir(), "domus-test-"));
 		databaseFile = join(tempDir, "domus.db");
 	}
+	// The harness's own folder of contents goes with the platform; a test's own stays.
+	let filesTempDir: string | undefined;
+	let filesDirectory: string;
+	if (files === undefined) {
+		filesTempDir = mkdtempSync(join(tmpdir(), "domus-files-"));
+		filesDirectory = join(filesTempDir, "files");
+	} else filesDirectory = files;
+	const removeTemporary = () => {
+		if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+		if (filesTempDir) rmSync(filesTempDir, { recursive: true, force: true });
+	};
 
 	let now = TEST_START;
 	const timer = controlledTimer(() => now);
@@ -435,6 +462,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 				modules,
 				retention,
 				confirmation,
+				filesDirectory,
 				...(backups === undefined
 					? {}
 					: {
@@ -451,16 +479,18 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 				...(jobs === undefined ? {} : { jobs }),
 				...(backups?.restic === undefined ? {} : { restic: backups.restic }),
 				...(backups?.node === undefined ? {} : { node: backups.node }),
+				...(interleave === undefined ? {} : { interleave }),
 			},
 		);
 	} catch (error) {
-		if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+		removeTemporary();
 		throw error;
 	}
 
+	// Closing the platform cancels the uploads in progress and closes their descriptors before the folders go.
 	const close = () => {
 		platform.close();
-		if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+		removeTemporary();
 	};
 
 	const prepare: TestPreparation = {
@@ -529,6 +559,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		platform,
 		door,
 		databaseFile,
+		filesDirectory,
 		browser: () => createTestBrowser(door, TEST_ORIGIN),
 		clock,
 		background,

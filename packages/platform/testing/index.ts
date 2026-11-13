@@ -41,6 +41,7 @@ import {
 import type { BackupConfig, BackupMarks } from "../backups";
 import { createMarkStore } from "../backups/marks";
 import { listSnapshots, type SnapshotSummary } from "../backups/restore";
+import type { Interleave } from "../files";
 import {
 	ensureDeviceAccount,
 	insertAccount,
@@ -97,6 +98,7 @@ export type {
 export { PermanentJobError } from "../background";
 export { STOP_MARGIN } from "../background/engine";
 export type { BackupMarks } from "../backups";
+export type { Interleave, InterleavePoint } from "../files";
 /**
  * `runRestore` restores with the runtime the test gives: its clock, the restic executable and, only here, the points
  * where the test cuts the exchange.
@@ -136,6 +138,11 @@ export interface TestBackgroundRuntime {
 	readonly restic?: string;
 	/** The Node executable of the backups' child processes, such as a fake one: this process's own unless given. */
 	readonly node?: string;
+	/**
+	 * Where the platform tells the test it got to a point, such as a publication between its file and its rows, and
+	 * waits until the promise the test returns settles. Only here.
+	 */
+	readonly interleave?: Interleave;
 }
 
 /**
@@ -145,7 +152,7 @@ export interface TestBackgroundRuntime {
 export function createPlatformWithClock(
 	options: PlatformOptions,
 	clock: Clock,
-	{ timer, tasks, jobs, restic, node }: TestBackgroundRuntime = {},
+	{ timer, tasks, jobs, restic, node, interleave }: TestBackgroundRuntime = {},
 ): Platform {
 	return openPlatform(options, {
 		clock,
@@ -154,6 +161,7 @@ export function createPlatformWithClock(
 		...(jobs === undefined ? {} : { jobs }),
 		...(restic === undefined ? {} : { restic }),
 		...(node === undefined ? {} : { node }),
+		...(interleave === undefined ? {} : { interleave }),
 	});
 }
 
