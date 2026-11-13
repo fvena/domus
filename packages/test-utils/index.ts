@@ -7,6 +7,7 @@ export {
 	type DelegationChange,
 	listBackups,
 	restoreBackup,
+	type TestBackups,
 	type TestRestoreOptions,
 	pendingFrom,
 	type PermissionChange,
@@ -19,7 +20,9 @@ export {
 	type TestPreparation,
 	type WriteOptions,
 } from "./platform";
+export { requireRestic } from "./restic";
 export {
+	fakeNode,
 	type InterleavePoint,
 	PermanentJobError,
 	type VerifiedContext,

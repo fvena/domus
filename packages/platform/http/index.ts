@@ -323,24 +323,27 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 
 	// Downloading a file: a read of a module on the path of the actions, which must return the file at a position
 	// marked with `fileRef()`. The input never goes in the URL. The bytes go after its transaction, never cached.
+	// A download whose read asks for confirmation waits, and is confirmed here alone, with `{ confirmation }`.
 	app.post(DOWNLOAD_PATH, async (c) => {
 		const responseHeaders = new Headers();
 		let answer: Response;
 		try {
 			const verified = await contextOf(c.req.raw, responseHeaders);
 			if (!verified?.session) throw new ORPCError("UNAUTHORIZED");
-			const { action, input, file } = downloadRequest(
-				await c.req.json().catch(() => undefined),
-			);
-			const found = actions.download({
-				context: verified,
-				action,
-				input,
-				file,
-				...(c.req.header(PROOF_HEADER) === undefined
-					? {}
-					: { proof: c.req.header(PROOF_HEADER) }),
-			});
+			const request = downloadRequest(await c.req.json().catch(() => undefined));
+			const proof = c.req.header(PROOF_HEADER);
+			const found =
+				"confirmation" in request
+					? actions.confirmDownload({
+							context: verified,
+							confirmation: request.confirmation,
+							...(proof === undefined ? {} : { proof }),
+						})
+					: actions.download({
+							context: verified,
+							...request,
+							...(proof === undefined ? {} : { proof }),
+						});
 			// Only a test waits here: the file open, the transaction ended, no byte sent.
 			try {
 				await files?.opened();
@@ -388,14 +391,19 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	return { fetch: async (request) => app.fetch(request) };
 }
 
-/** The body of a download: `{ action, input, file }`, else a bad request. */
-function downloadRequest(body: unknown): {
-	readonly action: string;
-	readonly input: unknown;
-	readonly file: string;
-} {
+/**
+ * The body of a download: `{ action, input, file }`, or `{ confirmation }` to confirm a pending one, else a bad
+ * request.
+ */
+function downloadRequest(
+	body: unknown,
+):
+	| { readonly action: string; readonly input: unknown; readonly file: string }
+	| { readonly confirmation: string } {
 	if (typeof body !== "object" || body === null || Array.isArray(body))
 		throw new ORPCError("BAD_REQUEST");
+	const { confirmation } = body as Record<string, unknown>;
+	if (Object.keys(body).length === 1 && typeof confirmation === "string") return { confirmation };
 	const { action, input, file, ...rest } = body as Record<string, unknown>;
 	if (typeof action !== "string" || typeof file !== "string" || Object.keys(rest).length > 0)
 		throw new ORPCError("BAD_REQUEST");

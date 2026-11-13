@@ -10,10 +10,26 @@ import type Database from "better-sqlite3";
 import type { VerifiedContext } from "../authorization";
 import { randomId } from "../identity/accounts";
 
-/** What waits: an action with its validated input, or the undo of an entry. */
+/**
+ * What waits: an action with its validated input, the undo of an entry, or a download (ADR 0028), the read with
+ * its input and the file it is asked to open. A download waits as a read, kept apart by its fingerprint.
+ */
 export type PendingOperation =
 	| { readonly action: string; readonly input: unknown }
-	| { readonly undo: number };
+	| { readonly undo: number }
+	| PendingDownload;
+
+/** A download waiting for confirmation: confirmed only through the download's own route. */
+export interface PendingDownload {
+	readonly action: string;
+	readonly input: unknown;
+	readonly file: string;
+}
+
+/** Whether what waits is a download. */
+export function isDownload(operation: PendingOperation): operation is PendingDownload {
+	return "file" in operation;
+}
 
 /** Where a pending confirmation stands: waiting, run once, refused, or ended by its session or password. */
 export type PendingState = "pending" | "consumed" | "rejected" | "ended";

@@ -69,6 +69,10 @@ export default defineModule({
 			const found = findNote(context, context.input.id);
 			return found ? withFiles(context.files, found) : null;
 		},
+		getGuardedNote: (context) => {
+			const found = findNote(context, context.input.id);
+			return found ? withFiles(context.files, found) : null;
+		},
 		countNotes: ({ db, visible }) =>
 			db.select({ total: count() }).from(schema.notes).where(visible(schema.notes)).get()
 				?.total ?? 0,
