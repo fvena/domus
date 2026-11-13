@@ -2,9 +2,9 @@
 
 ## Qué es
 
-Casi todo lo que hace Domus ocurre porque alguien lo pide. Pero hay trabajo que nadie pide en el momento: limpiar lo que ya no sirve cada noche, por ejemplo. Ese trabajo corre en segundo plano, dentro del mismo programa api, sin que nadie espere la respuesta.
+Casi todo lo que hace Domus ocurre porque alguien lo pide. Pero hay trabajo que nadie pide en el momento: limpiar lo que ya no sirve cada noche, o hacer la copia de seguridad, por ejemplo. Ese trabajo corre en segundo plano, dentro del mismo programa api, sin que nadie espere la respuesta.
 
-Hoy hay una sola tarea programada, la limpieza, que corre cada noche a las 04:30, hora de Madrid. La pieza que la lanza a su hora es el planificador.
+Hoy hay tres tareas programadas, todas a la hora de Madrid: la limpieza, cada noche a las 04:30; la copia de seguridad, cada noche a las 05:00; y la comprobación de las copias, cada domingo a las 05:30. La pieza que las lanza a su hora es el planificador.
 
 ## Cómo funciona
 
@@ -22,7 +22,7 @@ La limpieza borra de verdad lo que ya caducó: lo que entró en cada acción y s
 
 Cualquier cuenta puede ver la lista de tareas: a qué hora corren, si están pausadas y cómo fue la última vez. Solo el admin puede cambiar la hora, pausarlas, reanudarlas o lanzarlas en el momento, y para eso pide la contraseña otra vez, como cualquier operación de administrar. Esos cambios quedan en el registro de acciones. Un cambio de hora o una pausa se pueden deshacer, siempre que sean el último cambio de esa tarea.
 
-El planificador se despierta al menos una vez por minuto. Si lleva más de cinco minutos sin hacerlo, o hay un carril atascado, la página de salud de Domus lo dice.
+El planificador se despierta al menos una vez por minuto. Si lleva más de cinco minutos sin hacerlo, o hay un carril atascado, la página de salud de Domus lo dice. También dice si las copias están al día, y si hay varios problemas a la vez, los da todos juntos. Cómo funcionan las copias está en [Las copias de seguridad y restaurar](copias.md).
 
 ## Por qué es así
 
@@ -42,7 +42,8 @@ Y la limpieza borra lo caducado porque guardar lo que ya no se puede deshacer es
 - La hora de la casa: `@domus/utils/date-time`, sobre `date-fns` y `@date-fns/tz`, con la zona `Europe/Madrid` que le pasa la plataforma.
 - El arranque y la parada: `apps/api/src/main.ts`, con `startBackground` y `stopBackground`. El log dice `scheduler started: <N> jobs recovered` y `scheduler stopped`.
 - Por HTTP: `tasks/list` (lectura) y `tasks/setTime`, `tasks/pause`, `tasks/resume` y `tasks/launch` (de nivel `manage`, con comprobante), en `packages/platform/background/operations.ts`.
-- La salud: `GET /health` añade `background`, que es `ok` o `degraded` con `scheduler-silent` o `lane-stuck`.
+- La salud: `GET /health` añade `background`, con `status` `ok` o `degraded`, `reasons` (todos los motivos a la vez: `scheduler-silent`, `lane-stuck` y los de las copias) y `backups`.
+- Las tareas de las copias, `backup` y `backup-check`: `packages/platform/backups/` ([Las copias de seguridad y restaurar](copias.md)).
 - Probar: `createTestPlatform` ofrece `background`, que mueve el mismo motor con el reloj de pruebas; las opciones `tasks` y `jobs` declaran tareas y trabajos de prueba.
 - Los módulos no pueden usar nada de esto: una regla de dependencias lo impide.
-- Decisiones: [ADR 0025](../architecture/adr/0025-segundo-plano.md). Cómo comprobarlo en la Pi: [`docs/despliegue.md`](../despliegue.md).
+- Decisiones: [ADR 0025](../architecture/adr/0025-segundo-plano.md) y, para las copias, [ADR 0026](../architecture/adr/0026-copias-de-seguridad-y-restaurar.md). Cómo comprobarlo en la Pi: [`docs/despliegue.md`](../despliegue.md).

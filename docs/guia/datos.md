@@ -18,7 +18,7 @@ Casi todos los registros llevan un número. Si uno se borra, su número no se le
 
 ## Por qué es así
 
-Un solo fichero es fácil de entender y de copiar, y para una casa es más que suficiente.
+Un solo fichero es fácil de entender y de copiar, y para una casa es más que suficiente. Cada noche se copia: está en [Las copias de seguridad y restaurar](copias.md).
 
 Lo de todas o ninguna lo decidimos porque una actualización a medias deja la base de datos en un estado que nadie ha previsto.
 

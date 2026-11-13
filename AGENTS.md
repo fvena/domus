@@ -24,6 +24,7 @@ Node 22 (`.nvmrc`) with corepack, which installs the pnpm `packageManager` names
 | `pnpm check`                        | Every gate, quietly; generators leave no diff |
 | `pnpm db:generate`                  | Migrations and `migrations.ts` of modules     |
 | `pnpm accounts`                     | Create an account or change its password      |
+| `pnpm restore`                      | List the backups or restore one, api stopped  |
 | `docker compose up -d --build`      | The three containers as on the Pi             |
 
 Deploying to and checking the Raspberry Pi: `docs/despliegue.md`.
