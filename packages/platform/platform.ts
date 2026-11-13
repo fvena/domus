@@ -232,6 +232,8 @@ export function openPlatform(
 							timer,
 							config: backupConfig,
 							databaseFile,
+							// On a file there is always one: the option's or the data folder's.
+							filesDirectory: filesDirectory ?? join(dirname(databaseFile), "files"),
 							...(restic === undefined ? {} : { executable: restic }),
 							...(node === undefined ? {} : { node }),
 						}),
