@@ -688,3 +688,173 @@ describe("downloading", () => {
 		expect(await anonymous.json()).toMatchObject({ code: "UNAUTHORIZED" });
 	});
 });
+
+describe("a confirmed download", () => {
+	/** Confirms the pending download `confirmation` from `browser`, through the download's own route. */
+	function confirmDownload(browser: TestBrowser, confirmation: string): Promise<Response> {
+		return browser.fetch(
+			new Request(new URL("/api/files/download", TEST_ORIGIN), {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ confirmation }),
+			}),
+		);
+	}
+
+	/** Asks for `file` through `getGuardedNote`, which always asks first, and returns the pending download's id. */
+	async function askToDownload(browser: TestBrowser, file: string): Promise<string> {
+		const response = await download(browser, "probe.getGuardedNote", { id: 1 }, file);
+		expect(response.status).toBe(428);
+		const body = (await response.json()) as { code: string; data: { confirmation: string } };
+		expect(body.code).toBe("CONFIRMATION_REQUIRED");
+		return body.data.confirmation;
+	}
+
+	/** The error a call throws. */
+	function thrown(call: () => unknown): unknown {
+		try {
+			call();
+		} catch (error) {
+			return error;
+		}
+		throw new Error("it did not throw");
+	}
+
+	it("waits as a pending download of its own, apart from the same read asked as a read", async () => {
+		await using test = await household();
+		const phone = await signedIn(test, "ana");
+		const ana = test.contextOf(phone);
+		const photo = attach(test, ana, 1, await prepare(phone));
+
+		const pending = await askToDownload(phone, photo);
+		expect(await askToDownload(phone, photo)).toBe(pending);
+
+		const read = thrown(() => test.invoke(ana, "probe.getGuardedNote", { id: 1 }));
+		expect(read).toMatchObject({ code: "CONFIRMATION_REQUIRED" });
+		const asRead = (read as { data: { confirmation: string } }).data.confirmation;
+		expect(asRead).not.toBe(pending);
+		expect(test.confirm(ana, asRead)).toMatchObject({ id: 1, files: [{ id: photo }] });
+	});
+
+	it("gives the bytes once confirmed from another session of the same person, and is not found by another", async () => {
+		await using test = await household();
+		const phone = await signedIn(test, "ana");
+		const laptop = await signedIn(test, "ana");
+		const photo = attach(test, test.contextOf(phone), 1, await prepare(phone));
+		const pending = await askToDownload(phone, photo);
+
+		const luis = await confirmDownload(await signedIn(test, "luis"), pending);
+		expect(luis.status).toBe(404);
+		expect(await luis.json()).toMatchObject({ code: "NOT_FOUND" });
+		expect((await confirmDownload(test.browser(), pending)).status).toBe(401);
+
+		const response = await confirmDownload(laptop, pending);
+		expect(response.status).toBe(200);
+		expect(response.headers.get("content-type")).toBe("image/jpeg");
+		expect(response.headers.get("cache-control")).toBe("no-store");
+		expect(sha256(new Uint8Array(await response.arrayBuffer()))).toBe(sha256(JPEG));
+	});
+
+	it("gives the bytes once: the second confirmation is a conflict, also when the first answer was lost", async () => {
+		await using test = await household();
+		const phone = await signedIn(test, "ana");
+		const photo = attach(test, test.contextOf(phone), 1, await prepare(phone));
+		const pending = await askToDownload(phone, photo);
+
+		// The first answer never reaches the person: its body is given up unread.
+		const lost = await confirmDownload(phone, pending);
+		expect(lost.status).toBe(200);
+		await lost.body?.cancel();
+
+		const again = await confirmDownload(phone, pending);
+		expect(again.status).toBe(409);
+		expect(await again.json()).toMatchObject(consumed);
+	});
+
+	it("does not give the bytes of one that expired or was rejected", async () => {
+		await using test = await household();
+		const phone = await signedIn(test, "ana");
+		const ana = test.contextOf(phone);
+		const photo = attach(test, ana, 1, await prepare(phone));
+
+		const rejected = await askToDownload(phone, photo);
+		test.reject(ana, rejected);
+		const afterRejecting = await confirmDownload(phone, rejected);
+		expect(afterRejecting.status).toBe(409);
+		expect(await afterRejecting.json()).toMatchObject(consumed);
+
+		const expiring = await askToDownload(phone, photo);
+		test.clock.advance(DAY);
+		const afterExpiring = await confirmDownload(phone, expiring);
+		expect(afterExpiring.status).toBe(409);
+		expect(await afterExpiring.json()).toMatchObject({
+			code: "CONFLICT",
+			data: { reason: "confirmation-expired" },
+		});
+	});
+
+	it("is refused by the generic confirm without consuming it, and still confirms through its route", async () => {
+		await using test = await household();
+		const phone = await signedIn(test, "ana");
+		const ana = test.contextOf(phone);
+		const photo = attach(test, ana, 1, await prepare(phone));
+		const pending = await askToDownload(phone, photo);
+
+		expect(thrown(() => test.confirm(ana, pending))).toMatchObject({
+			code: "CONFLICT",
+			status: 409,
+			data: { reason: "confirm-by-download" },
+		});
+
+		expect(await downloadedOnConfirming(phone, pending)).toBe(sha256(JPEG));
+	});
+
+	it("is not found through the download's route for a pending operation that is not a download", async () => {
+		await using test = await household();
+		const phone = await signedIn(test, "ana");
+		const ana = test.contextOf(phone);
+		const read = thrown(() => test.invoke(ana, "probe.getGuardedNote", { id: 1 }));
+		const pending = (read as { data: { confirmation: string } }).data.confirmation;
+
+		const response = await confirmDownload(phone, pending);
+		expect(response.status).toBe(404);
+		expect(test.confirm(ana, pending)).toMatchObject({ id: 1 });
+	});
+
+	it("gives no bytes when the permission or the file went between asking and confirming", async () => {
+		await using test = await household();
+		const phone = await signedIn(test, "ana");
+		const ana = test.contextOf(phone);
+		const photo = attach(test, ana, 1, await prepare(phone));
+
+		const withoutPermission = await askToDownload(phone, photo);
+		test.prepare.grant("ana", "probe", "none");
+		expect((await confirmDownload(phone, withoutPermission)).status).toBe(403);
+		test.prepare.grant("ana", "probe", "write");
+
+		const withoutFile = await askToDownload(phone, photo);
+		test.invoke(
+			ana,
+			"probe.detachFile",
+			{ noteId: 1, file: photo },
+			{ idempotencyKey: "detach" },
+		);
+		expect((await confirmDownload(phone, withoutFile)).status).toBe(404);
+
+		// Neither was consumed: once the file is back, the one that waited for it gives it.
+		test.undo(ana, lastEntry(test)?.entry ?? 0, { idempotencyKey: "undo-detach" });
+		expect(await downloadedOnConfirming(phone, withoutFile)).toBe(sha256(JPEG));
+	});
+
+	const consumed = { code: "CONFLICT", data: { reason: "confirmation-consumed" } };
+
+	/** The SHA-256 of what confirming a pending download answers, once it answered 200. */
+	async function downloadedOnConfirming(
+		browser: TestBrowser,
+		confirmation: string,
+	): Promise<string> {
+		const response = await confirmDownload(browser, confirmation);
+		expect(response.status).toBe(200);
+		return sha256(new Uint8Array(await response.arrayBuffer()));
+	}
+});

@@ -53,8 +53,7 @@ import { checkTransition, editableTo, type RecordArea } from "../authorization/w
 import { markedFiles } from "../files/marked";
 import { FilesRefusal, type References, type WriteRun } from "../files/references";
 import type { OpenedContent } from "../files/store";
-import type { FileType } from "../files/type";
-import { answeringWith, type ConfirmationCall } from "./answering";
+import { answeringWith, type ConfirmationCall, type Download } from "./answering";
 import type { Capture, CapturedTransition } from "./capture";
 import { type ConfirmationTimes, type Confirmations, type NewPending } from "./confirmations";
 import { conflict, internalError, notUndoable, stepUpRequired } from "./failures";
@@ -134,6 +133,12 @@ export interface Actions {
 	 * closed if anything fails after it opened; the caller sends its bytes and the stream closes it.
 	 */
 	download(call: DownloadCall): Download;
+	/**
+	 * Confirms a pending download of the account that asks, with the rules of {@link Actions.confirm}, and opens
+	 * its file as {@link Actions.download} does, consuming the confirmation in the same transaction. Throws like
+	 * `confirm`, "not found" for a pending operation that is not a download, and like the download.
+	 */
+	confirmDownload(call: ConfirmationCall): Download;
 }
 
 /** A download: who asks, the read that returns the file and its input, and the file's id. */
@@ -144,14 +149,6 @@ export interface DownloadCall {
 	readonly file: string;
 	/** The step-up proof of the read, when it is sensitive. */
 	readonly proof?: string;
-}
-
-/** A file ready to send: its open content and what the answer says of it. */
-export interface Download {
-	readonly content: OpenedContent;
-	readonly name: string;
-	readonly type: FileType;
-	readonly size: number;
 }
 
 /** The operation a step-up proof is asked for: an action, or an operation of the platform, and its input, or an undo. */
@@ -194,7 +191,7 @@ export interface ActionsOptions {
 	readonly openContent?: (hash: string) => OpenedContent;
 }
 
-export type { ConfirmationCall, ConfirmationTimes, PlatformOperation };
+export type { ConfirmationCall, ConfirmationTimes, Download, PlatformOperation };
 export { platformOperation, READ_DELEGATION, READ_LOG } from "./platform-operations";
 
 /** The actions of `modules`, which `checkModules` has already accepted, on one connection. */
@@ -251,6 +248,10 @@ export function createActions({
 		read,
 		write,
 		undo: undoEntry,
+		download: (found, context, { action, input, file }, { proof, confirmed }) => {
+			const checked = authorizeRead(found, context, action, input, { proof, confirmed });
+			return openReturned(found, context, input, file, { proof, checked });
+		},
 	});
 
 	return {
@@ -260,6 +261,7 @@ export function createActions({
 		reject: (call) => guarded(() => answering.reject(call)),
 		fingerprintOf: (operation) => guarded(() => fingerprintOf(operation)),
 		download: (call) => guarded(() => download(call)),
+		confirmDownload: (call) => guarded(() => answering.confirmDownload(call)),
 	};
 
 	function download({ context, action, input, file, proof }: DownloadCall): Download {
@@ -268,29 +270,43 @@ export function createActions({
 		if (found.kind !== "read")
 			throw new ORPCError("NOT_FOUND", { message: `no read "${action}"` });
 		// Authorization first, outside the transaction, so a pending confirmation it stores stays.
-		const checked = authorizeRead(found, context, action, value, { proof });
-		let opened: OpenedContent | undefined;
+		const checked = authorizeRead(found, context, action, value, { proof, file });
+		let opened: Download | undefined;
 		try {
 			return connection.transaction((): Download => {
-				const output = answerRead(found, context, value, { proof, checked });
-				if (!markedFiles(found.outputSchema, output).includes(file))
-					throw new ORPCError("NOT_FOUND", { message: `no file "${file}"` });
-				const reference = references.live(found.module, file);
-				// A file the read returned that is not a live reference of its module: the module's mistake.
-				if (!reference || !openContent) throw internalError();
-				opened = openContent(reference.content);
-				return {
-					content: opened,
-					name: reference.name,
-					type: reference.type,
-					size: reference.size,
-				};
+				opened = openReturned(found, context, value, file, { proof, checked });
+				return opened;
 			})();
 		} catch (error) {
 			// Rolled back after the file opened: nobody sends it.
-			opened?.close();
+			opened?.content.close();
 			throw error;
 		}
+	}
+
+	/**
+	 * Runs an authorized read and opens the file `file` it returned at a position marked `fileRef()`, inside the
+	 * caller's transaction, which closes it if it rolls back. Opening is the last step.
+	 */
+	function openReturned(
+		found: RegisteredAction,
+		context: VerifiedContext,
+		input: unknown,
+		file: string,
+		options: { readonly proof: string | undefined; readonly checked: ProofCheck | undefined },
+	): Download {
+		const output = answerRead(found, context, input, options);
+		if (!markedFiles(found.outputSchema, output).includes(file))
+			throw new ORPCError("NOT_FOUND", { message: `no file "${file}"` });
+		const reference = references.live(found.module, file);
+		// A file the read returned that is not a live reference of its module: the module's mistake.
+		if (!reference || !openContent) throw internalError();
+		return {
+			content: openContent(reference.content),
+			name: reference.name,
+			type: reference.type,
+			size: reference.size,
+		};
 	}
 
 	function invoke({ context, action, input, idempotencyKey, proof }: ActionCall): unknown {
@@ -446,15 +462,19 @@ export function createActions({
 	}
 
 	/**
-	 * Authorizes a read, or stores it as a pending confirmation and answers `CONFIRMATION_REQUIRED`. Returns how its
-	 * proof checked, for {@link answerRead} to use it.
+	 * Authorizes a read, or stores it as a pending confirmation and answers `CONFIRMATION_REQUIRED`: a pending
+	 * download when it is asked to open `file`. Returns how its proof checked, for {@link answerRead} to use it.
 	 */
 	function authorizeRead(
 		found: RegisteredAction,
 		context: VerifiedContext,
 		action: string,
 		input: unknown,
-		{ proof, confirmed = false }: { readonly proof?: string; readonly confirmed?: boolean },
+		{
+			proof,
+			confirmed = false,
+			file,
+		}: { readonly proof?: string; readonly confirmed?: boolean; readonly file?: string },
 	): ProofCheck | undefined {
 		const fingerprint = operationFingerprint(action, input);
 		const checked = proofs.check(proof, context, fingerprint, clock());
@@ -469,7 +489,14 @@ export function createActions({
 			...(checked === undefined ? {} : { proof: checked }),
 		};
 		orPending(
-			{ kind: "read", operation: { action, input }, fingerprint, origin: context },
+			file === undefined
+				? { kind: "read", operation: { action, input }, fingerprint, origin: context }
+				: {
+						kind: "read",
+						operation: { action, input, file },
+						fingerprint: downloadFingerprint(fingerprint, file),
+						origin: context,
+					},
 			() => authorize(request),
 		);
 		return checked;
@@ -971,6 +998,14 @@ function isTouchedRecord(value: unknown): value is TouchedRecord {
  */
 function undoFingerprint(entry: number): string {
 	return `undo:${entry}`;
+}
+
+/**
+ * The fingerprint of a download waiting for confirmation: its read's and the file's id. It never equals a read's,
+ * whose action name always holds a dot before the first colon, so a download and the same read wait apart.
+ */
+function downloadFingerprint(read: string, file: string): string {
+	return `download:${read}:${file}`;
 }
 
 /**
