@@ -6,7 +6,8 @@ name: domus-restore
 
 services:
     api:
-        image: domus-api:local
+        # The real compose's image, or another one to measure a change before it reaches the real Domus.
+        image: ${DOMUS_ENSAYO_IMAGE:-domus-api:local}
         read_only: true
         tmpfs:
             - /tmp
