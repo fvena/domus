@@ -21,6 +21,11 @@ export {
 	type WriteOptions,
 } from "./platform";
 export { requireRestic } from "./restic";
-export { fakeNode, PermanentJobError, type VerifiedContext } from "@domus/platform/testing";
+export {
+	fakeNode,
+	type InterleavePoint,
+	PermanentJobError,
+	type VerifiedContext,
+} from "@domus/platform/testing";
 /** The platform's own operations, for HTTP tests of modules, whose rules keep them from platform's contracts. */
 export { platformContract } from "@domus/platform/contracts";

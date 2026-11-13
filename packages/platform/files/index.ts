@@ -21,9 +21,11 @@ import type Database from "better-sqlite3";
 
 import type { Clock } from "../actions";
 import { type AccessView, mayUpload, type VerifiedContext } from "../authorization";
+import type { CleanupSweep } from "../background/cleanup";
 import type { Timer } from "../background/timer";
 import { randomId } from "../identity/accounts";
 import { sessionLookup } from "../identity/sessions";
+import { contentSweeps } from "./cleanup";
 import { fileError } from "./failures";
 import { readFileName } from "./name";
 import { createReservations, type FreeSpace } from "./reservations";
@@ -70,9 +72,10 @@ export interface PreparedFile {
 /**
  * The points where the platform tells a test it got there and waits until the test lets it go: only the testing
  * entry gives one. `published`: the content's file is in its place, renamed or reused, and its rows are not yet
- * written.
+ * written. `claimed`: the cleanup marked a content claimed and let its lock go, and its file is not yet removed.
+ * `opened`: a download has its file open and its transaction ended, and no byte is sent yet.
  */
-export type InterleavePoint = "published";
+export type InterleavePoint = "published" | "claimed" | "opened";
 
 export type Interleave = (point: InterleavePoint) => Promise<void> | void;
 
@@ -94,6 +97,10 @@ export interface Files {
 	 * taken before the file exists and freed after it is removed, so one for which this is false was left behind.
 	 */
 	inProgress(name: string): boolean;
+	/** The cleanup's steps of the store, after its rows': they share the lock of each hash with publishing. */
+	readonly sweeps: readonly CleanupSweep[];
+	/** Where a download waits for a test, once its file is open: at once outside the testing entry. */
+	opened(): Promise<void> | void;
 	/**
 	 * Closes the descriptor of every upload in progress, which then fails and removes its temporary file, and of
 	 * every download still open, which then ends with an error.
@@ -342,6 +349,14 @@ export function createFiles({
 		},
 		clearIncoming: () => store.clearIncoming(),
 		inProgress: (name) => reservations.holds(name),
+		sweeps: contentSweeps({
+			connection,
+			store,
+			locks,
+			inProgress: (name) => reservations.holds(name),
+			claimed: () => interleave?.("claimed"),
+		}),
+		opened: () => interleave?.("opened"),
 		close: () => {
 			for (const opened of serving) opened.close();
 			for (const upload of receiving) {

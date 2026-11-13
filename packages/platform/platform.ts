@@ -12,7 +12,12 @@ import { type Capture, installCapture } from "./actions/capture";
 import { type ConfirmationTimes, createConfirmations } from "./actions/confirmations";
 import { createProofs, type Proofs } from "./actions/proofs";
 import { type ActionLog, createActionLog } from "./audit";
-import { type AreaPolicy, type Authorizer, createAuthorizer } from "./authorization";
+import {
+	type AccessView,
+	type AreaPolicy,
+	type Authorizer,
+	createAuthorizer,
+} from "./authorization";
 import {
 	type Background,
 	type BackgroundStart,
@@ -203,6 +208,8 @@ export function openPlatform(
 	const db = openFile(databaseFile, lock);
 	let appliedMigrations: number;
 	let capture: Capture;
+	let view: AccessView;
+	let files: Files | undefined;
 	let background: Background;
 	try {
 		if (databaseFile !== IN_MEMORY) {
@@ -218,11 +225,29 @@ export function openPlatform(
 		ensureDeviceAccount(db, areas, clock());
 		// After the migrations, which its triggers would stop from dropping a column, and before any action.
 		capture = installCapture(db, modules, areas);
+		view = accessView(db, areas);
+		const filesFolder =
+			filesDirectory ??
+			(databaseFile === IN_MEMORY ? undefined : join(dirname(databaseFile), "files"));
+		files =
+			filesFolder === undefined
+				? undefined
+				: createFiles({
+						connection: db,
+						clock,
+						timer,
+						view,
+						directory: filesFolder,
+						...(interleave === undefined ? {} : { interleave }),
+						...(freeSpace === undefined ? {} : { freeSpace }),
+						...(diskFull === undefined ? {} : { diskFull }),
+					});
 		// The backups load their marks now; the background checks its tasks and kinds.
 		background = createBackground({
 			connection: db,
 			clock,
 			timer,
+			...(files === undefined ? {} : { sweeps: files.sweeps }),
 			...(backupConfig === undefined
 				? {}
 				: {
@@ -248,23 +273,6 @@ export function openPlatform(
 	}
 
 	const actionLog = createActionLog(db);
-	const view = accessView(db, areas);
-	const filesFolder =
-		filesDirectory ??
-		(databaseFile === IN_MEMORY ? undefined : join(dirname(databaseFile), "files"));
-	const files =
-		filesFolder === undefined
-			? undefined
-			: createFiles({
-					connection: db,
-					clock,
-					timer,
-					view,
-					directory: filesFolder,
-					...(interleave === undefined ? {} : { interleave }),
-					...(freeSpace === undefined ? {} : { freeSpace }),
-					...(diskFull === undefined ? {} : { diskFull }),
-				});
 	const platform: Platform = {
 		appliedMigrations,
 		startBackground: () => background.start(),

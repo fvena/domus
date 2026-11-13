@@ -283,6 +283,14 @@ Un fichero que falta en disco con su contenido presente es un fallo interno (`IN
 - Borrar un contenido: con el cerrojo de su hash, una transacción comprueba que nada lo protege y lo marca reclamado; después se borra el fichero y se sincroniza su carpeta; por último se borra su fila.
 - «Presente» quiere decir disponible y no reclamado. `attach`, `reattach` y crear un archivo preparado lo comprueban en su transacción.
 - Limpiar dos veces no cambia nada, y un corte a mitad deja cada lote entero.
+- Decidido al implementar la 06:
+    - los pasos van en este orden, todos con el instante del comienzo de la pasada: archivos preparados, referencias soltadas, contenidos, contenidos reclamados y temporales. Los dos primeros son sentencias, como los de la 1d1; los otros tres tocan el disco y van por lotes de contenidos o de temporales, con una transacción por contenido;
+    - un archivo preparado es de una sesión que ya no existe cuando no hay una sesión con su id y su cuenta, la misma regla que `attach`; una referencia soltada se recoge cuando su entrada está deshecha o su `expiresAt` llegó;
+    - «nada lo protege» se comprueba como «nada lo apunta»: ni un archivo preparado ni una referencia, de ninguna clase. Las filas que ya no protegen las quitan los dos pasos anteriores de la misma pasada; una que quede (una sesión que terminó a mitad de la pasada) aplaza el borrado a la noche siguiente. Así nunca queda una fila con clave ajena a un contenido borrado;
+    - el cerrojo del hash cubre solo la transacción que marca reclamado. Borrar el fichero, sincronizar su carpeta y borrar la fila van después, sin el cerrojo: el estado reclamado aparta a la publicación, que responde `CONTENT_BUSY`. La carpeta de dos caracteres se queda aunque se vacíe;
+    - `attach` y `reattach` sobre un contenido reclamado responden «no encontrado», como si no existiera. Con la regla anterior no se alcanza, porque un contenido reclamado no tiene filas que lo apunten: queda como guarda;
+    - una limpieza que falla se reintenta a los 30 s, como cualquier trabajo, y ese reintento ya termina un contenido que dejó reclamado;
+    - los puntos de intercalación son `claimed` (con el contenido marcado y el cerrojo suelto, antes de borrar el fichero) y `opened` (en la puerta, con el descriptor de la descarga abierto y antes del primer byte). Si la promesa que devuelve la prueba se rechaza, el trabajo falla en ese punto: así se simula un corte sin matar el proceso.
 
 ### Copia (Q11)
 
