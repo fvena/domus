@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { readConfig } from "./config";
+import { readConfig, readRestoreConfig } from "./config";
 
 const SECRET = "s".repeat(32);
 const base = {
@@ -159,5 +159,51 @@ describe("readConfig of the backups", () => {
 			expect(message).not.toBe("");
 			expect(message).not.toContain(PASSWORD);
 		}
+	});
+
+	describe("for restoring", () => {
+		/** The message readRestoreConfig throws with, or "" when it does not throw. */
+		const restoreMessageOf = (env: NodeJS.ProcessEnv) => {
+			try {
+				readRestoreConfig(env);
+				return "";
+			} catch (error) {
+				return (error as Error).message;
+			}
+		};
+
+		it("reads the database, the repository and the password file, without the session secret", () => {
+			expect(
+				readRestoreConfig({
+					DOMUS_DATA_DIR: "/data",
+					DOMUS_BACKUP_REPOSITORY: "/backups",
+					DOMUS_BACKUP_PASSWORD_FILE: passwordFile,
+				}),
+			).toEqual({
+				databaseFile: "/data/domus.db",
+				backups: { repository: "/backups", passwordFile },
+			});
+		});
+
+		it("reads the repository with the switch on: it turns off the backup tasks, not restoring", () => {
+			expect(readRestoreConfig({ ...on(), DOMUS_BACKUPS_OFF: "1" }).backups).toEqual({
+				repository: "/backups",
+				passwordFile,
+			});
+		});
+
+		it.each(["DOMUS_BACKUP_REPOSITORY", "DOMUS_BACKUP_PASSWORD_FILE"])(
+			"refuses without %s",
+			(missing) => {
+				expect(restoreMessageOf({ ...on(), [missing]: undefined })).toMatch(
+					new RegExp(`^${missing} is required`),
+				);
+			},
+		);
+
+		it("refuses an empty password file", () => {
+			writeFileSync(passwordFile, "\n");
+			expect(restoreMessageOf(on())).toMatch(/DOMUS_BACKUP_PASSWORD_FILE ".*" is empty/);
+		});
 	});
 });

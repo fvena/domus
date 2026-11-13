@@ -57,6 +57,13 @@ import {
 	wakeBackground,
 	type VerifiedContext,
 	type WriteOutcome,
+	type BackupMarks,
+	listSnapshotsOf,
+	readBackupMarks,
+	restoreWithRuntime,
+	type RestorePoint,
+	type RestoreResult,
+	type SnapshotSummary,
 } from "@domus/platform/testing";
 
 import { createTestBrowser, type TestBrowser } from "./browser";
@@ -201,6 +208,8 @@ export interface TestBackground {
 	resume(task: string): void;
 	/** Sets the local `HH:MM` the admin chose for a declared task, or null for its default. */
 	setTime(task: string, time: string | null): void;
+	/** A read-only snapshot of the backups' marks, the provenance of the last restore included. */
+	marks(): BackupMarks;
 }
 
 /** The platform clock of a test: it moves only when the test moves it. */
@@ -503,6 +512,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		pause: (task) => changeTask(platform, task, { paused: true }),
 		resume: (task) => changeTask(platform, task, { paused: false }),
 		setTime: (task, time) => changeTask(platform, task, { time }),
+		marks: () => readBackupMarks(platform),
 	};
 
 	const door = createHttpHandler({
@@ -581,6 +591,56 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 			close();
 		},
 	};
+}
+
+/** What a test restores: like {@link TestPlatformOptions}, on a file kept across closing and opening. */
+export interface TestRestoreOptions<TModules extends readonly AnyModule[]> {
+	/** The live database's path, the one a test platform opens before and after. */
+	readonly file: string;
+	/** The modules of the code that restores: their migrations are checked and applied to the copy. */
+	readonly modules: TModules;
+	readonly backups: TestBackups;
+	/** The snapshot's id, or a prefix of it: the latest of host `domus` unless given. */
+	readonly snapshot?: string;
+	/** The instant of restoring on the platform clock: {@link TEST_START} unless given. */
+	readonly at?: number;
+	/** Where the exchange stops, for a test that cuts a restore: only the testing entry has it. */
+	readonly cut?: (point: RestorePoint) => Promise<void> | void;
+}
+
+/**
+ * Restores a backup with the platform's real procedure: the exclusive lock, preparing apart and the exchange, or
+ * ending one that was cut. The platform on `file` must be closed, else it refuses.
+ */
+export function restoreBackup<const TModules extends readonly AnyModule[]>({
+	file,
+	modules,
+	backups,
+	snapshot,
+	at = TEST_START,
+	cut,
+}: TestRestoreOptions<TModules>): Promise<RestoreResult> {
+	return restoreWithRuntime(
+		{
+			databaseFile: file,
+			modules,
+			backups: { repository: backups.repository, passwordFile: backups.passwordFile },
+			...(snapshot === undefined ? {} : { snapshot }),
+		},
+		{
+			clock: () => at,
+			...(backups.restic === undefined ? {} : { restic: backups.restic }),
+			...(cut === undefined ? {} : { cut }),
+		},
+	);
+}
+
+/** The snapshots of host `domus` in the repository, oldest first, as `restore list` shows them. */
+export function listBackups(backups: TestBackups): Promise<readonly SnapshotSummary[]> {
+	return listSnapshotsOf(
+		{ repository: backups.repository, passwordFile: backups.passwordFile },
+		backups.restic,
+	);
 }
 
 /**

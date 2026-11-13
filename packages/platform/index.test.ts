@@ -10,14 +10,18 @@ describe("the main entry of platform", () => {
 
 	// Production has no switch that lets everything through (ADR 0022, ADR 0023): no other authorizer, no
 	// synthetic context and no way to invoke the actions but the door, with a session. Besides them, only the core
-	// of `pnpm accounts`, which asks for the secret in a terminal (ADR 0023).
-	it("offers only createPlatform, the door and the accounts command", () => {
+	// of `pnpm accounts`, which asks for the secret in a terminal (ADR 0023), and of `restore.mjs`, which reaches no
+	// cut point of the tests (ADR 0026).
+	it("offers only createPlatform, the door, the accounts command and the restore command", () => {
 		expect(Object.keys(platform).sort()).toEqual([
 			"ACCOUNTS_USAGE",
+			"RESTORE_USAGE",
 			"createHttpHandler",
 			"createPlatform",
 			"parseAccountsArguments",
+			"parseRestoreArguments",
 			"runAccounts",
+			"runRestoreCommand",
 		]);
 	});
 });

@@ -29,6 +29,12 @@ export interface MarkStore {
 	failed(at: number): void;
 	/** Marks the end of a retention and its result. */
 	retention(at: number, result: MarkResult): void;
+	/**
+	 * Marks where a restore came from: its snapshot, the instant its data was captured and the instant of restoring.
+	 * The saved backup becomes that snapshot only when its capture is newer than the one the copy had: restoring
+	 * never makes the backups younger. The `check` stays as the copy had it.
+	 */
+	restored(snapshot: string, capturedAt: number, at: number): void;
 }
 
 interface MarksRow {
@@ -63,6 +69,12 @@ export function createMarkStore(connection: Database.Database): MarkStore {
 			ON CONFLICT (id) DO UPDATE SET retention_at = excluded.retention_at,
 				retention_result = excluded.retention_result`,
 	);
+	const writeRestored = connection.prepare<[string, number, number]>(
+		`INSERT INTO platform_backup_marks (id, restored_snapshot, restored_captured_at, restored_at)
+			VALUES (1, ?, ?, ?)
+			ON CONFLICT (id) DO UPDATE SET restored_snapshot = excluded.restored_snapshot,
+				restored_captured_at = excluded.restored_captured_at, restored_at = excluded.restored_at`,
+	);
 
 	return {
 		current: () => marks,
@@ -77,6 +89,14 @@ export function createMarkStore(connection: Database.Database): MarkStore {
 		retention(at, result) {
 			writeRetention.run(at, result);
 			marks = { ...marks, retention: { at, result } };
+		},
+		restored(snapshot, capturedAt, at) {
+			writeRestored.run(snapshot, capturedAt, at);
+			marks = { ...marks, restored: { snapshot, capturedAt, at } };
+			if (marks.saved === null || marks.saved.capturedAt < capturedAt) {
+				writeSaved.run(capturedAt, snapshot);
+				marks = { ...marks, saved: { capturedAt, snapshot } };
+			}
 		},
 	};
 }

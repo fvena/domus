@@ -19,7 +19,8 @@
 		"check": "bash tooling/scripts/check.sh",
 		"prepare": "git rev-parse --git-dir >/dev/null 2>&1 && git config core.hooksPath .githooks || true",
 		"modules:generate": "pnpm --filter @domus/scripts modules:generate",
-		"accounts": "dotenv -c -- pnpm --silent --filter @domus/api accounts"
+		"accounts": "dotenv -c -- pnpm --silent --filter @domus/api accounts",
+		"restore": "dotenv -c -- pnpm --silent --filter @domus/api restore"
 	},
 	"devDependencies": {
 		"@domus/tsconfig": "workspace:*",

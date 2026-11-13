@@ -377,6 +377,31 @@ function messageOf(error: unknown): string {
 	return (typeof code === "string" ? `${error.name} ${code}` : error.name).slice(0, MAX_ERROR);
 }
 
+/**
+ * Cancels for good every job pending, running or stuck, with `error`, and ends the run of a task each one belonged
+ * to as cancelled with the same error, inside the caller's transaction: nothing of it runs, nor is recovered at
+ * start. Restoring does it, so a copy repeats no notice or effect that already went out.
+ */
+export function discardUnfinishedJobs(
+	connection: Database.Database,
+	now: number,
+	error: string,
+): void {
+	connection
+		.prepare(
+			`UPDATE platform_task_runs SET finished_at = ?, result = 'cancelled', error = ?
+				WHERE result IS NULL AND id IN (SELECT task_run FROM platform_jobs
+					WHERE state IN ('pending', 'running', 'stuck') AND task_run IS NOT NULL)`,
+		)
+		.run(now, error);
+	connection
+		.prepare(
+			`UPDATE platform_jobs SET state = 'cancelled', finished_at = ?, error = ?
+				WHERE state IN ('pending', 'running', 'stuck')`,
+		)
+		.run(now, error);
+}
+
 /** Every job, oldest first. */
 export function readJobs(connection: Database.Database): readonly JobSnapshot[] {
 	return connection

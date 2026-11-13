@@ -86,6 +86,11 @@ export function sessionsOf(
 		}));
 }
 
+/** Ends every session of every account inside the caller's transaction: restoring does it. */
+export function endEverySession(connection: Database.Database): void {
+	connection.prepare("DELETE FROM platform_session").run();
+}
+
 /**
  * An id for a device that groups its sessions without giving away the one its cookie carries: a hash of it,
  * which cannot be turned back into the cookie.

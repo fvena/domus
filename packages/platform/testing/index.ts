@@ -36,6 +36,16 @@ import {
 	type TaskState,
 	type Timer,
 } from "../background";
+import type { BackupConfig, BackupMarks } from "../backups";
+import { createMarkStore } from "../backups/marks";
+import {
+	listSnapshots,
+	type RestoreOptions,
+	type RestoreResult,
+	type RestoreRuntime,
+	runRestore,
+	type SnapshotSummary,
+} from "../backups/restore";
 import {
 	ensureDeviceAccount,
 	insertAccount,
@@ -90,6 +100,39 @@ export type {
 } from "../background";
 export { PermanentJobError } from "../background";
 export { STOP_MARGIN } from "../background/engine";
+export type { BackupMarks } from "../backups";
+export {
+	MARKER as RESTORE_MARKER,
+	type RestoreOptions,
+	type RestorePoint,
+	type RestoreResult,
+	type RestoreRuntime,
+	type SnapshotSummary,
+} from "../backups/restore";
+
+/**
+ * Restores with the runtime the test gives: its clock, the restic executable and, only here, the points where the
+ * test cuts the exchange.
+ */
+export function restoreWithRuntime(
+	options: RestoreOptions,
+	runtime: RestoreRuntime,
+): Promise<RestoreResult> {
+	return runRestore(options, runtime);
+}
+
+/** The snapshots of host `domus` in the repository, oldest first, as `restore list` shows them. */
+export function listSnapshotsOf(
+	backups: BackupConfig,
+	restic?: string,
+): Promise<readonly SnapshotSummary[]> {
+	return listSnapshots(backups, { clock: Date.now, ...(restic === undefined ? {} : { restic }) });
+}
+
+/** The backups' marks of a platform's database, as its row holds them. Plain data: changing it changes nothing. */
+export function readBackupMarks(platform: Platform): BackupMarks {
+	return createMarkStore(connectionOf(platform)).current();
+}
 
 /** What a test may give the background of its platform besides the clock. */
 export interface TestBackgroundRuntime {
