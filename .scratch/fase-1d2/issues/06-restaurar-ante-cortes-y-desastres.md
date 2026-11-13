@@ -15,7 +15,9 @@ La demostración de que el procedimiento de la 05 aguanta lo que tiene que aguan
     3. tras borrar `domus.db-wal` y `domus.db-shm`;
     4. tras renombrar la preparada sobre `domus.db`;
     5. con la base instalada y antes de borrar la marca.
-- En cada posición, el padre comprueba qué hace abrir (arranca con la base anterior entera en la 1; se niega en la 2–5), que el conjunto conservado sigue intacto y que restaurar otra vez deja la restaurada saneada, sin crear otra carpeta `before-restore`.
+- En cada posición, el padre comprueba qué hace abrir (arranca con la base anterior entera en la 1; se niega en la 2–5), que el conjunto conservado sigue intacto y que restaurar otra vez deja la restaurada saneada.
+    - En la 2–5, restaurar otra vez retoma desde la marca, sin crear otra carpeta `before-restore`.
+    - En la 1 no hay marca: la base anterior sigue en su sitio y `api` puede haber escrito en ella, así que restaurar otra vez empieza de cero y crea una carpeta `before-restore` nueva. La del intento cortado queda sobrante e inofensiva, como en la tabla del grilling para los cortes antes de publicar la marca.
 - **Base actual dañada**: restaurar funciona sin abrirla y conserva sus ficheros tal cual.
 - **Base actual ausente**: restaurar instala la copia preparada y no deja una base vacía en ningún momento.
 - **Conjunto anterior con WAL**: una base anterior con escrituras confirmadas todavía en su WAL se conserva en `before-restore-…` y, abierta allí, conserva esas escrituras.
@@ -23,7 +25,7 @@ La demostración de que el procedimiento de la 05 aguanta lo que tiene que aguan
 
 ## Criterios de aceptación
 
-- [ ] Las cinco posiciones de corte tienen su prueba con un proceso muerto por SIGKILL, y en cada una abrir hace lo esperado y retomar termina la restauración.
+- [ ] Las cinco posiciones de corte tienen su prueba con un proceso muerto por SIGKILL, y en cada una abrir hace lo esperado y restaurar otra vez termina la restauración: retomando sin otra carpeta `before-restore` en la 2–5, y empezando de cero en la 1.
 - [ ] En ninguna posición queda un auxiliar viejo junto a la base restaurada ni una `domus.db` vacía.
 - [ ] Restaurar sobre una base dañada funciona y conserva sus ficheros.
 - [ ] Restaurar sin base actual funciona.
