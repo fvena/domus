@@ -102,7 +102,51 @@ La limpieza diaria recoge lo que ya nada protege. La copia sube, junto a la base
 - El nombre llega en `X-File-Name`, en UTF-8 codificado como URL. Se decodifica y se mide en bytes: de 1 a 255. Se rechaza una codificación inválida, un separador de ruta, un carácter de control, `.` o `..`.
 - Un minuto sin bytes, en cualquier momento, cancela la subida con un error controlado. Se cuenta con el reloj y el temporizador de la plataforma, para que las pruebas lo avancen.
 - Al terminar de recibir, la misma petición hace el paso 2 y responde con el archivo preparado: `{ id, name, type, size, expiresAt }`.
-- Errores: cada causa con su código y su estado HTTP. Al menos: sin sesión, no permitido, falta `Content-Length`, demasiado grande, cuerpo que no coincide, nombre no válido, tipo no admitido, límite de la sesión, espacio insuficiente, disco lleno, tiempo sin bytes y contenido ocupado (pasajero, la app reintenta). Los códigos concretos se fijan al implementar la primera tarea y se anotan aquí.
+- Cada causa de error tiene su código y su estado HTTP: «Errores de las rutas de archivos».
+
+### Errores de las rutas de archivos
+
+Las dos rutas responden sus errores con la misma forma JSON que los de oRPC (`code`, `status`, `message` y `data`), para que `api-client` y la app los traten igual. «Reintento» dice si la misma petición puede salir bien más tarde sin cambiar nada.
+
+| Ruta y causa                                                                          | Código                                           | HTTP            | Reintento                              |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------ | --------------- | -------------------------------------- |
+| Las dos, sin sesión o con una sesión que terminó durante la subida                    | `UNAUTHORIZED`                                   | 401             | no                                     |
+| Subir, con una cuenta que no puede (`device`)                                         | `FORBIDDEN`                                      | 403             | no                                     |
+| Subir, sin `Content-Length`                                                           | `LENGTH_REQUIRED`                                | 411             | no                                     |
+| Subir, con `Content-Length` 0                                                         | `FILE_EMPTY`                                     | 400             | no                                     |
+| Subir, con `Content-Length` de más de 25 MB                                           | `FILE_TOO_LARGE`                                 | 413             | no                                     |
+| Subir, con un cuerpo más corto o más largo que lo declarado                           | `BODY_MISMATCH`                                  | 400             | sí, con una subida nueva               |
+| Subir, con un nombre ausente o no válido                                              | `INVALID_FILE_NAME`                              | 400             | no                                     |
+| Subir, con un tipo no admitido o una cabecera que no se reconoce                      | `FILE_TYPE_NOT_ALLOWED`                          | 415             | no                                     |
+| Subir, por encima del límite de la sesión                                             | `UPLOAD_LIMIT`                                   | 429             | sí, al consumirse o caducar preparados |
+| Subir, sin 2 GB libres tras las reservas                                              | `INSUFFICIENT_STORAGE`                           | 507             | sí, más tarde                          |
+| Subir, con `ENOSPC` al escribir                                                       | `DISK_FULL`                                      | 507             | sí, más tarde                          |
+| Subir, tras un minuto sin bytes                                                       | `UPLOAD_TIMEOUT`                                 | 408             | sí                                     |
+| Subir, con el contenido reclamado para borrarse                                       | `CONTENT_BUSY`, con `Retry-After: 1`             | 503             | sí, la app reintenta sola              |
+| Descargar, con un cuerpo que no es ni `{ action, input, file }` ni `{ confirmation }` | `BAD_REQUEST`                                    | 400             | no                                     |
+| Descargar, con una acción que no existe o no es una lectura                           | `NOT_FOUND`                                      | 404             | no                                     |
+| Descargar, con una entrada no válida para la lectura                                  | `BAD_REQUEST`                                    | 400             | no                                     |
+| Descargar, con lo que responda la autorización de la lectura                          | `FORBIDDEN`, `STEP_UP_REQUIRED`                  | 403             | no                                     |
+| Descargar, si la lectura pide confirmación                                            | `CONFIRMATION_REQUIRED`, `data.confirmation`     | 428             | se confirma en la misma ruta           |
+| Descargar, con un error que declara el contrato de la lectura                         | el del contrato                                  | el del contrato | el del contrato                        |
+| Descargar, con un `file` que no salió de la lectura o no existe                       | `NOT_FOUND`                                      | 404             | no                                     |
+| Descargar con `{ confirmation }`, una pendiente fuera de alcance                      | `NOT_FOUND`                                      | 404             | no                                     |
+| Descargar con `{ confirmation }`, caducada, consumida o rechazada                     | `CONFLICT`, `data.reason` como en `confirm`      | 409             | no                                     |
+| `confirmations/confirm` con una pendiente de descarga, sin consumirla                 | `CONFLICT`, `data.reason: "confirm-by-download"` | 409             | no, se confirma en su ruta             |
+
+Y desde `ctx.files`, por el camino de las acciones:
+
+| Causa                                                                            | Código                                              | HTTP |
+| -------------------------------------------------------------------------------- | --------------------------------------------------- | ---- |
+| `attach` con un archivo preparado que no existe o es de otra sesión              | `NOT_FOUND`                                         | 404  |
+| `attach` con un archivo preparado caducado                                       | `CONFLICT`, `data.reason: "prepared-file-expired"`  | 409  |
+| `attach` con un archivo preparado ya consumido                                   | `CONFLICT`, `data.reason: "prepared-file-consumed"` | 409  |
+| `attach`, `detach` o `reattach` sobre un registro que no se ve                   | `NOT_FOUND`                                         | 404  |
+| `attach`, `detach` o `reattach` sobre un registro que se ve y no se puede editar | `FORBIDDEN`                                         | 403  |
+| `detach` de un archivo que no es de ese registro                                 | `NOT_FOUND`                                         | 404  |
+| `reattach` fuera del deshacer de la entrada que soltó la referencia              | `NOT_FOUND`                                         | 404  |
+
+Un fichero que falta en disco con su contenido presente es un fallo interno (`INTERNAL_SERVER_ERROR`, 500), que no debería ocurrir nunca.
 
 ### Reservas de espacio (Q4)
 
@@ -130,7 +174,7 @@ La limpieza diaria recoge lo que ya nada protege. La copia sube, junto a la base
 - En los tres casos que siguen, una transacción vuelve a comprobar que la sesión sigue válida y que el contenido está presente o no tiene fila, y crea la fila del contenido si falta y la del archivo preparado.
 - El cerrojo se suelta al terminar, también tras un error o una cancelación.
 - `api` borra todo `files/incoming/` al arrancar, antes de admitir peticiones.
-- Un fichero sin fila es basura recuperable. Nunca hay una fila de contenido sin su fichero sincronizado.
+- Un fichero sin fila es basura recuperable. Nunca hay un contenido presente sin su fichero sincronizado. Uno reclamado puede haber perdido ya su fichero: es un estado del protocolo de borrar, y la limpieza lo retoma y elimina su fila.
 
 ### Archivo preparado (Q5)
 
@@ -197,7 +241,7 @@ La limpieza diaria recoge lo que ya nada protege. La copia sube, junto a la base
 
 - Tras la instantánea y su `quick_check`, el mismo proceso hijo saca de la instantánea la lista de contenidos que necesita: los de las referencias vivas y los de las soltadas cuya entrada seguía deshacible en el instante de captura. Sin archivos preparados.
 - Cada contenido de la lista se enlaza con un enlace duro dentro de la carpeta de preparación, bajo `files/`, así que la ruta guardada en restic no depende de la carpeta de datos. Si falta uno, la copia falla sin reintento, con su motivo, y no se guarda como buena.
-- restic sube `domus.db` y esos enlaces en una sola instantánea suya, con `--files-from-verbatim`. La preparación se vacía al terminar, como en la 1d2.
+- restic sube `domus.db` y esos enlaces en una sola instantánea suya, con `--files-from-verbatim`. La preparación, enlaces incluidos, se vacía al terminar, también tras un error, una cancelación o una caída, como en la 1d2: un enlace olvidado conservaría unos bytes que la limpieza ya retiró del almacén.
 - Una copia parcial no cuenta como buena ni da paso a la retención (ADR 0026).
 
 ### Restaurar (Q12)
@@ -251,6 +295,7 @@ La limpieza diaria recoge lo que ya nada protege. La copia sube, junto a la base
     - en la limpieza, entre marcar reclamado y borrar el fichero: la carrera con `attach`, `reattach` y crear un archivo preparado, en los dos órdenes;
     - en la descarga, con el descriptor abierto y antes de transmitir: se suelta la referencia, corre la limpieza, se comprueba que el fichero ya no está y la descarga termina con el hash correcto.
 - **Costura 3: `restoreBackup` y `listBackups` con `backups` sobre fichero y restic real**, como en la 1d2:
+    - la preparación de la copia y la de restaurar quedan vacías, sin enlaces, tras éxito, error y cancelación;
     - qué contenidos entran en la copia (vivos, soltados deshacibles en la captura, y no los preparados ni los soltados caducados);
     - un contenido que falta hace fallar la copia, que no cuenta como buena;
     - restaurar devuelve base y contenidos, y las descargas coinciden por hash;
@@ -258,7 +303,7 @@ La limpieza diaria recoge lo que ya nada protege. La copia sube, junto a la base
     - un contenido vivo dañado queda arreglado;
     - un contenido necesario ausente o dañado en la copia niega la restauración sin tocar la base ni el almacén;
     - los archivos preparados de la copia no sirven después.
-- **Costura 4: `startChild` con variantes nuevas de `ChildTask`**, solo para los cortes que piden matar el proceso: al publicar (tras el renombrado y antes de las filas), al borrar (tras marcar reclamado y tras borrar el fichero) y al restaurar (con los contenidos instalados y antes de la marca, y tras la marca). Al reabrir, la prueba comprueba que no hay ninguna fila sin fichero y que la limpieza o la restauración lo retoman.
+- **Costura 4: `startChild` con variantes nuevas de `ChildTask`**, solo para los cortes que piden matar el proceso: al publicar (tras el renombrado y antes de las filas), al borrar (tras marcar reclamado y tras borrar el fichero) y al restaurar (tras instalar parte de los contenidos, tras instalarlos todos y antes de la marca, y la retoma desde la marca). Los puntos de corte del intercambio de la base de la 1d2 siguen pasando. Al reabrir, la prueba comprueba que nunca queda un contenido presente sin fichero, que uno reclamado sin fichero lo retoma la limpieza y que la restauración se retoma o se repite.
 - **Costura 5: pruebas internas de `platform`** para las funciones puras de reconocer el tipo y validar el nombre, sin ampliar `test-utils`: cada firma, cabeceras truncadas, HEIC frente a AVIF, texto UTF-8 válido, inválido y con nulos, nombres mal codificados, largos, con rutas y con caracteres de control.
 - **Con `probe` sobre la costura 1:**
     - la autorización: una nota pública ajena no admite archivos, una privada ajena no se descarga, un id que no salió de la lectura responde «no encontrado», la cuenta `device` no sube;
@@ -293,3 +338,18 @@ La limpieza diaria recoge lo que ya nada protege. La copia sube, junto a la base
 - El ADR 0028, sus enlaces de vuelta, el README de arquitectura, el glosario y el plan ya están al día en la rama del grilling.
 - Algunas decisiones de detalle se toman en esta spec y no en el grilling: la carpeta `files/` y sus subcarpetas, las tres tablas, las marcas `ftyp` de HEIC, la forma de `ctx.files`, las acciones nuevas de `probe`, que las descargas no entren en el registro, el enlace duro en la preparación de la copia y la lista desde el mismo hijo de `quick_check`. Si la implementación muestra que alguna no encaja, se corrige aquí antes de seguir.
 - La copia necesita además, en la preparación, enlaces duros, que no ocupan espacio de datos.
+
+## Tareas
+
+| Tarea                                                    | Qué                                        | Bloqueada por |
+| -------------------------------------------------------- | ------------------------------------------ | ------------- |
+| [01](issues/01-reconocer-el-tipo-y-validar-el-nombre.md) | Reconocer el tipo y validar el nombre      | —             |
+| [02](issues/02-subir-y-preparar.md)                      | Subir y preparar                           | 01            |
+| [03](issues/03-limites-de-la-subida.md)                  | Límites de la subida                       | 02            |
+| [04](issues/04-vincular-descargar-soltar-y-deshacer.md)  | Vincular, descargar, soltar y deshacer     | 02            |
+| [05](issues/05-la-descarga-confirmada.md)                | La descarga confirmada                     | 04            |
+| [06](issues/06-la-limpieza-de-archivos.md)               | La limpieza de archivos                    | 03, 04        |
+| [07](issues/07-huerfanos-y-cortes.md)                    | Huérfanos y cortes al publicar y al borrar | 06            |
+| [08](issues/08-la-copia-lleva-los-contenidos.md)         | La copia lleva los contenidos              | 04            |
+| [09](issues/09-restaurar-base-y-archivos-juntos.md)      | Restaurar base y archivos juntos           | 07, 08        |
+| [10](issues/10-la-pi-y-el-cierre.md)                     | La Pi y el cierre de la 1d3                | todas         |
