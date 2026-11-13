@@ -115,4 +115,19 @@ export const generatedMigrations: readonly ModuleMigration[] = [
 			'CREATE TABLE `platform_backup_marks` (\n\t`id` integer PRIMARY KEY NOT NULL,\n\t`saved_captured_at` integer,\n\t`saved_snapshot` text,\n\t`failed_at` integer,\n\t`retention_at` integer,\n\t`retention_result` text,\n\t`check_at` integer,\n\t`check_result` text,\n\t`restored_snapshot` text,\n\t`restored_captured_at` integer,\n\t`restored_at` integer,\n\tCONSTRAINT "platform_backup_marks_one_row" CHECK("platform_backup_marks"."id" = 1),\n\tCONSTRAINT "platform_backup_marks_retention_result" CHECK("platform_backup_marks"."retention_result" IN (\'ok\', \'failed\')),\n\tCONSTRAINT "platform_backup_marks_check_result" CHECK("platform_backup_marks"."check_result" IN (\'ok\', \'failed\'))\n);\n',
 		],
 	},
+	{
+		tag: "0011_steady_tony_stark",
+		position: 12,
+		hash: "d4c3605b4b83d3cbaaa3cb63a96734ec23a514578b6d017015987c71d708d438",
+		statements: [
+			"CREATE TABLE `platform_file_contents` (\n\t`hash` text PRIMARY KEY NOT NULL,\n\t`size` integer NOT NULL,\n\t`type` text NOT NULL,\n\t`state` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\tCONSTRAINT \"platform_file_contents_type\" CHECK(\"platform_file_contents\".\"type\" IN ('image/jpeg', 'image/png', 'image/webp', 'image/heic', 'application/pdf', 'text/plain')),\n\tCONSTRAINT \"platform_file_contents_state\" CHECK(\"platform_file_contents\".\"state\" IN ('present', 'claimed'))\n);\n",
+			"\nCREATE TABLE `platform_file_references` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`content` text NOT NULL,\n\t`name` text NOT NULL,\n\t`module` text NOT NULL,\n\t`record_table` text NOT NULL,\n\t`record_id` integer NOT NULL,\n\t`released_by` integer,\n\tFOREIGN KEY (`content`) REFERENCES `platform_file_contents`(`hash`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`released_by`) REFERENCES `platform_action_log`(`entry`) ON UPDATE no action ON DELETE no action\n);\n",
+			"\nCREATE INDEX `platform_file_references_record` ON `platform_file_references` (`module`,`record_table`,`record_id`);",
+			"\nCREATE INDEX `platform_file_references_content` ON `platform_file_references` (`content`);",
+			"\nCREATE INDEX `platform_file_references_released_by` ON `platform_file_references` (`released_by`);",
+			"\nCREATE TABLE `platform_prepared_files` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`content` text NOT NULL,\n\t`name` text NOT NULL,\n\t`session` text NOT NULL,\n\t`account` text NOT NULL,\n\t`expires_at` integer NOT NULL,\n\t`consumed` integer DEFAULT false NOT NULL,\n\tFOREIGN KEY (`content`) REFERENCES `platform_file_contents`(`hash`) ON UPDATE no action ON DELETE no action\n);\n",
+			"\nCREATE INDEX `platform_prepared_files_session` ON `platform_prepared_files` (`session`);",
+			"\nCREATE INDEX `platform_prepared_files_content` ON `platform_prepared_files` (`content`);",
+		],
+	},
 ];

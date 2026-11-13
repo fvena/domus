@@ -248,3 +248,14 @@ export function decisionOf(authorizer: Authorizer, request: AuthorizationRequest
 		return "deny";
 	}
 }
+
+/**
+ * Whether the context may upload a file (ADR 0028), an operation of the platform: a person's account, by itself.
+ * Never the device account, which is shared and would leave a file without a person behind it, nor Kira, until
+ * its key (phase 1e).
+ */
+export function mayUpload(view: AccessView, context: VerifiedContext): boolean {
+	if (context.via !== undefined) return false;
+	const role = view.roleOf(context.account);
+	return role === "admin" || role === "member";
+}

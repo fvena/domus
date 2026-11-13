@@ -93,6 +93,11 @@ La limpieza diaria recoge lo que ya nada protege. La copia sube, junto a la base
     - los archivos preparados: id opaco, contenido, nombre, sesión, cuenta, instante de caducidad y si se consumió;
     - las referencias de archivo: id opaco, contenido, nombre, módulo, tabla e id del registro dueño, y, si está soltada, la entrada del registro de acciones que la soltó.
 - Los ids de archivo preparado y de referencia son aleatorios y no son el hash: el hash es la dirección interna, nunca una credencial.
+- Decidido al implementar la 02:
+    - un contenido vive en `files/contents/<dos primeros caracteres del hash>/<hash>`; las carpetas se crean cuando hacen falta, no al abrir;
+    - la carpeta `files/` es por defecto la de la carpeta de datos, y `PlatformOptions.filesDirectory` la cambia; en memoria no hay ninguna y subir responde `INTERNAL_SERVER_ERROR`;
+    - la referencia guarda el nombre SQL de la tabla del registro y su id entero; `released_by` es una clave ajena a la entrada del registro de acciones; el archivo preparado no tiene clave ajena a su sesión, porque una sesión que termina lo deja inservible y la limpieza lo recoge;
+    - el tipo del contenido tiene un `CHECK` con las seis clases.
 
 ### Subir (Q4, Q8)
 
@@ -103,6 +108,12 @@ La limpieza diaria recoge lo que ya nada protege. La copia sube, junto a la base
 - Un minuto sin bytes, en cualquier momento, cancela la subida con un error controlado. Se cuenta con el reloj y el temporizador de la plataforma, para que las pruebas lo avancen.
 - Al terminar de recibir, la misma petición hace el paso 2 y responde con el archivo preparado: `{ id, name, type, size, expiresAt }`.
 - Cada causa de error tiene su código y su estado HTTP: «Errores de las rutas de archivos».
+- Decidido al implementar la 02:
+    - la respuesta buena es un 200 con el JSON del archivo preparado, como las RPC;
+    - se comprueba en este orden: la sesión, quién puede subir, `Content-Length`, el nombre y, después, los bytes;
+    - 25 MB son 25 × 1024 × 1024 bytes;
+    - un `Content-Length` que no es un número decimal cuenta como ausente: `LENGTH_REQUIRED`;
+    - Kira, con `via`, tampoco sube, y una cuenta sin perfil no sube.
 
 ### Errores de las rutas de archivos
 
@@ -176,7 +187,8 @@ Un fichero que falta en disco con su contenido presente es un fallo interno (`IN
     - contenido sin fila: si ya hay un fichero definitivo con ese hash (un huérfano de un corte), lo reutiliza; si no, renombra el temporal a su sitio y sincroniza el fichero y cada carpeta nueva.
 - En los tres casos que siguen, una transacción vuelve a comprobar que la sesión sigue válida y que el contenido está presente o no tiene fila, y crea la fila del contenido si falta y la del archivo preparado.
 - El cerrojo se suelta al terminar, también tras un error o una cancelación.
-- `api` borra todo `files/incoming/` al arrancar, antes de admitir peticiones.
+- `api` borra todo `files/incoming/` al arrancar, antes de admitir peticiones. Lo hace al crear la puerta (`createHttpHandler`), no al abrir la plataforma: `pnpm accounts` también la abre, con `api` en marcha, y borraría sus subidas en curso.
+- Cerrar la plataforma cierra el descriptor de cada subida en curso y cancela la lectura de su cuerpo: la subida falla y borra su temporal sin volver a usar el descriptor.
 - Un fichero sin fila es basura recuperable. Nunca hay un contenido presente sin su fichero sincronizado. Uno reclamado puede haber perdido ya su fichero: es un estado del protocolo de borrar, y la limpieza lo retoma y elimina su fila.
 
 ### Archivo preparado (Q5)
@@ -289,11 +301,11 @@ Un fichero que falta en disco con su contenido presente es un fallo interno (`IN
     No comprueba sentencias SQL, nombres de columnas ni llamadas internas. Cada garantía se prueba una vez, en el nivel más pequeño que pueda romperla.
 
 - **Costura 1: `createTestPlatform` con `probe`, su puerta y `browser()`.** Es la principal. La subida y la descarga van por HTTP de verdad, por el manejador de la puerta en el mismo proceso, sin servidor TCP. Vincular, soltar, deshacer y confirmar van con `invoke`, `undo` y `confirm`, y la limpieza con `background.runDue()`. Opciones nuevas, solo de pruebas:
-    - **Carpeta de contenidos**, también en memoria, con el patrón de `file`: sin valor, una carpeta temporal del arnés que se borra al cerrar, después de cancelar las subidas y cerrar los descriptores; con una ruta, la de la prueba, que se conserva para reabrir, procesos hijos y restaurar.
+    - **Carpeta de contenidos**, también en memoria, con el patrón de `file`: sin valor, una carpeta temporal del arnés que se borra al cerrar, después de cancelar las subidas y cerrar los descriptores; con una ruta, la de la prueba, que se conserva para reabrir, procesos hijos y restaurar. Es la opción `files` de `createTestPlatform`, y `test.filesDirectory` dice cuál es; sin valor no es la carpeta `files` de `file`, aunque la base esté en un fichero.
     - **El espacio libre**, una función que la prueba controla, para el rechazo previo y las reservas concurrentes.
     - **Un fallo `ENOSPC`** en la escritura del temporal, inyectado de forma estrecha, sin abstraer el sistema de ficheros.
     - **Un cuerpo de subida controlado por la prueba**, un flujo que entrega trozos cuando ella quiere, para la reserva antes del primer byte, subidas que compiten, el exceso de tamaño, la discrepancia con `Content-Length`, el minuto sin bytes también tras recibir parte (avanzando el reloj y el temporizador de pruebas), la cancelación y la sesión revocada durante la recepción.
-- **Costura 2: puntos de intercalación de la entrada de pruebas**, que avisan a la prueba y esperan a que los suelte:
+- **Costura 2: puntos de intercalación de la entrada de pruebas**, que avisan a la prueba y esperan a que los suelte. Es una sola función, la opción `interleave(point)` de `createTestPlatform` (`PlatformRuntime.interleave` por dentro), que recibe el nombre del punto y devuelve la promesa que lo retiene; cada tarea añade su nombre a `InterleavePoint`. El de la publicación es `published` y salta en los tres casos que siguen al cerrojo (fichero nuevo, huérfano reutilizado y contenido presente), con el cerrojo tomado:
     - en la publicación, entre el renombrado y sus filas: dos subidas del mismo hash y reutilizar un huérfano;
     - en la limpieza, entre marcar reclamado y borrar el fichero: la carrera con `attach`, `reattach` y crear un archivo preparado, en los dos órdenes;
     - en la descarga, con el descriptor abierto y antes de transmitir: se suelta la referencia, corre la limpieza, se comprueba que el fichero ya no está y la descarga termina con el hash correcto.

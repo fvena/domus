@@ -15,9 +15,11 @@ import { RPCHandler } from "@orpc/server/fetch";
 import { Hono } from "hono";
 
 import { READ_DELEGATION, READ_LOG } from "../actions";
+import { internalError } from "../actions/failures";
 import { sealContext, type VerifiedContext } from "../authorization";
 import { LIST_TASKS } from "../background/operations";
 import { PROTOCOL, platformContract } from "../contracts";
+import { errorResponse } from "../files";
 import { AUTH_PREFIX, type AuthOptions, createAuth } from "../identity/auth";
 import { replacePassword, SessionGoneError, verifiedPasswordHash } from "../identity/passwords";
 import { requestProof, WrongPasswordError } from "../identity/proofs";
@@ -27,6 +29,7 @@ import {
 	backgroundOf,
 	clockOf,
 	connectionOf,
+	filesOf,
 	type Platform,
 	proofIssuerOf,
 } from "../platform";
@@ -35,6 +38,9 @@ export interface HttpHandler {
 	/** A plain function, safe to pass around as `fetch`. */
 	readonly fetch: (request: Request) => Promise<Response>;
 }
+
+/** Where a file is uploaded (ADR 0028): a route of Hono, not of oRPC, to control its receipt. */
+const FILES_PATH = "/api/files";
 
 /** Where RPC procedures live; @domus/api-client calls the same path. */
 const RPC_PREFIX = "/api/rpc";
@@ -70,6 +76,9 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	const connection = connectionOf(platform);
 	const identity = createAuth(connection, auth);
 	const actions = actionsOf(platform);
+	const files = filesOf(platform);
+	// What an earlier process left half uploaded goes before the door admits a request (ADR 0028).
+	files?.clearIncoming();
 
 	/**
 	 * Runs the platform's write `platform.<name>` on the path of the actions with a session, its key and its proof:
@@ -286,6 +295,24 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 		});
 		if (!matched) return c.notFound();
 		const answer = c.newResponse(response.body, response);
+		for (const cookie of responseHeaders.getSetCookie())
+			answer.headers.append("set-cookie", cookie);
+		return answer;
+	});
+
+	// Uploading a file: only with a session; who may upload, authorization decides. The answer is the prepared file,
+	// or the error of the spec's table as the JSON of ORPCError without the RPC envelope.
+	app.post(FILES_PATH, async (c) => {
+		const responseHeaders = new Headers();
+		let answer: Response;
+		try {
+			const verified = await contextOf(c.req.raw, responseHeaders);
+			if (!verified?.session) throw new ORPCError("UNAUTHORIZED");
+			if (!files) throw internalError();
+			answer = Response.json(await files.upload(verified, c.req.raw));
+		} catch (error) {
+			answer = errorResponse(error);
+		}
 		for (const cookie of responseHeaders.getSetCookie())
 			answer.headers.append("set-cookie", cookie);
 		return answer;
