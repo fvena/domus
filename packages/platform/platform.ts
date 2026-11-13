@@ -2,7 +2,7 @@
 // at stop. It checks the module definitions, opens SQLite and brings its schema up to date before anything uses
 // it, makes sure the one device account exists, installs the write capture of the modules' owned tables, and
 // runs the modules' actions with the production authorizer.
-import { isAbsolute } from "node:path";
+import { dirname, isAbsolute } from "node:path";
 
 import { checkModules, type ModuleDefinition, PLATFORM_ID } from "@domus/module-sdk";
 import Database from "better-sqlite3";
@@ -23,10 +23,13 @@ import {
 	type Timer,
 } from "./background";
 import { taskOperations } from "./background/operations";
+import { type BackupConfig, createBackups } from "./backups";
+import { refuseWhileRestorePending } from "./backups/restore";
 import { accessView, registeredAreas } from "./identity/access";
 import { ensureDeviceAccount } from "./identity/accounts";
 import { platformOperations } from "./identity/operations";
 import type { ProofIssuer } from "./identity/proofs";
+import { type DatabaseLock, takeSharedLock } from "./lock";
 import { migrations } from "./migrations";
 import { migrate } from "./migrator";
 
@@ -47,6 +50,11 @@ export interface PlatformOptions {
 	 * instants it got when it was born, so a change applies only to new ones.
 	 */
 	readonly confirmation?: Partial<ConfirmationTimes>;
+	/**
+	 * Where the backups go and the file of their password (ADR 0026): unset, the backups are off and their tasks are
+	 * not declared. Only with a database on a file: their staging folder lives next to it.
+	 */
+	readonly backups?: BackupConfig;
 }
 
 /** The retention of the action log's content unless one is given: 30 days. */
@@ -91,6 +99,8 @@ export interface PlatformRuntime {
 	readonly tasks?: readonly ScheduledTask[];
 	/** Synthetic job kinds a test declares, by name, to enqueue them itself. */
 	readonly jobs?: Readonly<Record<string, JobKind>>;
+	/** The restic executable of the backups: `restic` from the `PATH` unless a test gives another. */
+	readonly restic?: string;
 }
 
 const IN_MEMORY = ":memory:";
@@ -118,13 +128,26 @@ export function createPlatform(options: PlatformOptions): Platform {
 
 /** createPlatform with a given runtime. Inside platform only; the testing entry hands test-utils its clock part. */
 export function openPlatform(
-	{ databaseFile, modules, retention = DEFAULT_RETENTION, confirmation = {} }: PlatformOptions,
-	{ clock, authorizer, timer = realTimer(clock), tasks, jobs }: PlatformRuntime,
+	{
+		databaseFile,
+		modules,
+		retention = DEFAULT_RETENTION,
+		confirmation = {},
+		backups: backupConfig,
+	}: PlatformOptions,
+	{ clock, authorizer, timer = realTimer(clock), tasks, jobs, restic }: PlatformRuntime,
 ): Platform {
 	if (databaseFile !== IN_MEMORY && !isAbsolute(databaseFile)) {
 		throw new Error(
 			`databaseFile must be an absolute path or ":memory:", got "${databaseFile}"`,
 		);
+	}
+	if (backupConfig) {
+		if (databaseFile === IN_MEMORY)
+			throw new Error("backups need a database on a file, not in memory");
+		for (const [name, path] of Object.entries(backupConfig))
+			if (!isAbsolute(path))
+				throw new Error(`backups.${name} must be an absolute path, got "${path}"`);
 	}
 	if (!Number.isSafeInteger(retention) || retention <= 0) {
 		throw new Error(
@@ -140,9 +163,12 @@ export function openPlatform(
 	checkModules(modules);
 
 	const areas = registeredAreas(modules);
-	const db = new Database(databaseFile);
+	// Before the data is touched, and held until close: no restore runs while the platform has the database open.
+	const lock = databaseFile === IN_MEMORY ? undefined : takeSharedLock(dirname(databaseFile));
+	const db = openFile(databaseFile, lock);
 	let appliedMigrations: number;
 	let capture: Capture;
+	let background: Background;
 	try {
 		if (databaseFile !== IN_MEMORY) {
 			const mode = db.pragma("journal_mode = WAL", { simple: true });
@@ -157,18 +183,32 @@ export function openPlatform(
 		ensureDeviceAccount(db, areas, clock());
 		// After the migrations, which its triggers would stop from dropping a column, and before any action.
 		capture = installCapture(db, modules, areas);
+		// The backups load their marks now; the background checks its tasks and kinds.
+		background = createBackground({
+			connection: db,
+			clock,
+			timer,
+			...(backupConfig === undefined
+				? {}
+				: {
+						backups: createBackups({
+							connection: db,
+							clock,
+							timer,
+							config: backupConfig,
+							dataDir: dirname(databaseFile),
+							...(restic === undefined ? {} : { executable: restic }),
+						}),
+					}),
+			...(tasks === undefined ? {} : { extraTasks: tasks }),
+			...(jobs === undefined ? {} : { extraKinds: jobs }),
+		});
 	} catch (error) {
 		db.close();
+		lock?.release();
 		throw error;
 	}
 
-	const background = createBackground({
-		connection: db,
-		clock,
-		timer,
-		...(tasks === undefined ? {} : { extraTasks: tasks }),
-		...(jobs === undefined ? {} : { extraKinds: jobs }),
-	});
 	const platform: Platform = {
 		appliedMigrations,
 		startBackground: () => background.start(),
@@ -179,6 +219,7 @@ export function openPlatform(
 					"stop the background before closing the platform: a job may still use it",
 				);
 			if (db.open) db.close();
+			lock?.release();
 		},
 	};
 	const actionLog = createActionLog(db);
@@ -211,6 +252,21 @@ export function openPlatform(
 		background,
 	});
 	return platform;
+}
+
+/**
+ * Opens the SQLite file, after the shared lock and once no restore is left unended in its folder; when it cannot,
+ * frees the lock taken for it.
+ */
+function openFile(databaseFile: string, lock: DatabaseLock | undefined): Database.Database {
+	try {
+		// A marker means the exchange of a restore was cut: the files beside it may be half of each set.
+		if (lock) refuseWhileRestorePending(dirname(databaseFile));
+		return new Database(databaseFile);
+	} catch (error) {
+		lock?.release();
+		throw error;
+	}
 }
 
 function internalsOf(platform: Platform) {

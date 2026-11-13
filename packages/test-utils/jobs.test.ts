@@ -249,3 +249,64 @@ describe("the synthetic jobs of the background control", () => {
 		]);
 	});
 });
+
+describe("the failed hook of a job kind", () => {
+	/** A held job whose kind notes each instant the engine calls its `failed` with. */
+	function failingJob(lane: SyntheticJob["lane"]) {
+		const held = heldJob(lane);
+		const failures: number[] = [];
+		const job: SyntheticJob = { ...held.job, failed: (at) => void failures.push(at) };
+		return { held, job, failures };
+	}
+
+	it("is called once, at the failure's instant, when a permanent error fails the job", async () => {
+		const broken = failingJob("maintenance");
+		await using test = createTestPlatform({ modules: [], jobs: { broken: broken.job } });
+		test.background.start();
+		test.background.enqueue("broken");
+		await test.background.flush();
+
+		broken.held.current.fail(new PermanentJobError("the repository is gone"));
+		await test.background.settled();
+
+		expect(broken.failures).toEqual([test.clock.now()]);
+	});
+
+	it("is called once, only when a passing error used up the attempts", async () => {
+		const flaky = failingJob("short");
+		await using test = createTestPlatform({ modules: [], jobs: { flaky: flaky.job } });
+		test.background.start();
+		test.background.enqueue("flaky");
+		await test.background.flush();
+
+		for (const wait of [30, 60, 120, 240]) {
+			flaky.held.current.fail(new Error("the network is down"));
+			await test.background.flush();
+			expect(flaky.failures).toEqual([]);
+			test.clock.advance(wait * SECOND);
+			await test.background.flush();
+		}
+		expect(flaky.held.started).toBe(5);
+
+		flaky.held.current.fail(new Error("the network is down"));
+		await test.background.settled();
+
+		expect(flaky.failures).toEqual([test.clock.now()]);
+	});
+
+	it("is not called when stopping cancels the job", async () => {
+		const cancelled = failingJob("maintenance");
+		await using test = createTestPlatform({ modules: [], jobs: { held: cancelled.job } });
+		test.background.start();
+		test.background.enqueue("held");
+		await test.background.flush();
+
+		const stopping = test.background.stop();
+		expect(cancelled.held.current.signal.aborted).toBe(true);
+		cancelled.held.current.fail(new Error("cancelled"));
+		await stopping;
+
+		expect(test.background.jobs()).toEqual([expect.objectContaining({ state: "cancelled" })]);
+		expect(cancelled.failures).toEqual([]);
+	});
+});

@@ -1,5 +1,5 @@
 // Internal tests of the engine, for what cannot be provoked from outside the platform: a process that ended in
-// the middle of a job, and two claims of the same job.
+// the middle of a job, two claims of the same job, and a job kind's `failed` rolled back with the job's end.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { connectionOf, openPlatform } from "../platform";
-import { createEngine, readJobs } from "./engine";
+import { createEngine, PermanentJobError, readJobs } from "./engine";
 import { readTaskRuns } from "./scheduler";
 import { controlledTimer } from "./timer";
 
@@ -75,6 +75,49 @@ describe("the engine", () => {
 		]);
 		expect(engine.recover()).toBe(0);
 		after.close();
+	});
+
+	it("rolls back a job kind's failed, with the job's end, when what follows in that transaction fails", async () => {
+		using file = databaseFile();
+		const platform = openPlatform(
+			{ databaseFile: file.path, modules: [] },
+			{ clock, timer: controlledTimer(clock) },
+		);
+		const connection = connectionOf(platform);
+		connection.exec("CREATE TABLE test_failed_marks (at INTEGER NOT NULL)");
+		const markFailed = connection.prepare("INSERT INTO test_failed_marks (at) VALUES (?)");
+		const engine = createEngine({
+			connection,
+			clock,
+			timer: controlledTimer(clock),
+			kinds: new Map([
+				[
+					"doomed",
+					{
+						lane: "maintenance",
+						run: () => {
+							throw new PermanentJobError("doomed from the start");
+						},
+						failed: (at: number) => markFailed.run(at),
+					},
+				],
+			]),
+			onFinish: () => {
+				throw new Error("the run's end could not be recorded");
+			},
+		});
+
+		engine.enqueue({ kind: "doomed", runAt: NOW });
+		engine.pump();
+		await expect(Promise.all(engine.inFlight())).rejects.toThrow(
+			"the run's end could not be recorded",
+		);
+
+		expect(connection.prepare("SELECT at FROM test_failed_marks").all()).toEqual([]);
+		expect(readJobs(connection)).toEqual([
+			expect.objectContaining({ kind: "doomed", state: "running", attempts: 1 }),
+		]);
+		platform.close();
 	});
 
 	it("recovers at the start of the background, and the run of a job out of attempts ends failed", async () => {

@@ -3,8 +3,9 @@ import { ORPCError } from "@orpc/server";
 // dbFor; a platform with the real authorization and a clock the test chooses; the way to invoke its actions and
 // undo their entries with a verified context; synthetic verified contexts; the privileged preparation of
 // accounts, roles, passwords, permission rows, delegation rows and sessions, without a session or a proof; the
-// platform's real read of a delegation table and real request of a step-up proof; and a read of its action log
-// and of its stored pending confirmations. A rule of .dependency-cruiser.cjs keeps every other importer out, production code of platform included; the main entry offers none of it.
+// platform's real read of a delegation table and real request of a step-up proof; a read of its action log
+// and of its stored pending confirmations; and child processes that hold the platform open or the exclusive lock
+// until the test kills them (ADR 0026). A rule of .dependency-cruiser.cjs keeps every other importer out, production code of platform included; the main entry offers none of it.
 import { hashPassword } from "better-auth/crypto";
 
 import {
@@ -35,6 +36,9 @@ import {
 	type TaskState,
 	type Timer,
 } from "../background";
+import type { BackupConfig, BackupMarks } from "../backups";
+import { createMarkStore } from "../backups/marks";
+import { listSnapshots, type SnapshotSummary } from "../backups/restore";
 import {
 	ensureDeviceAccount,
 	insertAccount,
@@ -77,6 +81,7 @@ export type {
 	VerifiedContext,
 } from "../authorization";
 export { type ModuleDatabase, moduleDatabase } from "./module-database";
+export { type ChildTask, startChild, type TestChild } from "./children";
 export { controlledTimer, type ControlledTimer } from "../background";
 export type {
 	JobContext,
@@ -88,6 +93,33 @@ export type {
 } from "../background";
 export { PermanentJobError } from "../background";
 export { STOP_MARGIN } from "../background/engine";
+export type { BackupMarks } from "../backups";
+/**
+ * `runRestore` restores with the runtime the test gives: its clock, the restic executable and, only here, the points
+ * where the test cuts the exchange.
+ */
+export {
+	MARKER as RESTORE_MARKER,
+	type RestoreOptions,
+	type RestorePoint,
+	type RestoreResult,
+	type RestoreRuntime,
+	runRestore,
+	type SnapshotSummary,
+} from "../backups/restore";
+
+/** The snapshots of host `domus` in the repository, oldest first, as `restore list` shows them. */
+export function listSnapshotsOf(
+	backups: BackupConfig,
+	restic?: string,
+): Promise<readonly SnapshotSummary[]> {
+	return listSnapshots(backups, { clock: Date.now, ...(restic === undefined ? {} : { restic }) });
+}
+
+/** The backups' marks of a platform's database, as its row holds them. Plain data: changing it changes nothing. */
+export function readBackupMarks(platform: Platform): BackupMarks {
+	return createMarkStore(connectionOf(platform)).current();
+}
 
 /** What a test may give the background of its platform besides the clock. */
 export interface TestBackgroundRuntime {
@@ -97,6 +129,8 @@ export interface TestBackgroundRuntime {
 	readonly tasks?: readonly ScheduledTask[];
 	/** Synthetic job kinds of the test, by name, of either lane, that the test enqueues. Not a contract for modules. */
 	readonly jobs?: Readonly<Record<string, JobKind>>;
+	/** The restic executable of the backups, such as a fake one: `restic` from the `PATH` unless given. */
+	readonly restic?: string;
 }
 
 /**
@@ -106,13 +140,14 @@ export interface TestBackgroundRuntime {
 export function createPlatformWithClock(
 	options: PlatformOptions,
 	clock: Clock,
-	{ timer, tasks, jobs }: TestBackgroundRuntime = {},
+	{ timer, tasks, jobs, restic }: TestBackgroundRuntime = {},
 ): Platform {
 	return openPlatform(options, {
 		clock,
 		...(timer === undefined ? {} : { timer }),
 		...(tasks === undefined ? {} : { tasks }),
 		...(jobs === undefined ? {} : { jobs }),
+		...(restic === undefined ? {} : { restic }),
 	});
 }
 

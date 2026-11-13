@@ -9,6 +9,7 @@
 import type Database from "better-sqlite3";
 
 import type { Clock } from "../actions";
+import { errorCode } from "../error-code";
 import type { jobs } from "../schema";
 import type { Timer } from "./timer";
 
@@ -42,6 +43,11 @@ export interface JobKind {
 	/** Milliseconds from its start until its signal is aborted. Unset: {@link LANE_TIMEOUT} of its lane. */
 	readonly timeout?: number;
 	run(context: JobContext): Promise<void> | void;
+	/**
+	 * Runs inside the transaction that records the job's end for good when it failed: at once for a permanent error,
+	 * or once a passing error used up its attempts. Not for a job that stopping cancelled.
+	 */
+	failed?(at: number): void;
 }
 
 /**
@@ -214,6 +220,7 @@ export function createEngine({
 		}
 		const error = end.state === "done" ? null : end.error;
 		markEnded.run(end.state, finishedAt, error, row.id);
+		if (end.state === "failed") kinds.get(row.kind)?.failed?.(finishedAt);
 		onFinish?.({
 			id: row.id,
 			kind: row.kind,
@@ -373,8 +380,33 @@ function messageOf(error: unknown): string {
 	if (!(error instanceof Error)) return "a non-Error value was thrown";
 	if (error instanceof PermanentJobError)
 		return `${error.name}: ${error.message}`.slice(0, MAX_ERROR);
-	const code = (error as { code?: unknown }).code;
-	return (typeof code === "string" ? `${error.name} ${code}` : error.name).slice(0, MAX_ERROR);
+	const code = errorCode(error);
+	return (code === undefined ? error.name : `${error.name} ${code}`).slice(0, MAX_ERROR);
+}
+
+/**
+ * Cancels for good every job pending, running or stuck, with `error`, and ends the run of a task each one belonged
+ * to as cancelled with the same error, inside the caller's transaction: nothing of it runs, nor is recovered at
+ * start. Restoring does it, so a copy repeats no notice or effect that already went out.
+ */
+export function discardUnfinishedJobs(
+	connection: Database.Database,
+	now: number,
+	error: string,
+): void {
+	connection
+		.prepare(
+			`UPDATE platform_task_runs SET finished_at = ?, result = 'cancelled', error = ?
+				WHERE result IS NULL AND id IN (SELECT task_run FROM platform_jobs
+					WHERE state IN ('pending', 'running', 'stuck') AND task_run IS NOT NULL)`,
+		)
+		.run(now, error);
+	connection
+		.prepare(
+			`UPDATE platform_jobs SET state = 'cancelled', finished_at = ?, error = ?
+				WHERE state IN ('pending', 'running', 'stuck')`,
+		)
+		.run(now, error);
 }
 
 /** Every job, oldest first. */

@@ -561,6 +561,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6
+      tsx:
+        specifier: 'catalog:'
+        version: 4.23.15
       typescript:
         specifier: 'catalog:'
         version: typescript-native-bridge@6.0.3-bridge.19.tsgo.7.0.2

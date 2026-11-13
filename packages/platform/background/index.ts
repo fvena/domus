@@ -5,12 +5,14 @@
 import type Database from "better-sqlite3";
 
 import type { Clock } from "../actions";
-import { cleanupTask } from "./cleanup";
+import { CLEANUP_SCHEDULE, cleanupTask } from "./cleanup";
 import { createEngine, type JobKind } from "./engine";
 import {
 	createScheduler,
+	moveNextRuns,
 	type ScheduledTask,
 	type TaskOverview,
+	type TaskSchedule,
 	type TaskSettings,
 } from "./scheduler";
 import type { Timer } from "./timer";
@@ -21,17 +23,54 @@ const HEARTBEAT = 60 * 1000;
 export const SILENCE_THRESHOLD = 5 * 60 * 1000;
 
 /**
- * What the watcher says of the background, for `/health`: only a state and its reason, nothing personal.
- * `scheduler-silent`: no wake for more than {@link SILENCE_THRESHOLD}. `lane-stuck`: a lane holds a stuck job.
+ * Why the watcher says the background is degraded, in the fixed order `/health` lists them (ADR 0026).
+ * `scheduler-silent`: no wake for more than {@link SILENCE_THRESHOLD}. `lane-stuck`: a lane holds a stuck job. The
+ * backups' own come from their marks.
+ */
+export const BACKGROUND_REASONS = [
+	"scheduler-silent",
+	"lane-stuck",
+	"backup-stale",
+	"backup-retention-failed",
+	"backup-check-failed",
+] as const;
+export type BackgroundReason = (typeof BACKGROUND_REASONS)[number];
+export type BackupReason = Exclude<BackgroundReason, "scheduler-silent" | "lane-stuck">;
+
+/**
+ * The backups as `/health` tells them: turned off, none saved and none failed yet, none saved but an attempt failed,
+ * or at least one saved.
+ */
+export type BackupsState = "off" | "none-yet" | "none" | "saved";
+
+/**
+ * What the watcher says of the background, for `/health`: states and reasons, nothing personal. `reasons` comes
+ * only when degraded, never empty, in the order of {@link BACKGROUND_REASONS}; `backups` always.
  */
 export type BackgroundHealth =
-	| { readonly status: "ok" }
-	| { readonly status: "degraded"; readonly reason: "scheduler-silent" | "lane-stuck" };
+	| { readonly status: "ok"; readonly backups: BackupsState }
+	| {
+			readonly status: "degraded";
+			readonly reasons: readonly [BackgroundReason, ...BackgroundReason[]];
+			readonly backups: BackupsState;
+	  };
+
+/** The backups as the background takes them when they are on: their tasks, and what the watcher reads of their marks. */
+export interface BackupsWatch {
+	readonly tasks: readonly ScheduledTask[];
+	/** Reads the marks in memory, never the database. */
+	health(): {
+		readonly state: Exclude<BackupsState, "off">;
+		readonly reasons: readonly BackupReason[];
+	};
+}
 
 export interface BackgroundOptions {
 	readonly connection: Database.Database;
 	readonly clock: Clock;
 	readonly timer: Timer;
+	/** The backups, when they are on: unset, they are off. */
+	readonly backups?: BackupsWatch;
 	/** Tasks a test declares besides the platform's own. Only the testing entry passes them. */
 	readonly extraTasks?: readonly ScheduledTask[];
 	/** Synthetic job kinds a test declares, by name, to enqueue them itself. Only the testing entry passes them. */
@@ -71,7 +110,10 @@ export interface Background {
 	has(task: string): boolean;
 	/** Each declared task as the admin sees it. Reads only. */
 	overview(): readonly TaskOverview[];
-	/** The watcher: degraded while the scheduler is silent past the threshold or a lane is stuck, else ok. */
+	/**
+	 * The watcher: degraded while the scheduler is silent past the threshold, a lane is stuck or the backups' marks
+	 * give a reason, else ok; and the state of the backups.
+	 */
 	health(): BackgroundHealth;
 }
 
@@ -79,10 +121,11 @@ export function createBackground({
 	connection,
 	clock,
 	timer,
+	backups,
 	extraTasks = [],
 	extraKinds = {},
 }: BackgroundOptions): Background {
-	const tasks = [cleanupTask(connection, clock), ...extraTasks];
+	const tasks = [...platformTasks(connection, clock, backups?.tasks), ...extraTasks];
 	const ids = new Set<string>();
 	for (const { id } of tasks) {
 		if (ids.has(id)) throw new Error(`the scheduled task "${id}" is declared twice`);
@@ -200,10 +243,15 @@ export function createBackground({
 		overview: () => scheduler.overview(),
 
 		health() {
-			if (clock() - lastBeat > SILENCE_THRESHOLD)
-				return { status: "degraded", reason: "scheduler-silent" };
-			if (engine.stuck()) return { status: "degraded", reason: "lane-stuck" };
-			return { status: "ok" };
+			const found = new Set<BackgroundReason>();
+			if (clock() - lastBeat > SILENCE_THRESHOLD) found.add("scheduler-silent");
+			if (engine.stuck()) found.add("lane-stuck");
+			const watched = backups?.health();
+			for (const reason of watched?.reasons ?? []) found.add(reason);
+			const state: BackupsState = watched?.state ?? "off";
+			const [first, ...rest] = BACKGROUND_REASONS.filter((reason) => found.has(reason));
+			if (first === undefined) return { status: "ok", backups: state };
+			return { status: "degraded", reasons: [first, ...rest], backups: state };
 		},
 
 		async settled() {
@@ -216,6 +264,27 @@ export function createBackground({
 	};
 }
 
+/** The platform's own scheduled tasks, in their order: the cleanup and, when they are on, the backups'. */
+function platformTasks(
+	connection: Database.Database,
+	clock: Clock,
+	backupTasks: readonly ScheduledTask[] = [],
+): readonly ScheduledTask[] {
+	return [cleanupTask(connection, clock), ...backupTasks];
+}
+
+/**
+ * Moves the next run of each of the platform's tasks, with the backups' `backupSchedules`, to its next occurrence
+ * from the clock's now, a paused one left as it is. Restoring does it on the copy it stages.
+ */
+export function rescheduleTasks(
+	connection: Database.Database,
+	clock: Clock,
+	backupSchedules: readonly TaskSchedule[],
+): void {
+	moveNextRuns(connection, clock, [CLEANUP_SCHEDULE, ...backupSchedules]);
+}
+
 export { controlledTimer, type ControlledTimer, realTimer, type Timer } from "./timer";
 export {
 	readTaskRuns,
@@ -224,11 +293,13 @@ export {
 	type TaskRun,
 	TaskBusyError,
 	type TaskOverview,
+	type TaskSchedule,
 	type TaskSettings,
 	type TaskState,
 	UnknownTaskError,
 } from "./scheduler";
 export {
+	discardUnfinishedJobs,
 	type JobContext,
 	type JobKind,
 	type JobSnapshot,

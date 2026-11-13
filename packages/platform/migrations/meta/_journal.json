@@ -71,6 +71,13 @@
 			"when": 1794511890479,
 			"tag": "0009_new_thanos",
 			"breakpoints": true
+		},
+		{
+			"idx": 10,
+			"version": "6",
+			"when": 1794520118398,
+			"tag": "0010_numerous_bromley",
+			"breakpoints": true
 		}
 	]
 }

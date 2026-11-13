@@ -130,6 +130,16 @@ export function sessionLives(connection: Database.Database, session: string): bo
 }
 
 /**
+ * Ends every proof of every account, unused or already used, with the same effect as changing a password has on one
+ * account's, inside the caller's transaction: restoring does it.
+ */
+export function endEveryProof(connection: Database.Database): void {
+	connection
+		.prepare("UPDATE platform_proofs SET state = 'ended' WHERE state IN ('issued', 'used')")
+		.run();
+}
+
+/**
  * Ends every proof of the account, unused or already used, as changing its password does, inside the caller's
  * transaction: a used one no longer acknowledges a repeat of its write either.
  */

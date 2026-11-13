@@ -369,3 +369,37 @@ export const jobs = sqliteTable(
 		),
 	],
 );
+
+// Backups (ADR 0026): the marks the backups leave, which the watcher of `/health` reads. platform/backups reads and
+// writes them with prepared statements.
+
+/**
+ * The one row of the backups' marks (`id` is always 1): the last saved backup, with the instant its data was
+ * captured and the id of its snapshot; the last failed attempt; the last retention and the last `check`, each with
+ * its instant and result; and where the last restore came from. The cleanup never touches it, so it outlives the
+ * purge of the runs and every restart. A column is null until its first mark.
+ */
+export const backupMarks = sqliteTable(
+	"platform_backup_marks",
+	{
+		id: integer().primaryKey(),
+		savedCapturedAt: integer("saved_captured_at"),
+		savedSnapshot: text("saved_snapshot"),
+		failedAt: integer("failed_at"),
+		retentionAt: integer("retention_at"),
+		retentionResult: text("retention_result", { enum: ["ok", "failed"] }),
+		checkAt: integer("check_at"),
+		checkResult: text("check_result", { enum: ["ok", "failed"] }),
+		restoredSnapshot: text("restored_snapshot"),
+		restoredCapturedAt: integer("restored_captured_at"),
+		restoredAt: integer("restored_at"),
+	},
+	(table) => [
+		check("platform_backup_marks_one_row", sql`${table.id} = 1`),
+		check(
+			"platform_backup_marks_retention_result",
+			sql`${table.retentionResult} IN ('ok', 'failed')`,
+		),
+		check("platform_backup_marks_check_result", sql`${table.checkResult} IN ('ok', 'failed')`),
+	],
+);

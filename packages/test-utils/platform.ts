@@ -57,6 +57,13 @@ import {
 	wakeBackground,
 	type VerifiedContext,
 	type WriteOutcome,
+	type BackupMarks,
+	listSnapshotsOf,
+	readBackupMarks,
+	runRestore,
+	type RestorePoint,
+	type RestoreResult,
+	type SnapshotSummary,
 } from "@domus/platform/testing";
 
 import { createTestBrowser, type TestBrowser } from "./browser";
@@ -152,6 +159,18 @@ export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	 * {@link TestBackground.enqueue} and ends them with its own promises. Not a contract for modules.
 	 */
 	readonly jobs?: Readonly<Record<string, SyntheticJob>>;
+	/**
+	 * The backups, on: a temporary repository folder and password file, absolute paths, and the restic executable
+	 * (`restic` from the `PATH` unless given, such as a fake one). Only with `file`. Unset: the backups are off.
+	 */
+	readonly backups?: TestBackups;
+}
+
+/** The backups of a test platform. */
+export interface TestBackups {
+	readonly repository: string;
+	readonly passwordFile: string;
+	readonly restic?: string;
 }
 
 /** A synthetic job of a test: its lane, its maximum time if not its lane's, and its work. */
@@ -189,6 +208,8 @@ export interface TestBackground {
 	resume(task: string): void;
 	/** Sets the local `HH:MM` the admin chose for a declared task, or null for its default. */
 	setTime(task: string, time: string | null): void;
+	/** A read-only snapshot of the backups' marks, the provenance of the last restore included. */
+	marks(): BackupMarks;
 }
 
 /** The platform clock of a test: it moves only when the test moves it. */
@@ -380,6 +401,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 	confirmation,
 	tasks,
 	jobs,
+	backups,
 }: TestPlatformOptions<TModules>): TestPlatform<TModules> {
 	let tempDir: string | undefined;
 	let databaseFile = file ?? ":memory:";
@@ -405,12 +427,26 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 	let platform: Platform;
 	try {
 		platform = createPlatformWithClock(
-			{ databaseFile, modules, retention, confirmation },
+			{
+				databaseFile,
+				modules,
+				retention,
+				confirmation,
+				...(backups === undefined
+					? {}
+					: {
+							backups: {
+								repository: backups.repository,
+								passwordFile: backups.passwordFile,
+							},
+						}),
+			},
 			() => now,
 			{
 				timer,
 				...(tasks === undefined ? {} : { tasks }),
 				...(jobs === undefined ? {} : { jobs }),
+				...(backups?.restic === undefined ? {} : { restic: backups.restic }),
 			},
 		);
 	} catch (error) {
@@ -476,6 +512,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		pause: (task) => changeTask(platform, task, { paused: true }),
 		resume: (task) => changeTask(platform, task, { paused: false }),
 		setTime: (task, time) => changeTask(platform, task, { time }),
+		marks: () => readBackupMarks(platform),
 	};
 
 	const door = createHttpHandler({
@@ -554,6 +591,56 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 			close();
 		},
 	};
+}
+
+/** What a test restores: like {@link TestPlatformOptions}, on a file kept across closing and opening. */
+export interface TestRestoreOptions<TModules extends readonly AnyModule[]> {
+	/** The live database's path, the one a test platform opens before and after. */
+	readonly file: string;
+	/** The modules of the code that restores: their migrations are checked and applied to the copy. */
+	readonly modules: TModules;
+	readonly backups: TestBackups;
+	/** The snapshot's id, or a prefix of it: the latest of host `domus` unless given. */
+	readonly snapshot?: string;
+	/** The instant of restoring on the platform clock: {@link TEST_START} unless given. */
+	readonly at?: number;
+	/** Where the exchange stops, for a test that cuts a restore: only the testing entry has it. */
+	readonly cut?: (point: RestorePoint) => Promise<void> | void;
+}
+
+/**
+ * Restores a backup with the platform's real procedure: the exclusive lock, staging apart and the exchange, or
+ * ending one that was cut. The platform on `file` must be closed, else it refuses.
+ */
+export function restoreBackup<const TModules extends readonly AnyModule[]>({
+	file,
+	modules,
+	backups,
+	snapshot,
+	at = TEST_START,
+	cut,
+}: TestRestoreOptions<TModules>): Promise<RestoreResult> {
+	return runRestore(
+		{
+			databaseFile: file,
+			modules,
+			backups: { repository: backups.repository, passwordFile: backups.passwordFile },
+			...(snapshot === undefined ? {} : { snapshot }),
+		},
+		{
+			clock: () => at,
+			...(backups.restic === undefined ? {} : { restic: backups.restic }),
+			...(cut === undefined ? {} : { cut }),
+		},
+	);
+}
+
+/** The snapshots of host `domus` in the repository, oldest first, as `restore list` shows them. */
+export function listBackups(backups: TestBackups): Promise<readonly SnapshotSummary[]> {
+	return listSnapshotsOf(
+		{ repository: backups.repository, passwordFile: backups.passwordFile },
+		backups.restic,
+	);
 }
 
 /**

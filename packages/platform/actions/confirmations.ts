@@ -221,6 +221,16 @@ export function endConfirmationsOnDevice(connection: Database.Database, device: 
 }
 
 /**
+ * Ends every pending confirmation of every account, with the same effect as changing a password has on one
+ * account's, inside the caller's transaction: restoring does it.
+ */
+export function endEveryConfirmation(connection: Database.Database): void {
+	connection
+		.prepare("UPDATE platform_confirmations SET state = 'ended' WHERE state = 'pending'")
+		.run();
+}
+
+/**
  * Ends every pending confirmation of the account still waiting, as changing its password does, inside the
  * caller's transaction.
  */

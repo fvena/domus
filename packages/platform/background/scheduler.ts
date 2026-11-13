@@ -20,10 +20,14 @@ export type Frequency =
 	| { readonly every: "day"; readonly at: string }
 	| { readonly every: "week"; readonly on: Weekday; readonly at: string };
 
-/** A scheduled task the platform declares in its code: a stable id, its default frequency and its job. */
-export interface ScheduledTask {
+/** When a task runs: its stable id and its default frequency. */
+export interface TaskSchedule {
 	readonly id: string;
 	readonly frequency: Frequency;
+}
+
+/** A scheduled task the platform declares in its code: a stable id, its default frequency and its job. */
+export interface ScheduledTask extends TaskSchedule {
 	/** The task's work. Its job kind is named after the task's id. */
 	readonly job: JobKind;
 }
@@ -195,13 +199,8 @@ export function createScheduler({
 			WHERE id = ?`,
 	);
 
-	/** The task's next run after `instant`, at the time the admin chose or else at its default time. */
-	const nextAfter = (task: ScheduledTask, row: TaskRow | undefined, instant: number) => {
-		const time = row?.time ?? task.frequency.at;
-		return task.frequency.every === "week"
-			? nextWeeklyOccurrence(instant, task.frequency.on, time, zone)
-			: nextDailyOccurrence(instant, time, zone);
-	};
+	const nextAfter = (task: ScheduledTask, row: TaskRow | undefined, instant: number) =>
+		nextRunAfter(task, row, instant, zone);
 
 	/** The rows of the declared tasks; a declared task always has one after `sync`. */
 	const rows = () =>
@@ -342,6 +341,41 @@ export function createScheduler({
 			});
 		},
 	};
+}
+
+/** The task's next run after `instant`, at the time the admin chose or else at its default time. */
+function nextRunAfter(
+	{ frequency }: TaskSchedule,
+	row: Pick<TaskRow, "time"> | undefined,
+	instant: number,
+	zone: string,
+): number {
+	const time = row?.time ?? frequency.at;
+	return frequency.every === "week"
+		? nextWeeklyOccurrence(instant, frequency.on, time, zone)
+		: nextDailyOccurrence(instant, time, zone);
+}
+
+/**
+ * Moves the next run of each task of `schedules` that has a row and is not paused to its next occurrence from the
+ * clock's now, catching up nothing it missed: a paused one stays as it is, and resuming moves it from then. The rows
+ * of other tasks are not touched. Restoring does it.
+ */
+export function moveNextRuns(
+	connection: Database.Database,
+	clock: Clock,
+	schedules: readonly TaskSchedule[],
+	zone = HOUSE_ZONE,
+): void {
+	const selectTask = connection.prepare<[string], TaskRow>(
+		"SELECT * FROM platform_tasks WHERE id = ?",
+	);
+	const moveNext = connection.prepare("UPDATE platform_tasks SET next_at = ? WHERE id = ?");
+	const now = clock();
+	for (const schedule of schedules) {
+		const row = selectTask.get(schedule.id);
+		if (row && !row.paused) moveNext.run(nextRunAfter(schedule, row, now, zone), schedule.id);
+	}
 }
 
 /** The state of every task with a row, declared or not, by id. */
