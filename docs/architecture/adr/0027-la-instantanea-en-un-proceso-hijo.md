@@ -1,0 +1,11 @@
+# La instantánea en un proceso hijo
+
+Precisa el ADR 0026: la instantánea de una copia ya no la saca `db.backup()` dentro de `api`, sino un proceso hijo con su propia conexión y `VACUUM INTO`.
+
+**Por qué.** La medición en la Pi, con una base de unos 500 MB, encontró un parón de 1,1 a 1,4 s en cada copia: todas las peticiones esperaban a la vez, sin errores. Los pasos de `db.backup()` se reparten bien entre vueltas del bucle de eventos, pero al terminar SQLite fuerza a disco el fichero de destino de una vez y de forma síncrona, en el único hilo de `api`. Hoy la base pesa unos cientos de KB y no se nota, pero el parón crece con ella. Sacar la copia de ese hilo lo quita de raíz. En otro proceso, `db.backup()` no sirve: la copia se reinicia cada vez que `api` escribe desde su conexión. `VACUUM INTO` saca una copia coherente dentro de una sola transacción de lectura, y en WAL no frena las escrituras de `api`.
+
+**Cómo.** El hijo toma el cerrojo compartido de la base antes de abrirla, igual que `api` y `accounts`: si `api` muriera y el hijo siguiera vivo, restaurar seguiría sin poder cambiar la base bajo él. Hace `VACUUM INTO` en la carpeta de preparación. El instante de captura es el de antes de empezar la copia, nunca el del final: la copia tiene los datos de su comienzo, y anotar el final la rejuvenecería. `quick_check` sigue comprobando la instantánea antes de subirla. Cancelar es terminar el hijo con SIGTERM y después SIGKILL, como cualquier otro, esperando a que acabe antes de vaciar la preparación y liberar el carril. Una salida interrumpida nunca se comprueba ni se sube como copia.
+
+**Lo que hay que vigilar.** `VACUUM` puede renumerar el `rowid` implícito de las tablas sin `INTEGER PRIMARY KEY`, y el registro de acciones ordena por él lo que toca cada entrada. Las pruebas comprueban que una copia restaurada conserva los identificadores, ese orden y las secuencias de `AUTOINCREMENT`. Sacar la copia del hilo no hace que la latencia deje de depender del tamaño: la CPU y el disco siguen compartidos, y una lectura larga puede retrasar los checkpoints y hacer crecer el WAL mientras dura. El umbral de la medición sigue en 500 ms, con las tres repeticiones de la copia entera.
+
+Fecha: 2026-11-13. Preguntas: la medición de la tarea 07 de la fase 1d2.

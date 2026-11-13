@@ -19,7 +19,7 @@ import { join } from "node:path";
 
 import { defineModule, type ModuleMigration } from "@domus/module-sdk";
 import { writeAction } from "@domus/module-sdk/contracts";
-import { type RestorePoint, startChild } from "@domus/platform/testing";
+import { fakeNode, type RestorePoint, startChild } from "@domus/platform/testing";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
@@ -46,18 +46,24 @@ const STUCK_MARGIN = 10 * 1000;
 /** restic derives its key on every open of the repository, which takes about a second each time. */
 const RESTIC_TIMEOUT = 60_000;
 
-/** A module whose one write is logged with its value: the action log shows which writes the database holds. */
+/**
+ * A module whose one write is logged with its value and the records it says it touched, in their order: the action
+ * log shows which writes the database holds.
+ */
 const ledger = defineModule({
 	id: "ledger",
 	schema: {},
 	migrations: [],
 	contract: {
 		note: writeAction({ undoable: false, level: "write" })
-			.input(z.object({ value: z.number() }))
+			.input(z.object({ value: z.number(), touched: z.array(z.string()).optional() }))
 			.output(z.number()),
 	},
 	actions: {
-		note: ({ input }) => ({ result: input.value, touched: [] }),
+		note: ({ input }) => ({
+			result: input.value,
+			touched: (input.touched ?? []).map((id) => ({ type: "note", id })),
+		}),
 	},
 });
 
@@ -248,6 +254,106 @@ describe("restoring a backup", { timeout: RESTIC_TIMEOUT }, () => {
 		expect(
 			test.invoke(test.member("ana"), "ledger.note", { value: 2 }, { idempotencyKey: "two" }),
 		).toEqual(expect.objectContaining({ result: 2 }));
+	});
+
+	it("keeps the entries of the action log, the order of what each touched and their numbering", async () => {
+		using target = restoreTarget();
+		let before: unknown;
+		{
+			await using test = open(target);
+			const ana = test.member("ana");
+			test.invoke(
+				ana,
+				"ledger.note",
+				{ value: 1, touched: ["c", "a", "b"] },
+				{ idempotencyKey: "one" },
+			);
+			test.invoke(
+				ana,
+				"ledger.note",
+				{ value: 2, touched: ["z", "b"] },
+				{ idempotencyKey: "two" },
+			);
+			before = test.log().map(({ entry, touched }) => ({ entry, touched }));
+			test.background.start();
+			await backUp(test);
+		}
+
+		await restoreBackup({
+			file: target.databaseFile,
+			modules: [ledger],
+			backups: target.backups,
+		});
+
+		await using test = open(target);
+		expect(before).toEqual([
+			{
+				entry: 1,
+				touched: ["c", "a", "b"].map((id) => ({ module: "ledger", type: "note", id })),
+			},
+			{ entry: 2, touched: ["z", "b"].map((id) => ({ module: "ledger", type: "note", id })) },
+		]);
+		expect(test.log().map(({ entry, touched }) => ({ entry, touched }))).toEqual(before);
+		test.invoke(test.member("ana"), "ledger.note", { value: 3 }, { idempotencyKey: "three" });
+		expect(test.log().map(({ entry }) => entry)).toEqual([1, 2, 3]);
+	});
+
+	it("holds a consistent state of a database api kept writing while the snapshot's child copied", async () => {
+		using target = restoreTarget();
+		using node = fakeNode({ pause: true });
+		let noted = 0;
+		let beforeTheCopy = 0;
+		{
+			await using test = createTestPlatform({
+				modules: [ledger],
+				file: target.databaseFile,
+				backups: { ...target.backups, node: node.executable },
+			});
+			const ana = test.member("ana");
+			const note = () => {
+				noted += 1;
+				test.invoke(
+					ana,
+					"ledger.note",
+					{ value: noted },
+					{ idempotencyKey: `note-${noted}` },
+				);
+			};
+			test.background.start();
+			test.clock.set(FIRST_BACKUP);
+			// While the child holds the lock, before its copy, and then while it copies, api keeps answering writes.
+			while (node.pausedChild() === undefined) {
+				note();
+				await new Promise((resolve) => setTimeout(resolve, 5));
+			}
+			beforeTheCopy = noted;
+			node.resume();
+			// `quick_check` starts once the copy ended: the last write comes after it.
+			while (!node.children().includes("quick_check")) {
+				note();
+				await new Promise((resolve) => setImmediate(resolve));
+			}
+			note();
+			await test.background.settled();
+			expect(test.background.runs().filter((run) => run.task === "backup")).toEqual([
+				expect.objectContaining({ result: "ok" }),
+			]);
+		}
+
+		await restoreBackup({
+			file: target.databaseFile,
+			modules: [ledger],
+			backups: target.backups,
+		});
+
+		await using test = open(target);
+		const restored = notes(test);
+		// Every write up to one instant, none after it, and every write made before the copy started.
+		expect(restored).toEqual(
+			Array.from({ length: restored.length }, (_, index) => ({ value: index + 1 })),
+		);
+		expect(restored.length).toBeGreaterThanOrEqual(beforeTheCopy);
+		expect(restored.length).toBeLessThan(noted);
 	});
 
 	it("discards the jobs the backup held pending, running or stuck, while the same state opened without restoring recovers them", async () => {

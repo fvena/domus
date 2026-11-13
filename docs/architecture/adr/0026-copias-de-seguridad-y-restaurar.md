@@ -19,3 +19,5 @@ Precisa el ADR 0025: cómo se hace una copia, cómo sabe el vigilante si las cop
 **Lo borrado sigue en las copias.** La retención 7/4/3 no garantiza un plazo máximo de conservación de lo borrado: cuenta meses con instantáneas, no antigüedad, y si las copias se paran, lo viejo se queda. Queda abierto en «Borrar datos privados», que se decide antes de admitir datos privados reales.
 
 Fecha: 2026-11-12. Preguntas del grilling: Q1–Q15 de la fase 1d2.
+
+Precisado por el ADR 0027: la instantánea la saca un proceso hijo con su propia conexión, su cerrojo compartido y `VACUUM INTO`, no `db.backup()` dentro de `api`; el instante de captura es el de antes de empezar la copia.

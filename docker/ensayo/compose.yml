@@ -1,0 +1,42 @@
+# The restore rehearsal (ADR 0026, docs/despliegue.md «Ensayar una restauración»): a second Domus beside the real
+# one, with a data volume of its own, on 127.0.0.1:3001 only. It runs the image the real compose built and reads the
+# real `.env` (`--env-file .env`), so it needs no secret of its own. Run from the repository's root:
+#   docker compose -f docker/ensayo/compose.yml --env-file .env <command>
+name: domus-restore
+
+services:
+    api:
+        # The real compose's image, or another one to measure a change before it reaches the real Domus.
+        image: ${DOMUS_ENSAYO_IMAGE:-domus-api:local}
+        read_only: true
+        tmpfs:
+            - /tmp
+        cap_drop:
+            - ALL
+        security_opt:
+            - no-new-privileges:true
+        restart: "no"
+        ports:
+            - "127.0.0.1:3001:3000"
+        volumes:
+            - data:/data
+            # Its own throwaway repository; only `restore` points it at the real one, by setting
+            # DOMUS_ENSAYO_BACKUPS=/srv/backups/domus for that one command.
+            - ${DOMUS_ENSAYO_BACKUPS:-backups}:/backups
+        secrets:
+            - backup-password
+        environment:
+            TZ: ${TZ:-Europe/Madrid}
+            DOMUS_AUTH_SECRET: ${DOMUS_AUTH_SECRET:?run with --env-file .env}
+            DOMUS_ORIGINS: http://localhost:3001
+            # Off unless DOMUS_ENSAYO_BACKUPS_OFF is set and empty: the measurement turns them on, over its own
+            # repository. `-` and not `:-`, so that empty means on.
+            DOMUS_BACKUPS_OFF: ${DOMUS_ENSAYO_BACKUPS_OFF-1}
+
+secrets:
+    backup-password:
+        file: ${DOMUS_BACKUP_PASSWORD:?run with --env-file .env}
+
+volumes:
+    data:
+    backups:

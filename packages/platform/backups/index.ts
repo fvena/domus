@@ -1,12 +1,12 @@
-// Backups (ADR 0026, which narrows ADR 0025): maintenance of the platform, without actions and without an actor.
-// The `backup` task takes a snapshot of the database into a fixed staging folder of the data folder, checks it in a
-// child process, saves it with restic into an encrypted repository and marks it saved, then applies the retention
-// and marks its result. A failed attempt is marked too. A cancelled job aborts the snapshot or ends the child that
+// Backups (ADR 0026, which narrows ADR 0025, and ADR 0027): maintenance of the platform, without actions and without
+// an actor. The `backup` task takes a snapshot of the database in a child process into a fixed staging folder of the
+// data folder, checks it in another, saves it with restic into an encrypted repository and marks it saved, then
+// applies the retention and marks its result. A failed attempt is marked too. A cancelled job ends the child that
 // runs, and the staging folder is emptied at the start and at the end of every run. The weekly `backup-check` reads
 // the whole repository and marks its result. The marks feed the watcher of `/health`. module-sdk offers none of
 // this, and a dependency rule keeps modules out.
 import { readdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import type Database from "better-sqlite3";
 
@@ -75,10 +75,12 @@ export interface BackupsOptions {
 	/** The platform's timer: how long a child that ignores SIGTERM has before SIGKILL. */
 	readonly timer: Timer;
 	readonly config: BackupConfig;
-	/** The folder of the live database, where the staging folder lives. */
-	readonly dataDir: string;
+	/** The live database's file: the snapshot's child opens it, and the staging folder lives beside it. */
+	readonly databaseFile: string;
 	/** The restic executable: `restic` from the `PATH` unless the testing entry gives another. */
 	readonly executable?: string;
+	/** The Node executable of the child processes: this process's own unless the testing entry gives another. */
+	readonly node?: string;
 }
 
 /** The backups' tasks and what the watcher reads of their marks. The marks load now. */
@@ -87,13 +89,14 @@ export function createBackups({
 	clock,
 	timer,
 	config,
-	dataDir,
+	databaseFile,
 	executable = "restic",
+	node = process.execPath,
 }: BackupsOptions): BackupsWatch {
 	const marks = createMarkStore(connection);
 	const clockAndTimer = { clock, timer };
 	const restic = createRestic(executable, config, clockAndTimer);
-	const staging = join(dataDir, STAGING);
+	const staging = join(dirname(databaseFile), STAGING);
 
 	/** The nightly backup, in the maintenance lane. */
 	const backupTask: ScheduledTask = {
@@ -106,10 +109,10 @@ export function createBackups({
 					try {
 						// What a crash in the middle of a run left goes now. Not emptying it is a failed attempt too.
 						emptyFolder(staging);
-						await takeSnapshot(connection, file, signal);
-						// The data is the database's as the copy ended.
+						// The copy holds the data of its start: noting its end would make it younger than it is.
 						const capturedAt = clock();
-						if (!(await passesQuickCheck(file, signal, clockAndTimer)))
+						await takeSnapshot(databaseFile, file, signal, clockAndTimer, node);
+						if (!(await passesQuickCheck(file, signal, clockAndTimer, node)))
 							throw new PermanentJobError("the snapshot failed quick_check");
 						await unlock(restic, signal);
 						const snapshot = await save(restic, config, staging, capturedAt, signal);

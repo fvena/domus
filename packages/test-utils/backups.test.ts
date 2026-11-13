@@ -23,6 +23,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 
 import { defineModule } from "@domus/module-sdk";
+import { fakeNode } from "@domus/platform/testing";
 import { describe, expect, it, vi } from "vitest";
 
 import { createTestPlatform, TEST_ORIGIN, type TestPlatform } from "./platform";
@@ -49,24 +50,6 @@ const bulk = defineModule({
 				"CREATE TABLE `bulk_rows` (`id` integer PRIMARY KEY, `body` text NOT NULL);",
 				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 400)
 					INSERT INTO bulk_rows (body) SELECT hex(randomblob(1000)) FROM n;`,
-			],
-		},
-	],
-});
-
-/** A module whose migration fills about 10 MB: `db.backup()` copies it in a few dozen steps. */
-const large = defineModule({
-	id: "large",
-	schema: {},
-	migrations: [
-		{
-			tag: "0000_large",
-			position: 0,
-			hash: "hash-of-0000_large",
-			statements: [
-				"CREATE TABLE `large_rows` (`id` integer PRIMARY KEY, `body` text NOT NULL);",
-				`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000)
-					INSERT INTO large_rows (body) SELECT hex(randomblob(1000)) FROM n;`,
 			],
 		},
 	],
@@ -208,6 +191,34 @@ describe("the nightly backup", { timeout: RESTIC_TIMEOUT }, () => {
 		]);
 	});
 
+	it("captures at the instant before the copy starts, never at its end", async () => {
+		using target = backupTarget();
+		using node = fakeNode({ pause: true });
+		await using test = createTestPlatform({
+			modules: [],
+			file: true,
+			backups: { ...target, node: node.executable },
+		});
+		test.background.start();
+
+		test.clock.set(FIRST_BACKUP);
+		await vi.waitFor(() => expect(node.pausedChild()).toBeDefined(), {
+			timeout: RESTIC_TIMEOUT / 2,
+		});
+		// The copy takes ten minutes.
+		test.clock.advance(10 * 60 * 1000);
+		node.resume();
+		await test.background.settled();
+
+		expect(backupRuns(test).map((run) => run.result)).toEqual(["ok"]);
+		expect(snapshots(target)).toEqual([
+			expect.objectContaining({ time: "2026-01-01T04:00:00Z" }),
+		]);
+		expect(test.background.marks().saved).toEqual(
+			expect.objectContaining({ capturedAt: FIRST_BACKUP }),
+		);
+	});
+
 	it("initializes an empty destination on the first backup, and adds to it on the next", async () => {
 		using target = backupTarget();
 		await using test = createTestPlatform({ modules: [], file: true, backups: target });
@@ -227,6 +238,30 @@ describe("the nightly backup", { timeout: RESTIC_TIMEOUT }, () => {
 
 	it("saves nothing of a snapshot that fails quick_check, and fails at once", async () => {
 		using target = backupTarget();
+		using node = fakeNode({ spoilCopy: true });
+		await using test = createTestPlatform({
+			modules: [],
+			file: true,
+			backups: { ...target, node: node.executable },
+		});
+		test.background.start();
+		test.clock.set(FIRST_BACKUP);
+		await test.background.settled();
+
+		expect(backupRuns(test)).toEqual([
+			expect.objectContaining({
+				result: "failed",
+				error: "PermanentJobError: the snapshot failed quick_check",
+			}),
+		]);
+		expect(node.children()).toEqual(["snapshot", "quick_check"]);
+		expect(backupJob(test)).toEqual(expect.objectContaining({ state: "failed", attempts: 1 }));
+		expect(readdirSync(target.repository)).toEqual([]);
+		expect(leftovers(test)).toEqual([]);
+	});
+
+	it("saves nothing of a database the copy cannot read whole, and fails at once", async () => {
+		using target = backupTarget();
 		const dir = mkdtempSync(join(tmpdir(), "domus-backups-data-"));
 		try {
 			const databaseFile = join(dir, "domus.db");
@@ -245,7 +280,7 @@ describe("the nightly backup", { timeout: RESTIC_TIMEOUT }, () => {
 			expect(backupRuns(test)).toEqual([
 				expect.objectContaining({
 					result: "failed",
-					error: "PermanentJobError: the snapshot failed quick_check",
+					error: "PermanentJobError: the snapshot could not be taken",
 				}),
 			]);
 			expect(test.background.jobs().find((job) => job.kind === "backup")).toEqual(
@@ -525,37 +560,36 @@ describe("a backup past its maximum time", { timeout: RESTIC_TIMEOUT }, () => {
 		expect(leftovers(test)).toEqual([]);
 	});
 
-	it("aborts db.backup() while it copies, and leaves the staging folder empty", async () => {
+	it("kills the snapshot's child while it copies, checks and uploads nothing, and leaves the staging folder empty", async () => {
 		using target = backupTarget();
 		using fake = fakeRestic(() => ({}));
-		const dir = mkdtempSync(join(tmpdir(), "domus-backups-data-"));
-		try {
-			const databaseFile = join(dir, "domus.db");
-			await using test = createTestPlatform({
-				modules: [large],
-				file: databaseFile,
-				backups: { ...target, restic: fake.executable },
-			});
-			test.background.start();
+		using node = fakeNode({ pause: true });
+		await using test = createTestPlatform({
+			modules: [],
+			file: true,
+			backups: { ...target, restic: fake.executable, node: node.executable },
+		});
+		test.background.start();
 
-			test.clock.set(FIRST_BACKUP);
-			const snapshot = join(dir, "backup-staging", "domus.db");
-			while (!existsSync(snapshot)) await new Promise((resolve) => setImmediate(resolve));
-			test.clock.advance(MAINTENANCE_TIMEOUT);
-			await test.background.settled();
+		test.clock.set(FIRST_BACKUP);
+		await vi.waitFor(() => expect(node.pausedChild()).toBeDefined(), {
+			timeout: RESTIC_TIMEOUT / 2,
+		});
+		const pid = node.pausedChild() ?? 0;
+		test.clock.advance(MAINTENANCE_TIMEOUT);
+		await test.background.settled();
 
-			expect(backupJob(test)).toEqual(
-				expect.objectContaining({
-					state: "pending",
-					attempts: 1,
-					error: `timed out after ${MAINTENANCE_TIMEOUT} ms`,
-				}),
-			);
-			expect(fake.calls()).toEqual([]);
-			expect(leftovers(test)).toEqual([]);
-		} finally {
-			rmSync(dir, { recursive: true, force: true });
-		}
+		expect(isAlive(pid)).toBe(false);
+		expect(backupJob(test)).toEqual(
+			expect.objectContaining({
+				state: "pending",
+				attempts: 1,
+				error: `timed out after ${MAINTENANCE_TIMEOUT} ms`,
+			}),
+		);
+		expect(node.children()).toEqual(["snapshot"]);
+		expect(fake.calls()).toEqual([]);
+		expect(leftovers(test)).toEqual([]);
 	});
 });
 
