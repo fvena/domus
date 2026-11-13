@@ -35,8 +35,11 @@ export const BACKGROUND_REASONS = [
 export type BackgroundReason = (typeof BACKGROUND_REASONS)[number];
 export type BackupReason = Exclude<BackgroundReason, "scheduler-silent" | "lane-stuck">;
 
-/** The backups as `/health` tells them: turned off, none saved and none failed yet, or at least one saved. */
-export type BackupsState = "off" | "none-yet" | "saved";
+/**
+ * The backups as `/health` tells them: turned off, none saved and none failed yet, none saved but an attempt failed,
+ * or at least one saved.
+ */
+export type BackupsState = "off" | "none-yet" | "none" | "saved";
 
 /**
  * What the watcher says of the background, for `/health`: states and reasons, nothing personal. `reasons` comes

@@ -193,6 +193,7 @@ export function openPlatform(
 						backups: createBackups({
 							connection: db,
 							clock,
+							timer,
 							config: backupConfig,
 							dataDir: dirname(databaseFile),
 							...(restic === undefined ? {} : { executable: restic }),

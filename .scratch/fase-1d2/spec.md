@@ -137,7 +137,7 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
 - **`/health`** cambia la forma de `background` de la 1d1:
     - `status`: `ok` o `degraded`.
     - `reasons`: solo cuando está `degraded`. Es una lista no vacía, en este orden fijo: `scheduler-silent`, `lane-stuck`, `backup-stale`, `backup-retention-failed`, `backup-check-failed`.
-    - `backups`: siempre presente. `off` (apagadas), `none-yet` (ni copia guardada ni intento fallido) o `saved` (hay alguna copia guardada).
+    - `backups`: siempre presente. `off` (apagadas), `none-yet` (ni copia guardada ni intento fallido), `none` (ninguna copia guardada y algún intento fallido) o `saved` (hay alguna copia guardada).
 - **Cuándo se da cada motivo de las copias:**
     - `backup-stale`: la última copia guardada se capturó hace más de 48 h, o no hay ninguna y hay un intento fallido.
     - `backup-retention-failed`: la última retención falló. Desaparece con una retención buena.
@@ -339,6 +339,14 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
     - La imagen no declara `/backups` como volumen: compose lo monta siempre, y un volumen anónimo escondería que falta.
     - El job `unit` corre en el contenedor `node:22-trixie` e instala restic con apt allí: el apt de Ubuntu 24.04 trae restic 0.16, sin el código `10`.
     - La comprobación de restic de las pruebas es un `globalSetup` de `test-utils`, que es donde corren las pruebas de las copias.
+- Decisiones tomadas al implementar la 03:
+    - Con un intento fallido y ninguna copia guardada, `backups` dice `none`: la spec solo tenía `off`, `none-yet` y `saved`, y la tarea pide que deje de decir `none-yet`.
+    - La retención agrupa por host (`--group-by host`). restic agrupa por host y rutas si no se le dice, y la ruta de la instantánea es absoluta: si la carpeta de datos cambiara, las copias viejas quedarían en otro grupo y nunca se podarían.
+    - `restic unlock` con el código `10` no falla: el repositorio aún no existe, y lo decide `backup` (iniciarlo si el destino está vacío o fallar). Con una contraseña incorrecta, la ejecución falla ya en `unlock` (código `12`).
+    - Un bloqueo vigente (código `11`) es un `ResticLockedError` y el motor solo guarda su nombre y su código, así que el registro dice `ResticLockedError backup-11`: el paso y el código.
+    - Cualquier intento de copia que no llegó a guardarla (fallo, bloqueo, tiempo agotado o parada) anota el intento fallido. La retención no lo anota: la copia está guardada.
+    - Al hijo que no termina tras SIGTERM le llega SIGKILL a los 5 s, contados con el reloj y el temporizador de la plataforma: antes de los 10 s en que un trabajo cuenta como atascado. El hijo de `quick_check` recibe el mismo trato que restic.
+    - Un trabajo de copia que agota su tiempo se reintenta como cualquier otro (ADR 0025). Si el tiempo se agota durante `forget`, el reintento repite la copia; con 30 min de tiempo máximo no se espera, y la medición lo revisará.
 - La copia necesita en el NVMe un espacio libre del tamaño de la base, para la instantánea, además del repositorio.
 - Al repartir las tareas se acordó que la fila de las marcas y la forma de `/health` nacen completas en la 01, que la 05 entrega el procedimiento entero de restaurar (retomar y la marca al abrir incluidos) y que la 06 lo demuestra con procesos cortados y casos de desastre.
 
