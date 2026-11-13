@@ -347,6 +347,10 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
     - Cualquier intento de copia que no llegó a guardarla (fallo, bloqueo, tiempo agotado o parada) anota el intento fallido. La retención no lo anota: la copia está guardada.
     - Al hijo que no termina tras SIGTERM le llega SIGKILL a los 5 s, contados con el reloj y el temporizador de la plataforma: antes de los 10 s en que un trabajo cuenta como atascado. El hijo de `quick_check` recibe el mismo trato que restic.
     - Un trabajo de copia que agota su tiempo se reintenta como cualquier otro (ADR 0025). Si el tiempo se agota durante `forget`, el reintento repite la copia; con 30 min de tiempo máximo no se espera, y la medición lo revisará.
+- Decisiones tomadas al implementar la 04:
+    - Un tipo de trabajo puede declarar `failed`, que el motor llama dentro de la transacción que anota su fin definitivo como fallido: al momento con un error permanente, o al agotar los reintentos de uno pasajero (también un tiempo agotado o una ejecución que un reinicio dejó a medias en su último intento). `backup-check` anota ahí el «check fallido»: el trabajo no sabe cuál es su último intento.
+    - Un `check` que una parada cancela no cambia su marca: no ha fallado, y un falso «check fallido» avisaría de un repositorio dañado hasta el domingo siguiente.
+    - Un `unlock` que falla (una contraseña incorrecta, por ejemplo) cuenta como `check` fallido. El código `10` en `unlock` o en `check` termina bien sin tocar la marca.
 - La copia necesita en el NVMe un espacio libre del tamaño de la base, para la instantánea, además del repositorio.
 - Al repartir las tareas se acordó que la fila de las marcas y la forma de `/health` nacen completas en la 01, que la 05 entrega el procedimiento entero de restaurar (retomar y la marca al abrir incluidos) y que la 06 lo demuestra con procesos cortados y casos de desastre.
 

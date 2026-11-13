@@ -29,6 +29,8 @@ export interface MarkStore {
 	failed(at: number): void;
 	/** Marks the end of a retention and its result. */
 	retention(at: number, result: MarkResult): void;
+	/** Marks the end of a check of the repository and its result. */
+	check(at: number, result: MarkResult): void;
 }
 
 interface MarksRow {
@@ -63,6 +65,11 @@ export function createMarkStore(connection: Database.Database): MarkStore {
 			ON CONFLICT (id) DO UPDATE SET retention_at = excluded.retention_at,
 				retention_result = excluded.retention_result`,
 	);
+	const writeCheck = connection.prepare<[number, MarkResult]>(
+		`INSERT INTO platform_backup_marks (id, check_at, check_result) VALUES (1, ?, ?)
+			ON CONFLICT (id) DO UPDATE SET check_at = excluded.check_at,
+				check_result = excluded.check_result`,
+	);
 
 	return {
 		current: () => marks,
@@ -77,6 +84,10 @@ export function createMarkStore(connection: Database.Database): MarkStore {
 		retention(at, result) {
 			writeRetention.run(at, result);
 			marks = { ...marks, retention: { at, result } };
+		},
+		check(at, result) {
+			writeCheck.run(at, result);
+			marks = { ...marks, check: { at, result } };
 		},
 	};
 }
