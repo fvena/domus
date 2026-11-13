@@ -78,8 +78,8 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
 - Es mantenimiento de la plataforma, en el carril de mantenimiento, diaria a las 05:00 para empezar. No tiene actor, no pasa por acciones y no deja entradas en el registro de acciones. No se promete que siempre corra después de la limpieza de las 04:30.
 - Pasos de una ejecución:
     1. Vacía la carpeta de preparación de copias, que es una carpeta fija dentro de la carpeta de datos.
-    2. Saca la instantánea con `db.backup()` de better-sqlite3 dentro de esa carpeta, con un nombre fijo. Guarda como instante de captura el del final de la copia.
-    3. Un proceso hijo de Node abre la instantánea en solo lectura y pasa `PRAGMA quick_check`. Si no da `ok`, la ejecución falla sin reintentos y no sube nada.
+    2. Guarda como instante de captura el de antes de empezar la copia, nunca el del final: la copia tiene los datos de su comienzo, y anotar el final la rejuvenecería. Después, un proceso hijo de Node con su propia conexión toma el cerrojo compartido de la base, como `api` y `accounts`, y saca la instantánea con `VACUUM INTO` dentro de esa carpeta, con un nombre fijo (ADR 0027). La copia es coherente, en una sola transacción de lectura, y no frena las escrituras de `api`. Si el hijo no termina bien, la ejecución falla sin reintentos y no sube nada.
+    3. Otro proceso hijo de Node abre la instantánea en solo lectura y pasa `PRAGMA quick_check`. Si no da `ok`, la ejecución falla sin reintentos y no sube nada.
     4. `restic unlock` quita solo los bloqueos viejos.
     5. `restic backup` de la carpeta de preparación, con host fijo `domus` y el instante de captura como hora de la instantánea, para que la antigüedad la lea quien restaure.
     6. Si la copia quedó guardada, anota la marca de copia guardada y, después, `restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 3 --prune --retry-lock 10m` con el mismo host, y anota la marca de retención. Si otro proceso tiene un bloqueo del repositorio, como la restauración del ensayo, espera hasta 10 min a que lo suelte.
@@ -92,7 +92,7 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
     - `11` (no pudo bloquear el repositorio): error pasajero, que el motor reintenta.
     - `12` (contraseña incorrecta) y cualquier otro: la ejecución falla sin reintentos.
 - **Una retención fallida no repite la copia.** Si `forget --prune` falla después de una copia guardada, la ejecución termina como fallida sin reintentos y con el mensaje de la retención. Un bloqueo que sigue ahí tras los 10 min de espera (el código `11`) también es una retención fallida. La copia sigue guardada y su marca, anotada. La próxima noche se vuelve a intentar.
-- **Cancelación.** Si se agota el tiempo máximo, `db.backup()` se aborta lanzando un error desde su callback de progreso. Un proceso hijo recibe SIGTERM y, si no termina en unos segundos, SIGKILL. El carril se libera solo cuando el hijo ha terminado de verdad.
+- **Cancelación.** Si se agota el tiempo máximo, el proceso hijo que corre, también el de la instantánea, recibe SIGTERM y, si no termina en unos segundos, SIGKILL. El carril se libera solo cuando el hijo ha terminado de verdad. Una instantánea interrumpida nunca se comprueba ni se sube.
 - El tiempo máximo es el del carril de mantenimiento (30 min), revisable con la medición.
 - El mensaje de error de una ejecución sigue la regla de la 1d1: en inglés, sin datos personales y con 200 caracteres como mucho. La salida de restic no se copia entera: solo el paso y el código.
 
@@ -249,7 +249,9 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
     - una copia guardada que restic lista, con host `domus` y su instante de captura;
     - el `init` de un destino vacío, y que un destino con contenido, uno ausente o una contraseña incorrecta fallan sin reintento y sin reinicializar;
     - la retención 7/4/3 sobre instantáneas de días distintos;
-    - una instantánea estropeada que no se sube;
+    - una instantánea estropeada que no se sube, y una base que la copia no puede leer entera;
+    - con un Node falso que detiene el hijo de la instantánea en su copia (ADR 0027): el instante de captura es el de antes de la copia, el hijo tiene el cerrojo compartido mientras copia y cancelar lo mata sin comprobar ni subir nada;
+    - una copia sacada mientras `api` escribe es coherente y se restaura, y una base restaurada conserva los números del registro de acciones y el orden de lo que tocó cada entrada;
     - la carpeta de preparación vacía tras éxito, fallo, cancelación y caída;
     - `backup-check` bueno, fallido y con el repositorio aún inexistente;
     - las copias apagadas, sin tareas y con `backups: off`;
@@ -369,6 +371,11 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
     - La regla `backups-stay-in-platform` cubre también `packages/platform/lock.ts`: `module-sdk` no puede ofrecer el cerrojo de la base, tampoco a través de una cadena de importaciones.
     - Restaurar comprueba la lista de módulos con `checkModules`, como abrir la plataforma, antes de tomar el cerrojo y de tocar la carpeta de datos.
     - `forget` lleva `--retry-lock 10m`, para que «si coincide espera» valga en los dos sentidos: la restauración del ensayo tiene el bloqueo compartido de restic a las 05:00 y la retención espera a que termine, igual que el ensayo espera a un `prune`. Solo un bloqueo que sigue tras la espera cuenta como retención fallida, sin reintento. Los 10 min caben en los 30 min del carril de mantenimiento junto a la copia.
+- La primera medición en la Pi (tarea 07) encontró un parón de 1,1 a 1,4 s en cada copia: al terminar, `db.backup()` fuerza a disco el fichero de destino de una vez, en el único hilo de `api`. El ADR 0027 saca la instantánea a un proceso hijo con `VACUUM INTO`, y estos pasos lo recogen. Decisiones tomadas al implementarlo:
+    - El hijo corre las mismas sentencias del cerrojo compartido que `lock.ts` (`TAKE_SHARED_LOCK`), sobre `domus.lock`, antes de abrir la base en solo lectura. Recibe la ruta de better-sqlite3 que resuelve la plataforma y un entorno vacío, como el de `quick_check`, y escribe `copied` al terminar.
+    - Una copia que el hijo no termina bien falla sin reintentos con `the snapshot could not be taken`, como `quick_check`: `VACUUM INTO` lee la base entera, así que una base dañada falla ya en la copia, y la próxima noche se vuelve a intentar. Con `db.backup()`, un error de la copia se reintentaba.
+    - `VACUUM INTO` conserva el `rowid` implícito de `platform_action_log_touched` y `sqlite_sequence`: las pruebas lo comprueban en la copia y en una base restaurada.
+    - Solo en la entrada de pruebas, `createTestPlatform` recibe el ejecutable de Node de los hijos de las copias, como el de restic. `fakeNode` de `@domus/platform/testing` detiene el hijo de la instantánea en su copia, con el cerrojo tomado, hasta que la prueba lo suelta, o estropea la copia ya hecha para que `quick_check` falle.
 - La copia necesita en el NVMe un espacio libre del tamaño de la base, para la instantánea, además del repositorio.
 - Al repartir las tareas se acordó que la fila de las marcas y la forma de `/health` nacen completas en la 01, que la 05 entrega el procedimiento entero de restaurar (retomar y la marca al abrir incluidos) y que la 06 lo demuestra con procesos cortados y casos de desastre.
 
