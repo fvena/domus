@@ -27,3 +27,7 @@ Los pasos que piden contraseña o `sudo` los hace la persona, en español y paso
 - [ ] El ensayo restaura en `domus-restore` la última copia de producción sin chocar con su retención, entra una sesión nueva y se ven los datos.
 - [ ] La medición está hecha y anotada: ninguna respuesta pasa de 500 ms ni da error, o la spec recoge qué se cambia.
 - [ ] `despliegue.md`, `plan.md`, la guía y el `AGENTS.md` raíz están al día.
+
+## Comments
+
+- La primera medición en la Pi, con una base de unos 500 MB, encontró un parón de 1,1 a 1,4 s en cada copia: todas las peticiones esperaban a la vez, sin errores. Al terminar, `db.backup()` forzaba a disco el fichero de destino de una vez, en el único hilo de `api`. El ADR 0027 saca la instantánea a un proceso hijo con su propia conexión, que toma el cerrojo compartido y hace `VACUUM INTO`; el instante de captura pasa a ser el de antes de empezar la copia. Hecho en `4871529`. Una copia que el hijo no termina bien falla ahora sin reintentos (`the snapshot could not be taken`), y las pruebas detienen el hijo en su copia con `fakeNode`. Falta repetir la medición, con el mismo umbral de 500 ms y las tres copias enteras.
