@@ -16,10 +16,40 @@ async function hold(task: ChildTask): Promise<void> {
 		held.push(
 			createPlatform({ databaseFile: join(task.dataDirectory, "domus.db"), modules: [] }),
 		);
-	} else {
+	} else if (task.hold === "exclusive") {
 		const { takeExclusiveLock } = await import("../lock");
 		held.push(takeExclusiveLock(task.dataDirectory));
+	} else {
+		await restoreUntil(task);
 	}
+}
+
+/**
+ * Restores until the task's cut point and stays there: the restore waits on a promise that never settles, kept
+ * referenced with the suspended procedure and its lock.
+ */
+async function restoreUntil(task: Extract<ChildTask, { hold: "restore" }>): Promise<void> {
+	const { runRestore } = await import("../backups/restore");
+	await new Promise<void>((reached, failed) => {
+		runRestore(
+			{
+				databaseFile: join(task.dataDirectory, "domus.db"),
+				modules: [],
+				backups: task.backups,
+			},
+			{
+				clock: Date.now,
+				...(task.restic === undefined ? {} : { restic: task.restic }),
+				cut: (point) => {
+					if (point !== task.at) return undefined;
+					const forever = new Promise<void>(() => {});
+					held.push(forever);
+					reached();
+					return forever;
+				},
+			},
+		).then(() => failed(new Error(`the restore ended without reaching ${task.at}`)), failed);
+	});
 }
 
 function tell(message: ChildMessage, then?: () => void): void {

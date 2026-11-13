@@ -5,12 +5,28 @@ import { fork } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import type { BackupConfig } from "../backups";
+import type { RestorePoint } from "../backups/restore";
+
 /** What a child holds over a data folder, the one that has or will have `domus.db` and `domus.lock`. */
 export type ChildTask =
 	/** The platform open, without modules, as `api` or `accounts` have it. */
 	| { readonly hold: "platform"; readonly dataDirectory: string }
 	/** The exclusive lock of the database, as restoring takes it. */
-	| { readonly hold: "exclusive"; readonly dataDirectory: string };
+	| { readonly hold: "exclusive"; readonly dataDirectory: string }
+	/**
+	 * A restore of the latest snapshot, without modules, stopped at a cut point of its exchange: the child tells the
+	 * test once it got there, and holds the exclusive lock until the test kills it. A restore that ends or fails
+	 * before reaching the point is the child's error.
+	 */
+	| {
+			readonly hold: "restore";
+			readonly dataDirectory: string;
+			readonly backups: BackupConfig;
+			/** The restic executable: `restic` from the `PATH` unless given. */
+			readonly restic?: string;
+			readonly at: RestorePoint;
+	  };
 
 /** What a child tells the test: that it holds its task, or why it could not. */
 export type ChildMessage = { readonly ready: true } | { readonly error: string };

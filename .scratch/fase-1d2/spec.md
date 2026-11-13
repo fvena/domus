@@ -351,6 +351,20 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
     - Un tipo de trabajo puede declarar `failed`, que el motor llama dentro de la transacción que anota su fin definitivo como fallido: al momento con un error permanente, o al agotar los reintentos de uno pasajero (también un tiempo agotado o una ejecución que un reinicio dejó a medias en su último intento). `backup-check` anota ahí el «check fallido»: el trabajo no sabe cuál es su último intento.
     - Un `check` que una parada cancela no cambia su marca: no ha fallado, y un falso «check fallido» avisaría de un repositorio dañado hasta el domingo siguiente.
     - Un `unlock` que falla (una contraseña incorrecta, por ejemplo) cuenta como `check` fallido. El código `10` en `unlock` o en `check` termina bien sin tocar la marca.
+- Decisiones tomadas al implementar la 05:
+    - Restaurar vive en `packages/platform/backups/` (`restore.ts`, y el núcleo del comando en `command.ts`), así que la regla `backups-stay-in-platform` lo cubre. La carpeta de preparación de restaurar es `restore-staging/` en la carpeta de datos, y la copia preparada se llama `domus.db`.
+    - Si preparar falla (restic, `quick_check`, migraciones), la carpeta de preparación se vacía: no queda una copia en claro. Todavía no hay marca, así que no rompe la invariante.
+    - Al preparar se borra un `restore.pending.tmp` que nunca se publicó. Un corte con el temporal escrito y sin renombrar no deja marca, así que la siguiente ejecución prepara otra vez y crea otra carpeta `before-restore`: `api` pudo abrir y escribir en la base entretanto, y el conjunto nuevo es el bueno. La 06 debe tenerlo en cuenta en la posición 1.
+    - La marca es JSON con la carpeta conservada, el identificador de la instantánea, su captura y el instante de restaurar. Es ilegible si no se puede leer por otra cosa que no existir, o si no tiene esa forma.
+    - Al retomar, si no está la copia preparada ni `domus.db`, restaurar falla y deja la marca.
+    - `before-restore-<instante>` va al segundo (`before-restore-20260101T040000Z`); si ya existe, restaurar falla antes de publicar la marca.
+    - `quick_check` de restaurar corre en el propio proceso: el comando no atiende nada más. `journal_mode=DELETE` se pone al final, como dice el paso 7, y un `-wal` que quede tras cerrar es un error.
+    - Las próximas ejecuciones se recalculan con las tareas que la plataforma declara con las copias encendidas (`cleanup` y las de `createBackups`, también `backup-check`). Las filas de tareas no declaradas no se tocan.
+    - La marca de copia guardada pasa a la instantánea restaurada solo si su captura es estrictamente más reciente.
+    - `restic snapshots` y `restic restore` de restaurar llevan `--retry-lock 30m`, el bloqueo compartido que pide el ensayo; `list` no espera. `list` con el código `10` (repositorio sin iniciar) da una lista vacía y escribe `no snapshots of host domus yet`.
+    - `--snapshot` acepta el identificador o su comienzo, en hexadecimal, si solo uno empieza así. `list` escribe el identificador entero y la captura en ISO UTC.
+    - `restore.mjs` lee `DOMUS_DATA_DIR` y las dos rutas de las copias con `readRestoreConfig`, sin el secreto de las sesiones, y no mira `DOMUS_BACKUPS_OFF`: el interruptor apaga las tareas de `api`, no restaurar.
+    - Los puntos de corte son `marker-written`, `marker-published`, `auxiliaries-removed`, `database-renamed` y `database-installed`. Solo `runRestore` de la entrada de pruebas los recibe, como `cut` del runtime; `ChildTask` gana `{ hold: "restore", dataDirectory, backups, restic?, at }`, que avisa al llegar al punto y espera el SIGKILL con el cerrojo.
 - La copia necesita en el NVMe un espacio libre del tamaño de la base, para la instantánea, además del repositorio.
 - Al repartir las tareas se acordó que la fila de las marcas y la forma de `/health` nacen completas en la 01, que la 05 entrega el procedimiento entero de restaurar (retomar y la marca al abrir incluidos) y que la 06 lo demuestra con procesos cortados y casos de desastre.
 

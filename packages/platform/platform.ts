@@ -24,6 +24,7 @@ import {
 } from "./background";
 import { taskOperations } from "./background/operations";
 import { type BackupConfig, createBackups } from "./backups";
+import { refuseWhileRestorePending } from "./backups/restore";
 import { accessView, registeredAreas } from "./identity/access";
 import { ensureDeviceAccount } from "./identity/accounts";
 import { platformOperations } from "./identity/operations";
@@ -253,9 +254,14 @@ export function openPlatform(
 	return platform;
 }
 
-/** Opens the SQLite file; when it cannot, frees the lock taken for it. */
+/**
+ * Opens the SQLite file, after the shared lock and once no restore is left unended in its folder; when it cannot,
+ * frees the lock taken for it.
+ */
 function openFile(databaseFile: string, lock: DatabaseLock | undefined): Database.Database {
 	try {
+		// A marker means the exchange of a restore was cut: the files beside it may be half of each set.
+		if (lock) refuseWhileRestorePending(dirname(databaseFile));
 		return new Database(databaseFile);
 	} catch (error) {
 		lock?.release();

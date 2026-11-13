@@ -50,6 +50,25 @@ function readBackups(env: NodeJS.ProcessEnv): BackupConfig | undefined {
 	if (off) throw new Error(`DOMUS_BACKUPS_OFF must be 1 or unset, got "${off}"`);
 
 	if (!env.DOMUS_BACKUP_REPOSITORY && !env.DOMUS_BACKUP_PASSWORD_FILE) return undefined;
+	return readBackupTarget(env);
+}
+
+/** What `restore.mjs` needs of the configuration (ADR 0026). */
+export interface RestoreConfig {
+	readonly databaseFile: string;
+	readonly backups: BackupConfig;
+}
+
+/**
+ * The database and the repository `restore.mjs` works on: both paths of the backups are required, and the switch
+ * does not matter, since it turns off the backup tasks of `api`, not restoring. It needs no session secret.
+ */
+export function readRestoreConfig(env: NodeJS.ProcessEnv = process.env): RestoreConfig {
+	return { databaseFile: readDatabaseFile(env), backups: readBackupTarget(env) };
+}
+
+/** The repository and the readable, non-empty password file. Never echoes the password. */
+function readBackupTarget(env: NodeJS.ProcessEnv): BackupConfig {
 	const repository = backupPath(env, "DOMUS_BACKUP_REPOSITORY", "DOMUS_BACKUP_PASSWORD_FILE");
 	const passwordFile = backupPath(env, "DOMUS_BACKUP_PASSWORD_FILE", "DOMUS_BACKUP_REPOSITORY");
 

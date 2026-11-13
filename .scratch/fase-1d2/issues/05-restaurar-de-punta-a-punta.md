@@ -1,6 +1,6 @@
 # 05. Restaurar de punta a punta, con retomar
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01, 02, 03
 
 Spec: [`../spec.md`](../spec.md), sección «Restaurar» entera, «Las marcas de las copias y el vigilante» (procedencia y antigüedad), «`apps/api` y la CI» (el comando y `restore.mjs list`) y, en «Decisiones de prueba», la costura 2. ADR 0026.
@@ -24,17 +24,27 @@ El procedimiento entero de restaurar, seguro desde el primer día: un solo coman
 
 Cada prueba usa una ruta temporal propia: preparar datos, copiar, cerrar, restaurar y volver a abrir sobre la misma ruta.
 
-- [ ] Los datos de la copia vuelven y los posteriores no.
-- [ ] Los trabajos pendientes, en curso y atascados de la copia quedan descartados y no corren; el mismo estado, reabierto sin restaurar, se recupera.
-- [ ] Las próximas ejecuciones se calculan desde la restauración, y una tarea pausada sigue pausada.
-- [ ] Las cookies de un `browser()` con sesión de antes de la copia y de después dejan de servir por HTTP.
-- [ ] Una confirmación pendiente y un comprobante guardados antes ya no autorizan su operación.
-- [ ] Una copia antigua recibe sus migraciones; una más nueva que el código y una migración que falla se rechazan sin tocar la base activa.
-- [ ] Restaurar con la plataforma abierta se niega.
-- [ ] Tras restaurar queda `before-restore-…` con el conjunto anterior, y no queda ningún auxiliar viejo junto a la base restaurada.
-- [ ] Restaurar una copia de hace diez días deja `backup-stale` y no cambia la marca del `check`; la procedencia queda anotada.
-- [ ] Con una marca válida puesta a mano en un estado intermedio, abrir se niega y restaurar otra vez termina sin volver a enlazar.
-- [ ] Una marca ilegible bloquea abrir y restaurar.
-- [ ] `restore list` muestra las instantáneas con su captura.
-- [ ] El job `containers` ejecuta `restore.mjs list` sin error.
-- [ ] `pnpm check` pasa.
+- [x] Los datos de la copia vuelven y los posteriores no.
+- [x] Los trabajos pendientes, en curso y atascados de la copia quedan descartados y no corren; el mismo estado, reabierto sin restaurar, se recupera.
+- [x] Las próximas ejecuciones se calculan desde la restauración, y una tarea pausada sigue pausada.
+- [x] Las cookies de un `browser()` con sesión de antes de la copia y de después dejan de servir por HTTP.
+- [x] Una confirmación pendiente y un comprobante guardados antes ya no autorizan su operación.
+- [x] Una copia antigua recibe sus migraciones; una más nueva que el código y una migración que falla se rechazan sin tocar la base activa.
+- [x] Restaurar con la plataforma abierta se niega.
+- [x] Tras restaurar queda `before-restore-…` con el conjunto anterior, y no queda ningún auxiliar viejo junto a la base restaurada.
+- [x] Restaurar una copia de hace diez días deja `backup-stale` y no cambia la marca del `check`; la procedencia queda anotada.
+- [x] Con una marca válida puesta a mano en un estado intermedio, abrir se niega y restaurar otra vez termina sin volver a enlazar.
+- [x] Una marca ilegible bloquea abrir y restaurar.
+- [x] `restore list` muestra las instantáneas con su captura.
+- [x] El job `containers` ejecuta `restore.mjs list` sin error.
+- [x] `pnpm check` pasa.
+
+## Comments
+
+- Hecho en `604cbf7`. Decisiones tomadas al implementar, también en la spec («Notas»): restaurar vive en `packages/platform/backups/` (`restore.ts`, y el núcleo de `restore.mjs` en `command.ts`), con la preparación en `restore-staging/`, que se vacía si preparar falla; la marca es JSON (carpeta conservada, instantánea, captura e instante); `before-restore-<instante>` va al segundo; `restic snapshots` y `restic restore` llevan `--retry-lock 30m`, y `list` con el código `10` da una lista vacía; `--snapshot` acepta un comienzo único del identificador; `restore.mjs` lee las dos rutas sin mirar `DOMUS_BACKUPS_OFF` y sin el secreto de las sesiones; las próximas ejecuciones se recalculan con las tareas que declara la plataforma con las copias encendidas, `backup-check` incluida.
+- Para la 06:
+    - **Puntos de corte**: `RestorePoint` en `backups/restore.ts`, en este orden: `marker-written` (temporal escrito y sincronizado, sin renombrar), `marker-published`, `auxiliaries-removed`, `database-renamed` (antes de sincronizar las carpetas) y `database-installed` (antes de borrar la marca). Solo llegan por `cut` del runtime: `restoreWithRuntime` de `@domus/platform/testing` y `restoreBackup({ …, cut })` de `test-utils`. Un `cut` que lanza corta en el mismo proceso, y la marca queda como en ese punto.
+    - **Hijo**: `startChild({ hold: "restore", dataDirectory, backups, restic?, at })` restaura la última instantánea sin módulos, avisa al llegar a `at` y espera el SIGKILL con el cerrojo exclusivo; si restaurar termina o falla antes, `startChild` rechaza con ese mensaje. La prueba de `restore.test.ts` que usa `marker-published` es el patrón.
+    - **Posición 1**: con el temporal escrito y sin renombrar no hay marca, así que abrir arranca con la base anterior y restaurar otra vez prepara desde cero, borra el temporal y crea otra carpeta `before-restore` (con otro instante). La 06 pide que no se cree otra en ninguna posición: en la 1 es lo correcto, porque `api` pudo escribir entretanto; si se prefiere otra cosa, hay que decidirlo.
+    - La base dañada y la ausente, y el WAL con escrituras confirmadas en el conjunto conservado, no tienen prueba todavía: son de la 06. El código no abre la base activa en ningún momento.
+- Comprobado en local: la imagen de `api` construida con este código responde a `node /app/restore.mjs list` con `no snapshots of host domus yet` y código 0 sobre un repositorio vacío, con el secret montado. El job `containers` de la CI no se ha ejecutado: lo comprueba el PR.

@@ -149,6 +149,10 @@ jobs:
                   echo "DOMUS_BACKUP_PASSWORD=$file" >> "$GITHUB_ENV"
             - name: Start the three containers
               run: docker compose up --detach --build --wait --wait-timeout 240
+            # The restore command as the Pi runs it: its bundle, the mounted secret and reading it. Listing takes no
+            # lock, so api may keep running; an empty repository has no snapshot yet and answers without error.
+            - name: The restore command lists the snapshots
+              run: docker compose run --rm --no-deps --entrypoint node api /app/restore.mjs list
             - name: Logs
               if: failure()
               run: docker compose logs --no-color

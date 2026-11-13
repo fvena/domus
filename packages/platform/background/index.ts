@@ -123,7 +123,7 @@ export function createBackground({
 	extraTasks = [],
 	extraKinds = {},
 }: BackgroundOptions): Background {
-	const tasks = [cleanupTask(connection, clock), ...(backups?.tasks ?? []), ...extraTasks];
+	const tasks = [...platformTasks(connection, clock, backups?.tasks), ...extraTasks];
 	const ids = new Set<string>();
 	for (const { id } of tasks) {
 		if (ids.has(id)) throw new Error(`the scheduled task "${id}" is declared twice`);
@@ -262,6 +262,34 @@ export function createBackground({
 	};
 }
 
+/** The platform's own scheduled tasks, in their order: the cleanup and, when they are on, the backups'. */
+function platformTasks(
+	connection: Database.Database,
+	clock: Clock,
+	backupTasks: readonly ScheduledTask[] = [],
+): readonly ScheduledTask[] {
+	return [cleanupTask(connection, clock), ...backupTasks];
+}
+
+/**
+ * Moves the next run of each of the platform's tasks, with the backups' `backupTasks`, to its next occurrence from
+ * the clock's now, a paused one left as it is. Restoring does it on the copy it prepares.
+ */
+export function rescheduleTasks(
+	connection: Database.Database,
+	clock: Clock,
+	backupTasks: readonly ScheduledTask[],
+): void {
+	createScheduler({
+		connection,
+		clock,
+		tasks: platformTasks(connection, clock, backupTasks),
+		enqueue: () => {
+			throw new Error("rescheduling enqueues nothing");
+		},
+	}).reschedule();
+}
+
 export { controlledTimer, type ControlledTimer, realTimer, type Timer } from "./timer";
 export {
 	readTaskRuns,
@@ -275,6 +303,7 @@ export {
 	UnknownTaskError,
 } from "./scheduler";
 export {
+	discardUnfinishedJobs,
 	type JobContext,
 	type JobKind,
 	type JobSnapshot,

@@ -63,6 +63,11 @@ export interface Scheduler {
 	start(taskRun: number, startedAt: number): void;
 	/** Records how a run ended, from its job's end. Runs inside the transaction that records the job's end. */
 	finish(job: FinishedJob): void;
+	/**
+	 * Moves the next run of each declared, unpaused task to its next occurrence from now, catching up nothing it
+	 * missed: a paused one stays as it is, and resuming moves it from then. Restoring does it.
+	 */
+	reschedule(): void;
 	/** Stops creating runs of the task. Pausing a paused task changes nothing. */
 	pause(task: string): void;
 	/** Creates runs again, the next one from now: what it skipped while paused is not caught up. */
@@ -288,6 +293,12 @@ export function createScheduler({
 				error,
 				job.taskRun,
 			);
+		},
+
+		reschedule() {
+			const now = clock();
+			for (const { task, row } of rows())
+				if (!row.paused) moveNext.run(nextAfter(task, row, now), task.id);
 		},
 
 		pause(id) {
