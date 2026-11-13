@@ -50,3 +50,6 @@ La demostración de que el procedimiento de la 05 aguanta lo que tiene que aguan
     - La comprobación de rutas absolutas sigue en la plataforma y en `apps/api`: la plataforma no se fía de quien la llama.
     - El formato de una sola línea por paquete de `packages/AGENTS.md` es anterior a la 1d2; darle otra forma es una limpieza aparte.
     - `restore.mjs` sale con `2` y el texto de uso ante argumentos incorrectos: es la convención para una orden mal escrita.
+- Segunda revisión de `main...feat/fase-1d2`. Lo que corrigió:
+    - Vaciar la carpeta de preparación al empezar una copia va dentro del bloque que anota el intento fallido: si no se puede vaciar, `/health` deja de decir `none-yet` y pasa a `backup-stale` con `backups: none`. Probado con una preparación sin permisos, en rojo antes del arreglo.
+    - Una prueba interna del motor de que el `failed` de un tipo de trabajo se revierte junto con el final del trabajo si algo posterior de esa transacción falla. Comprobado que falla si `record` deja de ser una transacción.

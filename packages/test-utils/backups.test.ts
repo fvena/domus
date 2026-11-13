@@ -356,6 +356,31 @@ describe("a backup that goes wrong", { timeout: RESTIC_TIMEOUT }, () => {
 		});
 		expect(leftovers(test)).toEqual([]);
 	});
+
+	it("counts a staging folder it cannot empty as a failed attempt, and /health says stale", async () => {
+		using target = backupTarget();
+		await using test = createTestPlatform({ modules: [], file: true, backups: target });
+		// What a crashed run left, in a folder the process can no longer read.
+		const staging = join(dirname(test.databaseFile), "backup-staging");
+		mkdirSync(staging);
+		writeFileSync(join(staging, "domus.db"), "left by a crash");
+		chmodSync(staging, 0o000);
+		try {
+			test.background.start();
+
+			test.clock.set(FIRST_BACKUP);
+			await test.background.settled();
+
+			expect(backupRuns(test)).toEqual([expect.objectContaining({ result: null })]);
+			expect(readdirSync(target.repository)).toEqual([]);
+			expect(await health(test)).toEqual({
+				status: "ok",
+				background: { status: "degraded", reasons: ["backup-stale"], backups: "none" },
+			});
+		} finally {
+			chmodSync(staging, 0o755);
+		}
+	});
 });
 
 describe("a destination that does not open", { timeout: 2 * RESTIC_TIMEOUT }, () => {

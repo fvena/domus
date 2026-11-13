@@ -101,11 +101,11 @@ export function createBackups({
 		job: {
 			lane: "maintenance",
 			async run({ signal }) {
-				// What a crash in the middle of a run left goes now.
-				emptyFolder(staging);
 				try {
 					const file = join(staging, SNAPSHOT_FILE);
 					try {
+						// What a crash in the middle of a run left goes now. Not emptying it is a failed attempt too.
+						emptyFolder(staging);
 						await takeSnapshot(connection, file, signal);
 						// The data is the database's as the copy ended.
 						const capturedAt = clock();
