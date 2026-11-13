@@ -47,7 +47,9 @@ describe("probe undo", () => {
 
 		test.undo(ana, edited.entry, { idempotencyKey: "u1" });
 
-		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([
+			{ id: 1, body: "comprar pan", files: [] },
+		]);
 	});
 
 	it("undoes deleting a note: it is back with its id and text", async () => {
@@ -60,8 +62,8 @@ describe("probe undo", () => {
 		test.undo(ana, deleted.entry, { idempotencyKey: "u1" });
 
 		expect(test.invoke(ana, "probe.listNotes")).toEqual([
-			{ id: 1, body: "comprar pan" },
-			{ id: 2, body: "regar" },
+			{ id: 1, body: "comprar pan", files: [] },
+			{ id: 2, body: "regar", files: [] },
 		]);
 	});
 
@@ -84,7 +86,7 @@ describe("probe undo", () => {
 				input: { id: 1 },
 				inverse: {
 					action: "probe.restoreNote",
-					input: { id: 1, body: "comprar pan", visibility: "private" },
+					input: { id: 1, body: "comprar pan", visibility: "private", files: [] },
 				},
 				touched: [{ module: "probe", type: "note", id: "1" }],
 			}),
@@ -122,7 +124,9 @@ describe("probe undo", () => {
 		expect(() => test.undo(ana, 1, { idempotencyKey: "u1" })).toThrow(
 			conflict("changed-since"),
 		);
-		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar leche" }]);
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([
+			{ id: 1, body: "comprar leche", files: [] },
+		]);
 		expect(test.log()).toHaveLength(2);
 	});
 
@@ -141,7 +145,9 @@ describe("probe undo", () => {
 		expect(() => test.undo(ana, 1, { idempotencyKey: "u2" })).toThrow(
 			conflict("changed-since"),
 		);
-		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([
+			{ id: 1, body: "comprar pan", files: [] },
+		]);
 	});
 
 	it("lets another note change in between", async () => {
@@ -158,7 +164,9 @@ describe("probe undo", () => {
 
 		test.undo(ana, 1, { idempotencyKey: "u1" });
 
-		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 2, body: "regar el olivo" }]);
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([
+			{ id: 2, body: "regar el olivo", files: [] },
+		]);
 	});
 
 	it("lets the module's rule refuse undoing a note that now has comments, without change or entry", async () => {
@@ -175,7 +183,9 @@ describe("probe undo", () => {
 		expect(() => test.undo(ana, 1, { idempotencyKey: "u1" })).toThrow(
 			expect.objectContaining({ code: "NOTE_HAS_COMMENTS" }),
 		);
-		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([
+			{ id: 1, body: "comprar pan", files: [] },
+		]);
 		expect(test.log()).toHaveLength(2);
 		expect(test.log()[0]).toHaveProperty("undoneBy", null);
 	});
@@ -238,7 +248,7 @@ describe("probe undo", () => {
 			test.invoke(ana, "probe.deleteNote", { id: 1 }, { idempotencyKey: "u1" }),
 		).toThrow(conflict("key-reused"));
 		expect(() => test.undo(ana, 2, { idempotencyKey: "k1" })).toThrow(conflict("key-reused"));
-		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 2, body: "regar" }]);
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 2, body: "regar", files: [] }]);
 	});
 
 	it("redoes an edit by undoing its undo", async () => {
@@ -255,7 +265,9 @@ describe("probe undo", () => {
 
 		test.undo(ana, undone.entry, { idempotencyKey: "u2" });
 
-		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar leche" }]);
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([
+			{ id: 1, body: "comprar leche", files: [] },
+		]);
 	});
 
 	it("cannot redo adding a comment, whose inverse cannot be undone", async () => {
@@ -287,7 +299,9 @@ describe("probe undo", () => {
 		expect(() => test.undo(ana, 1, { idempotencyKey: "u1" })).toThrow(
 			expect.objectContaining({ code: "FORBIDDEN" }),
 		);
-		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([
+			{ id: 1, body: "comprar pan", files: [] },
+		]);
 		expect(test.log()).toHaveLength(1);
 	});
 

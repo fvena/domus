@@ -4,7 +4,16 @@
 // and are published under the lock of their hash so that an error never leaves a row without its synced file.
 // module-sdk exposes none of it, and a dependency rule keeps modules out.
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, existsSync, fsyncSync, openSync, renameSync, rmSync, writeSync } from "node:fs";
+import {
+	closeSync,
+	existsSync,
+	fsyncSync,
+	openSync,
+	readSync,
+	renameSync,
+	rmSync,
+	writeSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 
 import { ORPCError } from "@orpc/server";
@@ -18,12 +27,25 @@ import { sessionLookup } from "../identity/sessions";
 import { fileError } from "./failures";
 import { readFileName } from "./name";
 import { createReservations, type FreeSpace } from "./reservations";
-import { createFileStore, createHashLocks, syncFolder } from "./store";
+import { createFileStore, createHashLocks, type OpenedContent, syncFolder } from "./store";
 import { detectFileType, type FileType } from "./type";
 
 export { errorResponse } from "./failures";
+export { markedFiles } from "./marked";
+export {
+	createReferences,
+	FilesRefusal,
+	type LiveReference,
+	type References,
+	type WriteRun,
+} from "./references";
+export { contentDisposition } from "./name";
 export type { FreeSpace } from "./reservations";
+export type { OpenedContent } from "./store";
 export type { FileType } from "./type";
+
+/** How many bytes of a content a download reads at a time. */
+const CHUNK = 64 * 1024;
 
 /** The largest upload, 25 MB, in bytes (ADR 0028). */
 const MAX_SIZE = 25 * 1024 * 1024;
@@ -60,6 +82,11 @@ export interface Files {
 	 * or an ORPCError with the code of the spec's table.
 	 */
 	upload(context: VerifiedContext, request: Request): Promise<PreparedFile>;
+	/**
+	 * Opens the file of a present content for a download, inside the transaction that found it: its descriptor
+	 * outlives a later deletion of the content. Throws when the file is missing, which should never happen.
+	 */
+	open(hash: string): OpenedContent;
 	/** Empties the uploads in progress of an earlier process: before the door admits requests. */
 	clearIncoming(): void;
 	/**
@@ -67,7 +94,10 @@ export interface Files {
 	 * taken before the file exists and freed after it is removed, so one for which this is false was left behind.
 	 */
 	inProgress(name: string): boolean;
-	/** Closes the descriptor of every upload in progress, which then fails and removes its temporary file. */
+	/**
+	 * Closes the descriptor of every upload in progress, which then fails and removes its temporary file, and of
+	 * every download still open, which then ends with an error.
+	 */
 	close(): void;
 }
 
@@ -133,6 +163,7 @@ export function createFiles({
 	});
 	const locks = createHashLocks();
 	const receiving = new Set<Receiving>();
+	const serving = new Set<OpenedContent>();
 	const lookup = sessionLookup(connection);
 	const sessionLives = ({ account, session }: Owner) => lookup(session)?.account === account;
 	const contentState = connection.prepare<[string], { state: "present" | "claimed" }>(
@@ -278,9 +309,41 @@ export function createFiles({
 				reservation.release();
 			}
 		},
+		open: (hash) => {
+			const descriptor = openSync(store.contentPath(hash), "r");
+			let open = true;
+			const opened: OpenedContent = {
+				stream: () =>
+					new ReadableStream<Uint8Array>({
+						pull: (controller) => {
+							// Closed by the platform or a rollback: its number may be another's by now.
+							if (!open) {
+								controller.error(new Error("the download was closed"));
+								return;
+							}
+							const chunk = new Uint8Array(CHUNK);
+							const read = readSync(descriptor, chunk, 0, CHUNK, null);
+							if (read === 0) {
+								opened.close();
+								controller.close();
+							} else controller.enqueue(chunk.subarray(0, read));
+						},
+						cancel: () => opened.close(),
+					}),
+				close: () => {
+					if (!open) return;
+					open = false;
+					serving.delete(opened);
+					closeSync(descriptor);
+				},
+			};
+			serving.add(opened);
+			return opened;
+		},
 		clearIncoming: () => store.clearIncoming(),
 		inProgress: (name) => reservations.holds(name),
 		close: () => {
+			for (const opened of serving) opened.close();
 			for (const upload of receiving) {
 				upload.open = false;
 				closeSync(upload.descriptor);

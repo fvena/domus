@@ -11,6 +11,7 @@ import { migrations } from "./migrations";
 import * as schema from "./schema";
 
 type Context = Pick<ActionContext<unknown, typeof schema>, "db" | "visible">;
+type Files = ActionContext<unknown, typeof schema>["files"];
 
 const note = { id: schema.notes.id, body: schema.notes.body };
 const boardNote = { id: schema.board.id, body: schema.board.body };
@@ -27,6 +28,11 @@ function findNote({ db, visible }: Context, id: number) {
 		.from(schema.notes)
 		.where(and(eq(schema.notes.id, id), visible(schema.notes)))
 		.get();
+}
+
+/** A note as the reads answer it, with its files. */
+function withFiles(files: Files, found: { readonly id: number; readonly body: string }) {
+	return { id: found.id, body: found.body, files: [...files.of(schema.notes, found.id)] };
 }
 
 /** The records the account sees of a table with only a body, oldest first. */
@@ -51,21 +57,22 @@ export default defineModule({
 	migrations,
 	contract: probeContract,
 	actions: {
-		listNotes: ({ db, visible }) =>
+		listNotes: ({ db, visible, files }) =>
 			db
 				.select(note)
 				.from(schema.notes)
 				.where(visible(schema.notes))
 				.orderBy(schema.notes.id)
-				.all(),
+				.all()
+				.map((found) => withFiles(files, found)),
 		getNote: (context) => {
 			const found = findNote(context, context.input.id);
-			return found ? { id: found.id, body: found.body } : null;
+			return found ? withFiles(context.files, found) : null;
 		},
 		countNotes: ({ db, visible }) =>
 			db.select({ total: count() }).from(schema.notes).where(visible(schema.notes)).get()
 				?.total ?? 0,
-		searchNotes: ({ db, visible, input }) =>
+		searchNotes: ({ db, visible, input, files }) =>
 			db
 				.select(note)
 				.from(schema.notes)
@@ -73,7 +80,8 @@ export default defineModule({
 					and(sql`instr(${schema.notes.body}, ${input.text}) > 0`, visible(schema.notes)),
 				)
 				.orderBy(schema.notes.id)
-				.all(),
+				.all()
+				.map((found) => withFiles(files, found)),
 		notesWithComments: ({ db, visible }) =>
 			db
 				.select({ note, comment })
@@ -110,7 +118,7 @@ export default defineModule({
 			};
 		},
 		deleteNote: (context) => {
-			const { db, input, errors, editable, forbidden } = context;
+			const { db, input, errors, editable, forbidden, files } = context;
 			const found = findNote(context, input.id);
 			if (!found) throw errors.NOTE_NOT_FOUND();
 			const mayDelete = db
@@ -128,25 +136,63 @@ export default defineModule({
 				.where(eq(schema.comments.noteId, input.id))
 				.get();
 			if (blocked) throw errors.NOTE_HAS_COMMENTS();
+			// Its files go with it, released for its undo to hang them back (ADR 0028).
+			const released = files
+				.of(schema.notes, found.id)
+				.map((file) => files.detach(file.id, { table: schema.notes, id: found.id }).id);
 			db.delete(schema.notes)
 				.where(and(eq(schema.notes.id, input.id), editable(schema.notes)))
 				.run();
 			return {
 				result: { id: found.id, body: found.body },
 				touched: [{ type: "note", id: found.id }],
-				inverse: { action: "probe.restoreNote", input: found },
+				inverse: { action: "probe.restoreNote", input: { ...found, files: released } },
 			};
 		},
-		restoreNote: ({ db, input, ownership }) => {
+		restoreNote: ({ db, input, ownership, files }) => {
+			const { files: released = [], ...values } = input;
 			const restored = db
 				.insert(schema.notes)
-				.values({ ...ownership(schema.notes), ...input })
+				.values({ ...ownership(schema.notes), ...values })
 				.returning(note)
 				.get();
+			for (const file of released)
+				files.reattach(file, { table: schema.notes, id: restored.id });
 			return {
 				result: restored,
 				touched: [{ type: "note", id: restored.id }],
 				inverse: { action: "probe.deleteNote", input: { id: restored.id } },
+			};
+		},
+		attachFile: (context) => {
+			const { input, files } = context;
+			const attached = files.attach(input.prepared, {
+				table: schema.notes,
+				id: input.noteId,
+			});
+			return {
+				result: attached,
+				touched: [],
+				inverse: {
+					action: "probe.detachFile",
+					input: { noteId: input.noteId, file: attached.id },
+				},
+			};
+		},
+		detachFile: ({ input, files }) => {
+			const detached = files.detach(input.file, { table: schema.notes, id: input.noteId });
+			return {
+				result: detached,
+				touched: [],
+				inverse: { action: "probe.restoreFile", input },
+			};
+		},
+		restoreFile: ({ input, files }) => {
+			const restored = files.reattach(input.file, { table: schema.notes, id: input.noteId });
+			return {
+				result: restored,
+				touched: [],
+				inverse: { action: "probe.detachFile", input },
 			};
 		},
 		setNoteVisibility: (context) => {

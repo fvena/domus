@@ -36,7 +36,9 @@ describe("probe idempotency", () => {
 
 		expect(first).toEqual({ result: { id: 1, body: "comprar pan" }, entry: 1 });
 		expect(retry).toStrictEqual({ entry: 1, repeated: true });
-		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([
+			{ id: 1, body: "comprar pan", files: [] },
+		]);
 		expect(test.log()).toHaveLength(1);
 	});
 
@@ -61,7 +63,9 @@ describe("probe idempotency", () => {
 		expect(() =>
 			test.invoke(ana, "probe.deleteNote", { id: 1 }, { idempotencyKey: "k1" }),
 		).toThrow(keyReused);
-		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([
+			{ id: 1, body: "comprar pan", files: [] },
+		]);
 		expect(test.log()).toHaveLength(1);
 	});
 
@@ -73,7 +77,9 @@ describe("probe idempotency", () => {
 		expect(() =>
 			test.invoke(ana, "probe.addNote", { body: "comprar leche" }, { idempotencyKey: "k1" }),
 		).toThrow(keyReused);
-		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([
+			{ id: 1, body: "comprar pan", files: [] },
+		]);
 		expect(test.log()).toHaveLength(1);
 	});
 
@@ -194,7 +200,9 @@ describe("probe idempotency", () => {
 					{ idempotencyKey: "k1" },
 				),
 			).toStrictEqual({ entry: 1, repeated: true });
-			expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
+			expect(test.invoke(ana, "probe.listNotes")).toEqual([
+				{ id: 1, body: "comprar pan", files: [] },
+			]);
 			expect(test.log()).toHaveLength(1);
 		});
 	});

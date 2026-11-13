@@ -89,3 +89,11 @@ export function createHashLocks(): HashLocks {
 		},
 	};
 }
+
+/** The open file of a content, until its bytes are sent or it is closed. */
+export interface OpenedContent {
+	/** Its bytes, from the start; the descriptor closes when they end or the stream is cancelled. */
+	stream(): ReadableStream<Uint8Array>;
+	/** Closes its descriptor, once; safe to call again. */
+	close(): void;
+}

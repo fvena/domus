@@ -37,6 +37,7 @@ import {
 	readPendingConfirmations,
 	rejectPending,
 	requestProofOf,
+	sessionOfToken,
 	syntheticContext,
 	type Acknowledgement,
 	type Annotation,
@@ -315,6 +316,11 @@ export interface TestPlatform<
 	 * session, the account itself as the device's, the app channel, proven by password, no conversation.
 	 */
 	context(account: string, options?: ContextOptions): VerifiedContext;
+	/**
+	 * The verified context the door builds for a request of `browser`, signed in: its session's account, device and
+	 * session, the app channel, proven by password. For invoking actions that need the session that uploaded a file.
+	 */
+	contextOf(browser: TestBrowser): VerifiedContext;
 	/** Creates the member `id` the first time, and returns a synthetic context for it as {@link context}. */
 	member(id: string, options?: ContextOptions): VerifiedContext;
 	/**
@@ -410,6 +416,9 @@ export const TEST_START = Date.UTC(2026, 0, 1);
 
 /** The origin the door of a test platform answers on. */
 export const TEST_ORIGIN = "http://domus.test";
+
+/** The cookie of Better Auth that carries a browser's session over plain HTTP. */
+const SESSION_COOKIE = "better-auth.session_token";
 
 /** The secret that signs the sessions of a test platform: only for tests. */
 const TEST_AUTH_SECRET = "test-only-secret-that-signs-test-sessions";
@@ -578,6 +587,22 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		deviceAccount: deviceAccountOf(platform),
 		dbFor: (module) => moduleDatabase(platform, module),
 		context,
+		contextOf: (browser) => {
+			// Better Auth's cookie holds the session's token and its signature, after the first dot.
+			const cookie = browser.cookie(SESSION_COOKIE);
+			const token =
+				cookie === undefined ? undefined : decodeURIComponent(cookie).split(".")[0];
+			const found = token === undefined ? undefined : sessionOfToken(platform, token);
+			if (!found) throw new Error("the browser is not signed in");
+			return syntheticContext({
+				account: found.account,
+				device: found.device,
+				session: found.session,
+				deviceAccount: found.account,
+				channel: "app",
+				identity: "password",
+			});
+		},
 		member: (id, options) => {
 			if (!hasAccount(platform, id)) prepare.account({ id, role: "member" });
 			return context(id, options);

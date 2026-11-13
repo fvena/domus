@@ -44,9 +44,9 @@ describe("probe visibility on reads", () => {
 		await using _ = test;
 
 		expect(test.invoke(ana, "probe.listNotes")).toEqual([
-			{ id: 1, body: "regalo para Bea" },
-			{ id: 2, body: "comprar pan" },
-			{ id: 4, body: "comprar leche" },
+			{ id: 1, body: "regalo para Bea", files: [] },
+			{ id: 2, body: "comprar pan", files: [] },
+			{ id: 4, body: "comprar leche", files: [] },
 		]);
 	});
 
@@ -57,6 +57,7 @@ describe("probe visibility on reads", () => {
 		expect(test.invoke(ana, "probe.getNote", { id: 4 })).toEqual({
 			id: 4,
 			body: "comprar leche",
+			files: [],
 		});
 		expect(test.invoke(ana, "probe.getNote", { id: 3 })).toBeNull();
 	});
@@ -75,11 +76,11 @@ describe("probe visibility on reads", () => {
 		await using _ = test;
 
 		expect(test.invoke(ana, "probe.searchNotes", { text: "regalo" })).toEqual([
-			{ id: 1, body: "regalo para Bea" },
+			{ id: 1, body: "regalo para Bea", files: [] },
 		]);
 		expect(test.invoke(ana, "probe.searchNotes", { text: "comprar" })).toEqual([
-			{ id: 2, body: "comprar pan" },
-			{ id: 4, body: "comprar leche" },
+			{ id: 2, body: "comprar pan", files: [] },
+			{ id: 4, body: "comprar leche", files: [] },
 		]);
 	});
 
@@ -227,6 +228,7 @@ describe("probe visibility on writes", () => {
 		expect(test.invoke(ana, "probe.getNote", { id: 4 })).toEqual({
 			id: 4,
 			body: "comprar leche",
+			files: [],
 		});
 		expect(test.log()).toEqual([]);
 	});
@@ -264,6 +266,7 @@ describe("probe visibility on writes", () => {
 		expect(test.invoke(bea, "probe.getNote", { id: 1 })).toEqual({
 			id: 1,
 			body: "regalo para Bea",
+			files: [],
 		});
 
 		expect(() =>

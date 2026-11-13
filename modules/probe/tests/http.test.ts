@@ -138,7 +138,7 @@ describe("probe over HTTP", () => {
 			await browser.signIn("ana@domus.test", PASSWORD);
 
 			expect(await probeClient(browser).probe.listNotes()).toEqual([
-				{ id: 1, body: "comprar pan" },
+				{ id: 1, body: "comprar pan", files: [] },
 			]);
 		});
 

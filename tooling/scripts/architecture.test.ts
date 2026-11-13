@@ -146,7 +146,12 @@ describe("module-sdk", () => {
 			"defineModule",
 			"ownedTableOf",
 		]);
-		expect(await names("contracts/index.ts")).toEqual(["readAction", "writeAction"]);
+		expect(await names("contracts/index.ts")).toEqual([
+			"fileRef",
+			"isFileRef",
+			"readAction",
+			"writeAction",
+		]);
 		// Table declarations and query helpers; no drizzle() and no connection.
 		expect(await names("db/index.ts")).toEqual([
 			"and",

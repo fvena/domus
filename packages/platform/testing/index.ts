@@ -378,6 +378,21 @@ export function prepareSession(
 	return { session, device: onDevice };
 }
 
+/**
+ * The session whose token a session cookie carries, with its account and device: what the door reads from a
+ * request, for a test that uses a signed-in browser's session in an invocation. `undefined` when there is none.
+ */
+export function sessionOfToken(
+	platform: Platform,
+	token: string,
+): { readonly session: string; readonly account: string; readonly device: string } | undefined {
+	return connectionOf(platform)
+		.prepare<[string], { session: string; account: string; device: string }>(
+			"SELECT id AS session, user_id AS account, device_id AS device FROM platform_session WHERE token = ?",
+		)
+		.get(token);
+}
+
 /** True while a session with this id exists. */
 export function hasSession(platform: Platform, session: string): boolean {
 	return (
