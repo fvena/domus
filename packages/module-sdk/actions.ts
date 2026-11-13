@@ -144,7 +144,7 @@ export interface ModuleFiles {
 	 */
 	detach(file: string, record: RecordOf): FileRef;
 	/**
-	 * Hangs again a file the entry being undone released from this record: only inside the undo of that entry,
+	 * Reattaches a file the entry being undone released from this record: only inside the undo of that entry,
 	 * else "not found".
 	 */
 	reattach(file: string, record: RecordOf): FileRef;

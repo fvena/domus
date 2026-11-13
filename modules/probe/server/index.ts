@@ -35,6 +35,14 @@ function withFiles(files: Files, found: { readonly id: number; readonly body: st
 	return { id: found.id, body: found.body, files: [...files.of(schema.notes, found.id)] };
 }
 
+/** The note with the input's id and its files, if the account sees one: what `getNote` and `getGuardedNote` answer. */
+function noteById(
+	context: Context & { readonly input: { readonly id: number }; readonly files: Files },
+) {
+	const found = findNote(context, context.input.id);
+	return found ? withFiles(context.files, found) : null;
+}
+
 /** The records the account sees of a table with only a body, oldest first. */
 function entriesOf(
 	db: ModuleDatabase<typeof schema>,
@@ -65,14 +73,8 @@ export default defineModule({
 				.orderBy(schema.notes.id)
 				.all()
 				.map((found) => withFiles(files, found)),
-		getNote: (context) => {
-			const found = findNote(context, context.input.id);
-			return found ? withFiles(context.files, found) : null;
-		},
-		getGuardedNote: (context) => {
-			const found = findNote(context, context.input.id);
-			return found ? withFiles(context.files, found) : null;
-		},
+		getNote: noteById,
+		getGuardedNote: noteById,
 		countNotes: ({ db, visible }) =>
 			db.select({ total: count() }).from(schema.notes).where(visible(schema.notes)).get()
 				?.total ?? 0,
@@ -140,7 +142,7 @@ export default defineModule({
 				.where(eq(schema.comments.noteId, input.id))
 				.get();
 			if (blocked) throw errors.NOTE_HAS_COMMENTS();
-			// Its files go with it, released for its undo to hang them back (ADR 0028).
+			// Its files go with it, released for its undo to reattach them (ADR 0028).
 			const released = files
 				.of(schema.notes, found.id)
 				.map((file) => files.detach(file.id, { table: schema.notes, id: found.id }).id);

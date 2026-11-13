@@ -53,7 +53,7 @@ import { checkTransition, editableTo, type RecordArea } from "../authorization/w
 import { markedFiles } from "../files/marked";
 import { FilesRefusal, type References, type WriteRun } from "../files/references";
 import type { OpenedContent } from "../files/store";
-import { answeringWith, type ConfirmationCall, type Download } from "./answering";
+import { answeringWith, type ConfirmationCall, type Download, openingDownload } from "./answering";
 import type { Capture, CapturedTransition } from "./capture";
 import { type ConfirmationTimes, type Confirmations, type NewPending } from "./confirmations";
 import { conflict, internalError, notUndoable, stepUpRequired } from "./failures";
@@ -271,17 +271,9 @@ export function createActions({
 			throw new ORPCError("NOT_FOUND", { message: `no read "${action}"` });
 		// Authorization first, outside the transaction, so a pending confirmation it stores stays.
 		const checked = authorizeRead(found, context, action, value, { proof, file });
-		let opened: Download | undefined;
-		try {
-			return connection.transaction((): Download => {
-				opened = openReturned(found, context, value, file, { proof, checked });
-				return opened;
-			})();
-		} catch (error) {
-			// Rolled back after the file opened: nobody sends it.
-			opened?.content.close();
-			throw error;
-		}
+		return openingDownload(connection, (opened) =>
+			opened(openReturned(found, context, value, file, { proof, checked })),
+		);
 	}
 
 	/**
@@ -830,17 +822,15 @@ export function createActions({
 		const { result, touched: declared, inverse } = outcome as Record<string, unknown>;
 
 		if (!Array.isArray(declared) || !declared.every(isTouchedRecord)) throw internalError();
-		const touched = [
-			...declared,
-			...changedFiles.filter(
-				(changed) =>
-					!declared.some(
-						(record) =>
-							record.type === changed.type &&
-							String(record.id) === String(changed.id),
-					),
-			),
-		];
+		const touched = [...declared];
+		for (const changed of changedFiles)
+			if (
+				!touched.some(
+					(record) =>
+						record.type === changed.type && String(record.id) === String(changed.id),
+				)
+			)
+				touched.push(changed);
 		// An undo is stopped by a later write of what this one touched (`changed-since`): an undoable write that
 		// declares nothing could be undone over any later change.
 		if (found.undoable && touched.length === 0) throw internalError();

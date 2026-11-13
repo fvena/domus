@@ -24,7 +24,7 @@ import { type AccessView, mayUpload, type VerifiedContext } from "../authorizati
 import type { CleanupSweep } from "../background/cleanup";
 import type { Timer } from "../background/timer";
 import { randomId } from "../identity/accounts";
-import { sessionLookup } from "../identity/sessions";
+import { sessionLives } from "../identity/sessions";
 import { contentSweeps } from "./cleanup";
 import { fileError } from "./failures";
 import { readFileName } from "./name";
@@ -93,11 +93,6 @@ export interface Files {
 	open(hash: string): OpenedContent;
 	/** Empties the uploads in progress of an earlier process: before the door admits requests. */
 	clearIncoming(): void;
-	/**
-	 * Whether the file named `name` in `incoming/` is the temporary file of an upload in progress. Its reservation is
-	 * taken before the file exists and freed after it is removed, so one for which this is false was left behind.
-	 */
-	inProgress(name: string): boolean;
 	/** The cleanup's steps of the store, after its rows': they share the lock of each hash with publishing. */
 	readonly sweeps: readonly CleanupSweep[];
 	/** Where a download waits for a test, once its file is open: at once outside the testing entry. */
@@ -132,10 +127,11 @@ interface Received {
 	readonly size: number;
 }
 
-/** Who uploads: the account and the session the prepared file will be of. */
+/** Who uploads: the account and the session the prepared file will be of, and the context they came in. */
 interface Owner {
 	readonly account: string;
 	readonly session: string;
+	readonly context: VerifiedContext;
 }
 
 /** An upload being received: its descriptor, open until it ends or the platform closes. */
@@ -172,8 +168,7 @@ export function createFiles({
 	const locks = createHashLocks();
 	const receiving = new Set<Receiving>();
 	const serving = new Set<OpenedContent>();
-	const lookup = sessionLookup(connection);
-	const sessionLives = ({ account, session }: Owner) => lookup(session)?.account === account;
+	const lives = sessionLives(connection);
 	const contentState = connection.prepare<[string], { state: "present" | "claimed" }>(
 		"SELECT state FROM platform_file_contents WHERE hash = ?",
 	);
@@ -221,7 +216,7 @@ export function createFiles({
 				).finally(disarm);
 				if (upload.stopped !== undefined) throw upload.stopped;
 				if (chunk.done) break;
-				if (!sessionLives(owner)) throw new ORPCError("UNAUTHORIZED");
+				if (!lives(owner.account, owner.session)) throw new ORPCError("UNAUTHORIZED");
 				size += chunk.value.length;
 				// Not a byte past the declared size reaches the disk: the reservation holds no more.
 				if (size > declared) throw fileError("BODY_MISMATCH");
@@ -251,7 +246,7 @@ export function createFiles({
 	/**
 	 * Publishes a received content under the lock of its hash: reuses a present one or a file left without a row,
 	 * refuses a claimed one, or renames the temporary file into place and syncs its folders. Then, in one
-	 * transaction, checks the session again and writes the rows.
+	 * transaction, checks again that the session lives and its account may upload, and writes the rows.
 	 */
 	function publish(
 		owner: Owner,
@@ -273,7 +268,8 @@ export function createFiles({
 			}
 			await interleave?.("published");
 			return connection.transaction(() => {
-				if (!sessionLives(owner)) throw new ORPCError("UNAUTHORIZED");
+				if (!lives(owner.account, owner.session)) throw new ORPCError("UNAUTHORIZED");
+				if (!mayUpload(view, owner.context)) throw new ORPCError("FORBIDDEN");
 				const now = clock();
 				const current = contentState.get(hash)?.state;
 				if (current === "claimed") throw fileError("CONTENT_BUSY");
@@ -309,7 +305,7 @@ export function createFiles({
 			const id = randomUUID();
 			const temporary = join(store.incoming(), id);
 			const reservation = reservations.reserve({ session, temporary: id, size });
-			const owner: Owner = { account: context.account, session };
+			const owner: Owner = { account: context.account, session, context };
 			try {
 				const received = await receive(request, { owner, temporary, declared: size });
 				return await publish(owner, name.name, received);
@@ -353,7 +349,6 @@ export function createFiles({
 			return opened;
 		},
 		clearIncoming: () => store.clearIncoming(),
-		inProgress: (name) => reservations.holds(name),
 		sweeps: contentSweeps({
 			connection,
 			store,
