@@ -3,7 +3,15 @@
 // uploads in progress under `incoming/`, on the same volume so that publishing is a rename. A content is never
 // rewritten: it is created, reused or deleted. Only `api` publishes or deletes, so one lock per hash inside the
 // process is enough.
-import { closeSync, fsyncSync, mkdirSync, openSync, rmSync } from "node:fs";
+import {
+	closeSync,
+	existsSync,
+	fsyncSync,
+	mkdirSync,
+	openSync,
+	readdirSync,
+	rmSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 
 /** How many characters of the hash name the folder a content lives in. */
@@ -19,6 +27,8 @@ export interface FileStore {
 	 * new folder's parent, so the new entry outlives a power cut. Returns the content's folder.
 	 */
 	ensureContentFolder(hash: string): string;
+	/** The name of every file in the folders of the contents, whether it has a row or not. */
+	stored(): string[];
 	/** Empties the uploads in progress: what `api` does before it admits requests. */
 	clearIncoming(): void;
 }
@@ -40,21 +50,34 @@ export function createFileStore(directory: string): FileStore {
 			if (first !== undefined) {
 				// Each folder created, from the deepest up to the first new one, is an entry of its parent's.
 				for (let created = folder; ; created = dirname(created)) {
-					syncFolder(dirname(created));
+					syncToDisk(dirname(created));
 					if (created === first) break;
 				}
 			}
 			return folder;
 		},
+		stored: () =>
+			existsSync(contents)
+				? readdirSync(contents, { withFileTypes: true })
+						.filter((folder) => folder.isDirectory())
+						.flatMap((folder) =>
+							readdirSync(join(contents, folder.name), { withFileTypes: true })
+								.filter((entry) => entry.isFile())
+								.map((entry) => entry.name),
+						)
+				: [],
 		clearIncoming: () => {
 			rmSync(incoming, { recursive: true, force: true });
 		},
 	};
 }
 
-/** Syncs a folder to disk, so the entries created or renamed in it outlive a power cut. */
-export function syncFolder(folder: string): void {
-	const descriptor = openSync(folder, "r");
+/**
+ * Syncs a file's bytes or a folder's entries to disk, so they outlive a power cut: for a folder, the entries created,
+ * renamed or removed in it.
+ */
+export function syncToDisk(path: string): void {
+	const descriptor = openSync(path, "r");
 	try {
 		fsyncSync(descriptor);
 	} finally {

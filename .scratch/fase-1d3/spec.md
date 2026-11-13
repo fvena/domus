@@ -197,7 +197,7 @@ Un fichero que falta en disco con su contenido presente es un fallo interno (`IN
 - Con el cerrojo tomado:
     - contenido presente: descarta el temporal y lo reutiliza;
     - contenido reclamado: descarta el temporal y responde «contenido ocupado», pasajero;
-    - contenido sin fila: si ya hay un fichero definitivo con ese hash (un huérfano de un corte), lo reutiliza; si no, renombra el temporal a su sitio y sincroniza el fichero y cada carpeta nueva.
+    - contenido sin fila: si ya hay un fichero definitivo con ese hash (un huérfano de un corte), lo reutiliza, y antes sincroniza a disco el fichero y su carpeta, porque un proceso muerto antes de sincronizarlos pudo dejarlos solo en memoria (decidido al implementar la 07); si no, renombra el temporal a su sitio y sincroniza el fichero y cada carpeta nueva.
 - En los tres casos que siguen, una transacción vuelve a comprobar que la sesión sigue válida y que el contenido está presente o no tiene fila, y crea la fila del contenido si falta y la del archivo preparado.
 - El cerrojo se suelta al terminar, también tras un error o una cancelación.
 - `api` borra todo `files/incoming/` al arrancar, antes de admitir peticiones. Lo hace al crear la puerta (`createHttpHandler`), no al abrir la plataforma: `pnpm accounts` también la abre, con `api` en marcha, y borraría sus subidas en curso.
@@ -291,6 +291,11 @@ Un fichero que falta en disco con su contenido presente es un fallo interno (`IN
     - `attach` y `reattach` sobre un contenido reclamado responden «no encontrado», como si no existiera. Con la regla anterior no se alcanza, porque un contenido reclamado no tiene filas que lo apunten: queda como guarda;
     - una limpieza que falla se reintenta a los 30 s, como cualquier trabajo, y ese reintento ya termina un contenido que dejó reclamado;
     - los puntos de intercalación son `claimed` (con el contenido marcado y el cerrojo suelto, antes de borrar el fichero) y `opened` (en la puerta, con el descriptor de la descarga abierto y antes del primer byte). Si la promesa que devuelve la prueba se rechaza, el trabajo falla en ese punto: así se simula un corte sin matar el proceso.
+- Decidido al implementar la 07:
+    - los ficheros sin fila van en un paso entre los contenidos reclamados y los temporales. Un fichero sin fila es cualquiera de una carpeta de dos caracteres de `files/contents/` cuyo nombre no es el hash de ninguna fila, en cualquier estado. Su edad es la de su fecha de modificación frente al instante del comienzo de la pasada, y se borra cuando la diferencia pasa de una hora: con una hora justa se queda;
+    - con el cerrojo de su hash se vuelve a comprobar que sigue sin fila y que tiene esa edad, se borra y se sincroniza su carpeta, todo antes de soltarlo; así una publicación que lo reutiliza escribe su fila antes o escribe su propio fichero después. Un lote cuenta solo los que tienen edad para borrarse, y los más jóvenes no lo alargan;
+    - el punto de intercalación `removed` salta con el fichero de un contenido reclamado ya borrado y su carpeta sincronizada, antes de borrar su fila, en los dos pasos que terminan un borrado;
+    - los cortes de la costura 4 son dos variantes de `ChildTask`: `publish` (sube un contenido para una sesión y una cuenta y se queda en `published`) y `delete` (corre la limpieza en un instante dado y se queda en `claimed` o en `removed`). El hijo de `delete` corre el trabajo de la tarea `cleanup` directamente, sin el segundo plano, para no dejar trabajos ni ejecuciones que la plataforma reabierta retome por su cuenta.
 
 ### Copia (Q11)
 

@@ -1,20 +1,29 @@
 // The cleanup of the store (ADR 0028, spec of phase 1d3, «Limpieza»): the steps of the daily cleanup that touch the
 // disk, each a batch the cleanup repeats until one comes short. The rows that stop protecting a content (prepared
 // files and released references) go before, in the cleanup's own statements; what is left here is the contents
-// nothing points to any more, the claimed ones a cut pass left, and the temporary files no upload holds.
+// nothing points to any more, the claimed ones a cut pass left, the files left without a row and the temporary
+// files no upload holds.
 //
 // Deleting a content: under the lock of its hash, one transaction checks that nothing points to it and marks it
 // claimed; the lock goes, and the claim alone keeps a publication off it (one of that hash answers «busy»); then
 // its file is removed and its folder synced; last, its row is deleted. A cut anywhere after the claim leaves it
 // claimed, maybe without its file, and the next cleanup finishes it.
-import { existsSync, readdirSync, rmSync } from "node:fs";
+//
+// A file of the store without a row (an orphan) is what a cut leaves between publishing a file and writing its row,
+// or a restore cut after installing its contents. Publishing reuses it; past an hour, the cleanup deletes it. Both
+// go under the lock of its hash, which the cleanup holds from checking that it still has no row and is that old
+// until the file is gone, so a publication either finds it and writes its row first or writes its own after.
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import type Database from "better-sqlite3";
 
 import type { CleanupSweep } from "../background/cleanup";
 import type { FileStore, HashLocks } from "./store";
-import { syncFolder } from "./store";
+import { syncToDisk } from "./store";
+
+/** How long a file of the store may stay without a row before the cleanup deletes it: one hour. */
+const ORPHAN_AGE = 60 * 60 * 1000;
 
 /** A content nothing points to: no prepared file and no reference, live or released. */
 const UNPOINTED = `NOT EXISTS (SELECT 1 FROM platform_prepared_files WHERE content = contents.hash)
@@ -28,6 +37,8 @@ export interface ContentSweepsOptions {
 	readonly inProgress: (name: string) => boolean;
 	/** Only from the testing entry: called once a content is claimed, before its file is removed. */
 	readonly claimed?: () => Promise<void> | void;
+	/** Only from the testing entry: called once a claimed content's file is removed, before its row is deleted. */
+	readonly removed?: () => Promise<void> | void;
 }
 
 export function contentSweeps({
@@ -36,6 +47,7 @@ export function contentSweeps({
 	locks,
 	inProgress,
 	claimed,
+	removed,
 }: ContentSweepsOptions): readonly CleanupSweep[] {
 	const unpointed = connection.prepare<[number], { hash: string }>(
 		`SELECT hash FROM platform_file_contents AS contents WHERE state = 'present' AND ${UNPOINTED} LIMIT ?`,
@@ -50,12 +62,23 @@ export function contentSweeps({
 	const forget = connection.prepare<[string]>(
 		"DELETE FROM platform_file_contents WHERE hash = ? AND state = 'claimed'",
 	);
+	const hasRow = connection.prepare<[string], { found: 1 }>(
+		"SELECT 1 AS found FROM platform_file_contents WHERE hash = ?",
+	);
+
+	/** Whether the file of `hash` has no row and was last modified more than an hour before `now`. */
+	function orphaned(hash: string, now: number): boolean {
+		if (hasRow.get(hash) !== undefined) return false;
+		const modified = statSync(store.contentPath(hash), { throwIfNoEntry: false })?.mtimeMs;
+		return modified !== undefined && now - modified > ORPHAN_AGE;
+	}
 
 	/** Removes the file of a claimed content, if it still has one, and then its row. */
-	function finish(hash: string): void {
+	async function finish(hash: string): Promise<void> {
 		const path = store.contentPath(hash);
 		rmSync(path, { force: true });
-		if (existsSync(dirname(path))) syncFolder(dirname(path));
+		if (existsSync(dirname(path))) syncToDisk(dirname(path));
+		await removed?.();
 		connection.transaction(() => forget.run(hash))();
 	}
 
@@ -69,14 +92,29 @@ export function contentSweeps({
 				);
 				if (!won) continue;
 				await claimed?.();
-				finish(hash);
+				await finish(hash);
 			}
 			return found.length;
 		},
 		// The claimed contents of a pass that was cut, with or without their file.
 		async (_now, batchSize) => {
 			const found = leftClaimed.all(batchSize);
-			for (const { hash } of found) finish(hash);
+			for (const { hash } of found) await finish(hash);
+			return found.length;
+		},
+		// The files without a row older than an hour: each checked again and deleted under its lock.
+		async (now, batchSize) => {
+			const found = store
+				.stored()
+				.filter((hash) => orphaned(hash, now))
+				.slice(0, batchSize);
+			for (const hash of found)
+				await locks.hold(hash, async () => {
+					if (!orphaned(hash, now)) return;
+					const path = store.contentPath(hash);
+					rmSync(path, { force: true });
+					syncToDisk(dirname(path));
+				});
 			return found.length;
 		},
 		// The temporary files of `incoming/` no upload in progress holds: what a failed one left behind.
