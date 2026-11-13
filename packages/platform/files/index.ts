@@ -29,7 +29,7 @@ import { contentSweeps } from "./cleanup";
 import { fileError } from "./failures";
 import { readFileName } from "./name";
 import { createReservations, type FreeSpace } from "./reservations";
-import { createFileStore, createHashLocks, type OpenedContent, syncFolder } from "./store";
+import { createFileStore, createHashLocks, type OpenedContent, syncToDisk } from "./store";
 import { detectFileType, type FileType } from "./type";
 
 export { errorResponse } from "./failures";
@@ -73,9 +73,10 @@ export interface PreparedFile {
  * The points where the platform tells a test it got there and waits until the test lets it go: only the testing
  * entry gives one. `published`: the content's file is in its place, renamed or reused, and its rows are not yet
  * written. `claimed`: the cleanup marked a content claimed and let its lock go, and its file is not yet removed.
+ * `removed`: the cleanup removed the file of a claimed content and synced its folder, and its row is not yet deleted.
  * `opened`: a download has its file open and its transaction ended, and no byte is sent yet.
  */
-export type InterleavePoint = "published" | "claimed" | "opened";
+export type InterleavePoint = "published" | "claimed" | "removed" | "opened";
 
 export type Interleave = (point: InterleavePoint) => Promise<void> | void;
 
@@ -264,7 +265,11 @@ export function createFiles({
 			if (state === undefined && !existsSync(target)) {
 				store.ensureContentFolder(hash);
 				renameSync(temporary, target);
-				syncFolder(dirname(target));
+				syncToDisk(dirname(target));
+			} else if (state === undefined) {
+				// A file without a row: a process killed before syncing it may have left it in memory only.
+				syncToDisk(target);
+				syncToDisk(dirname(target));
 			}
 			await interleave?.("published");
 			return connection.transaction(() => {
@@ -355,6 +360,7 @@ export function createFiles({
 			locks,
 			inProgress: (name) => reservations.holds(name),
 			claimed: () => interleave?.("claimed"),
+			removed: () => interleave?.("removed"),
 		}),
 		opened: () => interleave?.("opened"),
 		close: () => {

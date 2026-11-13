@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type { BackupConfig } from "../backups";
 import type { RestorePoint } from "../backups/restore";
+import type { InterleavePoint } from "../files";
 
 /** What a child holds over a data folder, the one that has or will have `domus.db` and `domus.lock`. */
 export type ChildTask =
@@ -26,6 +27,29 @@ export type ChildTask =
 			/** The restic executable: `restic` from the `PATH` unless given. */
 			readonly restic?: string;
 			readonly at: RestorePoint;
+	  }
+	/**
+	 * An upload of `content` for a session of `account`, without modules, stopped once its file is in place and
+	 * before its rows: the child tells the test once it got there.
+	 */
+	| {
+			readonly hold: "publish";
+			readonly dataDirectory: string;
+			readonly account: string;
+			readonly session: string;
+			/** The bytes of the upload, in base64. */
+			readonly content: string;
+	  }
+	/**
+	 * A cleanup at the instant `now`, without modules, stopped at a point of deleting a content: `claimed`, its row
+	 * marked and its file in place, or `removed`, its file gone and its row still claimed. A cleanup that ends or
+	 * fails before reaching the point is the child's error.
+	 */
+	| {
+			readonly hold: "delete";
+			readonly dataDirectory: string;
+			readonly now: number;
+			readonly at: Extract<InterleavePoint, "claimed" | "removed">;
 	  };
 
 /** What a child tells the test: that it holds its task, or why it could not. */

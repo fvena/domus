@@ -2,7 +2,7 @@
 // the cleanup takes what nothing protects any more out of the store, and never a content something has just hung
 // from a note nor the file of a download already under way.
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -196,6 +196,21 @@ function sha256(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
 
+/**
+ * Leaves the file of `bytes` in the store without its row, as a cut between publishing it and writing its row does,
+ * last modified at `at`.
+ */
+function orphan(test: Probe, bytes: Uint8Array, at: number): void {
+	const hash = sha256(bytes);
+	const folder = join(test.filesDirectory, "contents", hash.slice(0, 2));
+	mkdirSync(folder, { recursive: true });
+	const path = join(folder, hash);
+	writeFileSync(path, bytes);
+	utimesSync(path, new Date(at), new Date(at));
+}
+
+const HOUR = 60 * 60 * 1000;
+
 describe("the cleanup of the store", () => {
 	it("deletes the content of a prepared file that expired unused", async () => {
 		await using test = await household();
@@ -252,6 +267,68 @@ describe("the cleanup of the store", () => {
 			note: test.invoke(ana, "probe.getNote", { id: 1 }),
 		}).toEqual(once);
 		expect(once.stored).toEqual([sha256(JPEG)]);
+	});
+});
+
+describe("the cleanup of files without a row", () => {
+	it("deletes one left more than an hour ago, and keeps a younger one", async () => {
+		await using test = await household();
+		orphan(test, JPEG, nightOf(1) - HOUR - 1);
+		orphan(test, PNG, nightOf(1) - HOUR);
+
+		await cleanOn(test, 1);
+
+		expect(stored(test)).toEqual([sha256(PNG)]);
+	});
+
+	it("keeps one an upload reuses while the cleanup waits for its hash, published with its row", async () => {
+		const gate = holdAt("published");
+		await using test = await household({ interleave: gate.interleave });
+		const phone = await signedIn(test);
+		const ana = test.contextOf(phone);
+		orphan(test, JPEG, nightOf(1) - 2 * HOUR);
+		test.clock.set(nightOf(1), { wake: false });
+		const reusing = upload(phone);
+		await gate.reaching;
+
+		const cleaning = test.background.runDue();
+		// The cleanup finds the file without a row and waits for its hash, which the upload holds.
+		for (let turn = 0; turn < 20; turn += 1)
+			await new Promise((resolve) => setTimeout(resolve, 1));
+		gate.release();
+		const prepared = (await (await reusing).json()) as { id: string };
+		await cleaning;
+
+		expect(lastRun(test)).toMatchObject({ task: "cleanup", result: "ok" });
+		expect(stored(test)).toEqual([sha256(JPEG)]);
+		const file = attach(test, ana, prepared.id);
+		const response = await phone.fetch(
+			new Request(new URL("/api/files/download", TEST_ORIGIN), {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ action: "probe.getNote", input: { id: 1 }, file }),
+			}),
+		);
+		expect(sha256(new Uint8Array(await response.arrayBuffer()))).toBe(sha256(JPEG));
+	});
+
+	it("deletes one while an upload of its content is still arriving, which then writes its own", async () => {
+		await using test = await household();
+		const phone = await signedIn(test);
+		orphan(test, JPEG, nightOf(1) - 2 * HOUR);
+		test.clock.set(nightOf(1), { wake: false });
+		const uploading = controlledUpload(phone, JPEG.length);
+		uploading.send(JPEG.subarray(0, 4));
+		await until(() => incoming(test).length === 1);
+
+		await test.background.runDue();
+		expect(lastRun(test)).toMatchObject({ task: "cleanup", result: "ok" });
+		expect(stored(test)).toEqual([]);
+		uploading.send(JPEG.subarray(4));
+		uploading.end();
+
+		expect((await uploading.response).status).toBe(200);
+		expect(stored(test)).toEqual([sha256(JPEG)]);
 	});
 });
 
