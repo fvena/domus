@@ -800,6 +800,38 @@ describe("the weekly check of the repository", { timeout: 2 * RESTIC_TIMEOUT }, 
 	});
 });
 
+describe("a check that stopping cancels", { timeout: RESTIC_TIMEOUT }, () => {
+	it("leaves its mark as it was", async () => {
+		using target = backupTarget();
+		restic(target, "init");
+		using fake = fakeRestic((path) => ({
+			check: `[ -e '${path("hang")}' ] && exec sleep 60`,
+		}));
+		await using test = createTestPlatform({
+			modules: [],
+			file: true,
+			backups: { ...target, restic: fake.executable },
+		});
+		test.background.start();
+		test.background.pause("backup");
+		test.clock.set(FIRST_CHECK);
+		await test.background.settled();
+		const before = test.background.marks().check;
+		expect(before).toEqual({ at: FIRST_CHECK, result: "ok" });
+
+		writeFileSync(fake.path("hang"), "");
+		test.clock.set(FIRST_CHECK + WEEK);
+		await vi.waitFor(
+			() => expect(fake.calls().filter((call) => call === "check")).toHaveLength(2),
+			{ timeout: RESTIC_TIMEOUT },
+		);
+		await test.background.stop();
+
+		expect(checkRuns(test).map((run) => run.result)).toEqual(["ok", "cancelled"]);
+		expect(test.background.marks().check).toEqual(before);
+	});
+});
+
 describe("a check that finds the repository locked", { timeout: RESTIC_TIMEOUT }, () => {
 	it("is retried, and counts as a failed check once it used up its attempts", async () => {
 		using target = backupTarget();
