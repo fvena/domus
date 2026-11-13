@@ -101,6 +101,8 @@ export interface PlatformRuntime {
 	readonly jobs?: Readonly<Record<string, JobKind>>;
 	/** The restic executable of the backups: `restic` from the `PATH` unless a test gives another. */
 	readonly restic?: string;
+	/** The Node executable of the backups' child processes: this process's own unless a test gives another. */
+	readonly node?: string;
 }
 
 const IN_MEMORY = ":memory:";
@@ -135,7 +137,7 @@ export function openPlatform(
 		confirmation = {},
 		backups: backupConfig,
 	}: PlatformOptions,
-	{ clock, authorizer, timer = realTimer(clock), tasks, jobs, restic }: PlatformRuntime,
+	{ clock, authorizer, timer = realTimer(clock), tasks, jobs, restic, node }: PlatformRuntime,
 ): Platform {
 	if (databaseFile !== IN_MEMORY && !isAbsolute(databaseFile)) {
 		throw new Error(
@@ -196,8 +198,9 @@ export function openPlatform(
 							clock,
 							timer,
 							config: backupConfig,
-							dataDir: dirname(databaseFile),
+							databaseFile,
 							...(restic === undefined ? {} : { executable: restic }),
+							...(node === undefined ? {} : { node }),
 						}),
 					}),
 			...(tasks === undefined ? {} : { extraTasks: tasks }),

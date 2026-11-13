@@ -160,8 +160,9 @@ export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	 */
 	readonly jobs?: Readonly<Record<string, SyntheticJob>>;
 	/**
-	 * The backups, on: a temporary repository folder and password file, absolute paths, and the restic executable
-	 * (`restic` from the `PATH` unless given, such as a fake one). Only with `file`. Unset: the backups are off.
+	 * The backups, on: a temporary repository folder and password file, absolute paths, and the restic and Node
+	 * executables (`restic` from the `PATH` and this process's Node unless given, such as fake ones). Only with
+	 * `file`. Unset: the backups are off.
 	 */
 	readonly backups?: TestBackups;
 }
@@ -171,6 +172,8 @@ export interface TestBackups {
 	readonly repository: string;
 	readonly passwordFile: string;
 	readonly restic?: string;
+	/** The Node executable of the backups' child processes, such as a fake one: this process's own unless given. */
+	readonly node?: string;
 }
 
 /** A synthetic job of a test: its lane, its maximum time if not its lane's, and its work. */
@@ -447,6 +450,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 				...(tasks === undefined ? {} : { tasks }),
 				...(jobs === undefined ? {} : { jobs }),
 				...(backups?.restic === undefined ? {} : { restic: backups.restic }),
+				...(backups?.node === undefined ? {} : { node: backups.node }),
 			},
 		);
 	} catch (error) {
