@@ -341,6 +341,13 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 					? {}
 					: { proof: c.req.header(PROOF_HEADER) }),
 			});
+			// Only a test waits here: the file open, the transaction ended, no byte sent.
+			try {
+				await files?.opened();
+			} catch (error) {
+				found.content.close();
+				throw error;
+			}
 			answer = new Response(found.content.stream(), {
 				headers: {
 					"cache-control": "no-store",

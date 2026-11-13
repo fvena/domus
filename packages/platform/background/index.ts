@@ -5,7 +5,7 @@
 import type Database from "better-sqlite3";
 
 import type { Clock } from "../actions";
-import { CLEANUP_SCHEDULE, cleanupTask } from "./cleanup";
+import { CLEANUP_SCHEDULE, type CleanupSweep, cleanupTask } from "./cleanup";
 import { createEngine, type JobKind } from "./engine";
 import {
 	createScheduler,
@@ -71,6 +71,8 @@ export interface BackgroundOptions {
 	readonly timer: Timer;
 	/** The backups, when they are on: unset, they are off. */
 	readonly backups?: BackupsWatch;
+	/** The cleanup's steps of the store of files, when the platform has a folder for it. */
+	readonly sweeps?: readonly CleanupSweep[];
 	/** Tasks a test declares besides the platform's own. Only the testing entry passes them. */
 	readonly extraTasks?: readonly ScheduledTask[];
 	/** Synthetic job kinds a test declares, by name, to enqueue them itself. Only the testing entry passes them. */
@@ -122,10 +124,16 @@ export function createBackground({
 	clock,
 	timer,
 	backups,
+	sweeps = [],
 	extraTasks = [],
 	extraKinds = {},
 }: BackgroundOptions): Background {
-	const tasks = [...platformTasks(connection, clock, backups?.tasks), ...extraTasks];
+	// The platform's own tasks first, in their order: the cleanup and, when they are on, the backups'.
+	const tasks = [
+		cleanupTask(connection, clock, { sweeps }),
+		...(backups?.tasks ?? []),
+		...extraTasks,
+	];
 	const ids = new Set<string>();
 	for (const { id } of tasks) {
 		if (ids.has(id)) throw new Error(`the scheduled task "${id}" is declared twice`);
@@ -262,15 +270,6 @@ export function createBackground({
 			}
 		},
 	};
-}
-
-/** The platform's own scheduled tasks, in their order: the cleanup and, when they are on, the backups'. */
-function platformTasks(
-	connection: Database.Database,
-	clock: Clock,
-	backupTasks: readonly ScheduledTask[] = [],
-): readonly ScheduledTask[] {
-	return [cleanupTask(connection, clock), ...backupTasks];
 }
 
 /**

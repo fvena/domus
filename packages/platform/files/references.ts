@@ -75,6 +75,8 @@ interface ReferenceRow {
 	readonly type: FileType;
 	readonly size: number;
 	readonly releasedBy: number | null;
+	/** 1 while its content is present: 0 once the cleanup claimed it to delete it. */
+	readonly present: number;
 }
 
 interface PreparedRow {
@@ -85,9 +87,12 @@ interface PreparedRow {
 	readonly consumed: number;
 	readonly type: FileType;
 	readonly size: number;
+	/** 1 while its content is present: 0 once the cleanup claimed it to delete it. */
+	readonly present: number;
 }
 
-const REFERENCE = `SELECT r.id, r.name, c.type, c.size, r.released_by AS releasedBy
+const REFERENCE = `SELECT r.id, r.name, c.type, c.size, r.released_by AS releasedBy,
+		c.state = 'present' AS present
 	FROM platform_file_references r JOIN platform_file_contents c ON c.hash = r.content`;
 
 export function createReferences(connection: Database.Database, view: AccessView): References {
@@ -100,7 +105,8 @@ export function createReferences(connection: Database.Database, view: AccessView
 		`${REFERENCE} WHERE r.id = ? AND r.module = ? AND r.record_table = ? AND r.record_id = ?`,
 	);
 	const preparedFile = connection.prepare<[string], PreparedRow>(
-		`SELECT p.content, p.name, p.session, p.expires_at AS expiresAt, p.consumed, c.type, c.size
+		`SELECT p.content, p.name, p.session, p.expires_at AS expiresAt, p.consumed, c.type, c.size,
+			c.state = 'present' AS present
 		FROM platform_prepared_files p JOIN platform_file_contents c ON c.hash = p.content WHERE p.id = ?`,
 	);
 	const consume = connection.prepare<[string]>(
@@ -168,9 +174,11 @@ export function createReferences(connection: Database.Database, view: AccessView
 				attach: (prepared, record) => {
 					const { write: run, tableName } = editable(record);
 					const found = preparedFile.get(prepared);
-					// A prepared file is the session's that uploaded it, and only while that session exists.
+					// A prepared file is the session's that uploaded it, and only while that session exists; nothing
+					// hangs from a content the cleanup is deleting.
 					if (
 						!found ||
+						found.present === 0 ||
 						session === undefined ||
 						found.session !== session ||
 						lookup(session)?.account !== account
@@ -205,7 +213,12 @@ export function createReferences(connection: Database.Database, view: AccessView
 					const { write: run, tableName } = editable(record);
 					const found = oneOfRecord.get(file, module, tableName, record.id);
 					// Only the undo of the entry that released it hangs it again.
-					if (!found || found.releasedBy === null || found.releasedBy !== run.undoes)
+					if (
+						!found ||
+						found.present === 0 ||
+						found.releasedBy === null ||
+						found.releasedBy !== run.undoes
+					)
 						throw new FilesRefusal("NOT_FOUND");
 					hangAgain.run(file);
 					touch(run, record);

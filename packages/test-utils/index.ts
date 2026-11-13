@@ -19,6 +19,10 @@ export {
 	type TestPreparation,
 	type WriteOptions,
 } from "./platform";
-export { PermanentJobError, type VerifiedContext } from "@domus/platform/testing";
+export {
+	type InterleavePoint,
+	PermanentJobError,
+	type VerifiedContext,
+} from "@domus/platform/testing";
 /** The platform's own operations, for HTTP tests of modules, whose rules keep them from platform's contracts. */
 export { platformContract } from "@domus/platform/contracts";

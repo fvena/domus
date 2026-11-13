@@ -175,7 +175,9 @@ export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	readonly files?: string;
 	/**
 	 * Where the platform tells the test it got to a point, and waits until the promise the test returns settles:
-	 * `published`, a publication with its file in place and its rows not yet written. Only for tests.
+	 * `published`, a publication with its file in place and its rows not yet written; `claimed`, the cleanup with a
+	 * content marked claimed and its file not yet removed; `opened`, a download with its file open and no byte sent.
+	 * A rejected promise fails the work there. Only for tests.
 	 */
 	readonly interleave?: (point: InterleavePoint) => Promise<void> | void;
 	/**
