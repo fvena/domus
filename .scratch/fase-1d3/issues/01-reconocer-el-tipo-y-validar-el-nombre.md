@@ -1,6 +1,6 @@
 # 01. Reconocer el tipo y validar el nombre
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: None (can start immediately)
 
 Spec: [`../spec.md`](../spec.md), sección «Reconocer el tipo» y la fila de `INVALID_FILE_NAME` en «Errores de las rutas de archivos». ADR 0028, «Qué promete el tipo».
@@ -15,11 +15,15 @@ El trabajo previo de la 1d3: las dos funciones puras de `platform` que la subida
 
 ## Criterios de aceptación
 
-- [ ] Cada una de las cinco firmas se reconoce, también con la cabecera justa y nada más.
-- [ ] Una cabecera truncada o mal formada de cada clase se rechaza con un resultado controlado, nunca con una excepción.
-- [ ] Un HEIC con marca propia se reconoce; un AVIF, y un fichero con solo `mif1`, no.
-- [ ] Un texto UTF-8 válido se acepta aunque un carácter quede partido entre trozos; uno inválido o con un byte nulo, en cualquier posición, se rechaza.
-- [ ] Un fichero de bytes al azar no es de ninguna clase.
-- [ ] El nombre: válido con acentos y emojis; rechazado vacío, de 256 bytes tras decodificar (aceptado de 255), mal codificado, con `/`, `\`, un carácter de control, `.` o `..`.
-- [ ] Las pruebas son internas de `platform`; `test-utils` no cambia.
-- [ ] `pnpm check` pasa.
+- [x] Cada una de las cinco firmas se reconoce, también con la cabecera justa y nada más.
+- [x] Una cabecera truncada o mal formada de cada clase se rechaza con un resultado controlado, nunca con una excepción.
+- [x] Un HEIC con marca propia se reconoce; un AVIF, y un fichero con solo `mif1`, no.
+- [x] Un texto UTF-8 válido se acepta aunque un carácter quede partido entre trozos; uno inválido o con un byte nulo, en cualquier posición, se rechaza.
+- [x] Un fichero de bytes al azar no es de ninguna clase.
+- [x] El nombre: válido con acentos y emojis; rechazado vacío, de 256 bytes tras decodificar (aceptado de 255), mal codificado, con `/`, `\`, un carácter de control, `.` o `..`.
+- [x] Las pruebas son internas de `platform`; `test-utils` no cambia.
+- [x] `pnpm check` pasa.
+
+## Comments
+
+- Hecho en `98453a3`. Las dos funciones viven en `packages/platform/files/`: `detectFileType()` en `type.ts`, con `push(chunk)` por cada trozo y `finish()`, que da el tipo o `undefined`, y `readFileName(header)` en `name.ts`, que da `{ name, disposition }` o `undefined`. `contentDisposition(name)` se exporta aparte para que la descarga la construya desde el nombre guardado. Todavía no hay `files/index.ts`: lo abre la 02 al usarlas. Decisiones tomadas al implementar, también en la spec («Reconocer el tipo»): las clases se nombran por su tipo MIME, que es lo que se sirve y lo que responde la subida en `type`; un contenido que empieza como una firma es de esa clase o de ninguna, nunca texto, porque si no un PDF o un WebP truncados con bytes ASCII pasarían por texto; la caja `ftyp` se lee entera y hasta 4 KB, porque el detector guarda solo los primeros 4 KB y no crece con la subida; un contenido vacío no es de ninguna clase (la subida lo rechaza antes con `FILE_EMPTY`); el valor crudo de `X-File-Name` solo admite ASCII imprimible, porque un carácter crudo fuera de ASCII llega a Hono leído como latin1 y no se puede interpretar bien; el nombre no se normaliza a NFC; `Content-Disposition` es `attachment`, con `filename` en ASCII y `filename*` en UTF-8.

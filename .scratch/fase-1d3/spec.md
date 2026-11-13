@@ -161,7 +161,10 @@ Un fichero que falta en disco con su contenido presente es un fallo interno (`IN
 
 - Una función pura de `platform`, sin dependencias nuevas, que recibe los primeros bytes y dice cuál de las seis clases es, o ninguna: JPEG, PNG, WebP, HEIC y PDF por sus firmas; HEIC por las marcas `ftyp` propias de HEIC (`heic`, `heix`, `heim`, `heis`, `hevc`, `hevx`), nunca por `mif1` sola, que también usa AVIF. Si no es ninguna de las cinco, es texto plano solo si todo el contenido es UTF-8 válido y no tiene bytes nulos, comprobado mientras llegan los bytes.
 - Rechaza firmas desconocidas y cabeceras truncadas o mal formadas que detecte. No promete que el formato esté entero.
-- Una función pura aparte valida y sanea el nombre.
+- Las clases se nombran por el tipo con que se sirven: `image/jpeg`, `image/png`, `image/webp`, `image/heic`, `application/pdf` y `text/plain`.
+- Las cabeceras que se leen, todas desde el byte 0: JPEG, `FF D8 FF`; PNG, su firma de 8 bytes; WebP, `RIFF`, el tamaño, `WEBP` y la primera parte, `VP8 `, `VP8L` o `VP8X`; HEIC, una caja `ftyp` entera al principio, de 16 bytes a 4 KB y con las marcas alineadas, con una marca propia como principal o compatible; PDF, `%PDF-` y la versión, dígito, punto y dígito.
+- Un contenido que empieza como una firma (`FF D8`, `89 P N G`, `RIFF`, `ftyp` en el byte 4 o `%PDF-`) es de esa clase o de ninguna, nunca texto: así se rechazan también las cabeceras truncadas o mal formadas que serían UTF-8 válido. Un contenido vacío no es de ninguna clase.
+- Una función pura aparte valida y sanea el nombre. El valor crudo de `X-File-Name` solo admite ASCII imprimible; lo demás va codificado. Un carácter de control es uno de la categoría Unicode `Cc` (C0, DEL y C1). El nombre se guarda tal cual llega, sin normalizar. `Content-Disposition` es `attachment` con `filename` en ASCII, cada carácter fuera de ASCII imprimible y cada `"`, `\` o `%` cambiado por `_`, y `filename*` con el nombre entero en UTF-8 (RFC 8187).
 
 ### Publicar sin perder bytes (Q2)
 
