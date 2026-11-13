@@ -5,6 +5,7 @@ Sustituye dos decisiones: Permix, del ADR 0002, y la devolución del resultado g
 Precisa los ADR 0002, 0006, 0007, 0008, 0009, 0010, 0021 y 0022: cómo entra cada persona, qué recibe la autorización y cómo decide permiso, delegación, visibilidad y confirmación.
 
 Precisado por el ADR 0024: un borrado puede decir que lo impiden registros dependientes ocultos solo a quien ya ve el registro padre y puede borrarlo, sin revelar nada más de ellos.
+Precisado por el ADR 0028: vincular o soltar un archivo cambia su registro y pasa por `editable(table)`; una descarga que pide confirmación se confirma solo en su ruta, desde cualquier sesión de la misma persona, y el `confirm` genérico la rechaza sin consumirla.
 
 **Sin Permix.** La decisión es una función pura y síncrona de `platform/authorization` sobre tres tablas de búsqueda: permisos, delegación y visibilidad. La web no decide nada. Pregunta a la API, y si un día necesita pintar permisos, lo hará con una consulta. Permix no añadía nada a esa función.
 

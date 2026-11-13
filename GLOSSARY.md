@@ -153,15 +153,23 @@ Un mensaje al móvil de una persona, a la aplicación instalada, con un texto ge
 _Evitar_: notificación, alerta.
 
 **Archivo** (`file`):
-Un contenido binario, como una foto o un PDF, que cuelga siempre de un registro de un módulo y se ve solo si ese registro se ve. No tiene permisos propios.
-_Evitar_: adjunto (para el contenido), blob.
+Lo que una persona ve colgado de un registro de un módulo, como una foto o un PDF: un contenido de archivo con el nombre que le dio quien lo subió. Se ve solo si ese registro se ve y no tiene permisos propios. Un registro puede tener varios.
+_Evitar_: adjunto, blob.
+
+**Referencia de archivo** (`file reference`):
+El archivo visto desde la plataforma: el vínculo, guardado por ella, entre un registro de un módulo y un contenido de archivo, con su nombre. Vincularla o soltarla cambia ese registro.
+_Evitar_: enlace, adjunto.
+
+**Contenido de archivo** (`file content`):
+Los bytes de un archivo, identificados por su hash. No tiene dueño ni permisos: dos archivos de registros distintos pueden compartir el mismo contenido sin compartir el acceso. Nunca cambia, y se conserva mientras algo lo proteja.
+_Evitar_: «contenido» a secas, que es el de una entrada del registro de acciones; blob, fichero.
 
 **Archivo preparado** (`prepared file`):
-Un archivo ya subido y comprobado que todavía no cuelga de ningún registro. Es de un solo uso, de la sesión que lo subió, y caduca.
+Un contenido de archivo ya subido y comprobado, con su nombre, que todavía no cuelga de ningún registro. Es de un solo uso, de la sesión que lo subió, y caduca.
 _Evitar_: subida temporal.
 
 **Copia de seguridad** (`backup`):
-Una instantánea coherente de la base de datos y de los archivos que necesita, guardada cifrada fuera del volumen de datos.
+Una instantánea coherente de la base de datos y de los contenidos de archivo que necesita, guardada cifrada fuera del volumen de datos.
 _Evitar_: volcado, exportación.
 
 **Restaurar** (`restore`):

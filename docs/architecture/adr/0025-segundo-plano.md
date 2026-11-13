@@ -38,3 +38,5 @@ Un contenido se conserva mientras tenga una referencia viva, un archivo preparad
 Fecha: 2026-11-12. Preguntas del grilling: Q1–Q20 de la fase 1d.
 
 Precisado por el ADR 0026: las copias son dos tareas, `backup` y `backup-check`, y el vigilante lee sus propias marcas, con las 48 h contadas desde la captura; restaurar toma un cerrojo exclusivo sobre la base, prepara y sanea la copia aparte, cierra todas las sesiones e instala la base con un intercambio que resiste un corte.
+
+Precisado por el ADR 0028: los archivos se publican con un cerrojo por hash y sincronizando antes de crear sus filas; una referencia soltada por una escritura deshacible protege su contenido mientras dure su entrada y solo vuelve dentro de ese deshacer; la descarga abre el fichero dentro de la transacción de la lectura; y subir lo autoriza `platform/authorization`, con reservas de espacio.
