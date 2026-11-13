@@ -1,12 +1,12 @@
 // Restoring a backup (ADR 0026): a function of the platform, without an actor and without actions, that the command
 // `restore.mjs` of `apps/api` composes. It runs only with the database free: it holds the exclusive lock for the
-// whole procedure, or refuses. It prepares the snapshot apart, in a fixed staging folder of the data folder (checked,
+// whole procedure, or refuses. It stages the snapshot apart, in a fixed staging folder of the data folder (checked,
 // migrated and sanitized), and installs it with an exchange that, cut anywhere, leaves the previous database whole or
 // the restored one sanitized. A marker published before the first auxiliary file goes keeps the platform from
 // opening until running restore again ends the procedure.
 //
 // Invariants, each kept where its step is:
-// - the prepared copy is synced to disk before the marker is published;
+// - the staged copy is synced to disk before the marker is published;
 // - the exclusive lock lasts the whole procedure, resuming included;
 // - while the marker exists, nothing empties the staging folder of restoring nor creates another `before-restore`;
 // - from the first removal of an auxiliary file on, the marker is already on disk.
@@ -31,13 +31,22 @@ import type { Clock } from "../actions";
 import { endEveryConfirmation } from "../actions/confirmations";
 import { endEveryProof } from "../actions/proofs";
 import { discardUnfinishedJobs, realTimer, rescheduleTasks } from "../background";
+import { errorCode } from "../error-code";
 import { endEverySession } from "../identity/sessions";
 import { takeExclusiveLock } from "../lock";
 import { migrations } from "../migrations";
 import { migrate } from "../migrator";
-import { createBackups } from "./index";
+import { BACKUP_SCHEDULES } from "./index";
 import { createMarkStore } from "./marks";
-import { type BackupConfig, REPOSITORY_MISSING, restic } from "./restic";
+import {
+	type BackupConfig,
+	createRestic,
+	HOST,
+	REPOSITORY_MISSING,
+	type Restic,
+	resticExited,
+} from "./restic";
+import { emptyFolder, SNAPSHOT_FILE } from "./staging";
 
 /** The staging folder of restoring, inside the data folder. */
 const STAGING = "restore-staging";
@@ -45,10 +54,6 @@ const STAGING = "restore-staging";
 export const MARKER = "restore.pending";
 /** The marker while it is written, before its atomic rename. */
 const MARKER_DRAFT = `${MARKER}.tmp`;
-/** The file restic restores: each snapshot holds the database at its root. */
-const SNAPSHOT_FILE = "domus.db";
-/** The host of every snapshot of Domus. */
-const HOST = "domus";
 /** How long restic waits on a lock of the repository, so a restore never runs during a prune: it waits for it. */
 const RETRY_LOCK = ["--retry-lock", "30m"];
 /** What the jobs and runs a restore discards say. */
@@ -77,7 +82,7 @@ export interface RestoreResult {
 	readonly capturedAt: number;
 	/** The folder that keeps the previous set of files, `before-restore-<instant>` in the data folder. */
 	readonly preserved: string;
-	/** True when it ended a restore that was cut, without preparing anything again. */
+	/** True when it ended a restore that was cut, without staging anything again. */
 	readonly resumed: boolean;
 }
 
@@ -92,7 +97,7 @@ export type RestorePoint =
 	| "marker-published"
 	/** The old `-wal` and `-shm` removed and the data folder synced. */
 	| "auxiliaries-removed"
-	/** The prepared copy renamed over the database, before syncing the folders. */
+	/** The staged copy renamed over the database, before syncing the folders. */
 	| "database-renamed"
 	/** The restored database installed and synced, the marker not removed yet. */
 	| "database-installed";
@@ -121,13 +126,13 @@ export function restore(options: RestoreOptions): Promise<RestoreResult> {
 
 /**
  * Restores with the given runtime: takes the exclusive lock or refuses, then ends a restore that was cut, or
- * prepares the snapshot apart and installs it. Prepared and refused alike, the live database stays untouched until
- * the copy is ready.
+ * stages the snapshot apart and installs it. While it stages, and when it refuses, the live database stays untouched.
  */
 export async function runRestore(
 	{ databaseFile, modules, backups, snapshot }: RestoreOptions,
-	{ clock, restic: executable = "restic", cut }: RestoreRuntime,
+	runtime: RestoreRuntime,
 ): Promise<RestoreResult> {
+	const { clock, cut } = runtime;
 	if (!isAbsolute(databaseFile))
 		throw new Error(`databaseFile must be an absolute path, got "${databaseFile}"`);
 	// The same check as opening the platform, before anything of the data folder is touched.
@@ -143,8 +148,8 @@ export async function runRestore(
 			return { ...result(files, pending), resumed: true };
 		}
 
-		const prepared = await prepare(files, modules, backups, snapshot, executable, clock);
-		const marker = await publish(files, prepared, clock(), cut);
+		const staged = await stage(files, modules, resticOf(backups, runtime), snapshot, clock);
+		const marker = await publish(files, staged, clock(), cut);
 		await install(files, marker, cut);
 		return { ...result(files, marker), resumed: false };
 	} finally {
@@ -153,18 +158,32 @@ export async function runRestore(
 }
 
 /** The snapshots of host `domus`, oldest first. An empty repository folder, not initialized yet, has none. */
-export async function listSnapshots(
+export function listSnapshots(
+	backups: BackupConfig,
+	runtime: Pick<RestoreRuntime, "clock" | "restic">,
+): Promise<readonly SnapshotSummary[]> {
+	return snapshotsOf(resticOf(backups, runtime));
+}
+
+/** restic on the repository of `backups`, as the runtime gives it, on the real timer of its clock. */
+function resticOf(
 	backups: BackupConfig,
 	{ clock, restic: executable = "restic" }: Pick<RestoreRuntime, "clock" | "restic">,
+): Restic {
+	return createRestic(executable, backups, { clock, timer: realTimer(clock) });
+}
+
+/** The snapshots of host `domus` that `restic` lists, oldest first, with `extra` arguments. */
+async function snapshotsOf(
+	restic: Restic,
 	extra: readonly string[] = [],
 ): Promise<readonly SnapshotSummary[]> {
-	const repository = restic(executable, backups, { clock, timer: realTimer(clock) });
-	const { code, stdout } = await repository.run(
+	const { code, stdout } = await restic.run(
 		["snapshots", "--json", "--host", HOST, ...extra],
 		never(),
 	);
 	if (code === REPOSITORY_MISSING) return [];
-	if (code !== 0) throw new Error(`restic snapshots exited with code ${code}`);
+	if (code !== 0) throw new Error(resticExited("snapshots", code));
 	const listed = JSON.parse(stdout) as { id: string; time: string }[];
 	return listed
 		.map(({ id, time }) => ({ id, capturedAt: Date.parse(time) }))
@@ -178,8 +197,8 @@ interface Files {
 	/** The live database's `-wal` and `-shm`. */
 	readonly auxiliaries: readonly string[];
 	readonly staging: string;
-	/** The prepared copy, in the staging folder. */
-	readonly prepared: string;
+	/** The staged copy, in the staging folder. */
+	readonly staged: string;
 	readonly marker: string;
 	readonly draft: string;
 }
@@ -192,7 +211,7 @@ function filesOf(databaseFile: string): Files {
 		database: databaseFile,
 		auxiliaries: [`${databaseFile}-wal`, `${databaseFile}-shm`],
 		staging,
-		prepared: join(staging, SNAPSHOT_FILE),
+		staged: join(staging, SNAPSHOT_FILE),
 		marker: join(dataDir, MARKER),
 		draft: join(dataDir, MARKER_DRAFT),
 	};
@@ -206,33 +225,31 @@ function result(files: Files, marker: Marker): Omit<RestoreResult, "resumed"> {
 	};
 }
 
-/** What preparing leaves: the copy synced in the staging folder, and where it came from. */
-interface Prepared {
+/** What staging leaves: the copy synced in the staging folder, and where it came from. */
+interface Staged {
 	readonly snapshot: string;
 	readonly capturedAt: number;
 }
 
 /**
- * Prepares the snapshot apart: restic leaves it in the emptied staging folder, `quick_check` passes, its migrations
+ * Stages the snapshot apart: restic leaves it in the emptied staging folder, `quick_check` passes, its migrations
  * are an exact prefix of the code's and the missing ones are applied, it is sanitized in one transaction, and it is
  * closed without a WAL and synced with its folder. Any failure empties the staging folder and leaves the live
  * database untouched: no marker exists yet.
  */
-async function prepare(
+async function stage(
 	files: Files,
 	modules: readonly ModuleDefinition[],
-	backups: BackupConfig,
+	restic: Restic,
 	wanted: string | undefined,
-	executable: string,
 	clock: Clock,
-): Promise<Prepared> {
+): Promise<Staged> {
 	// No marker exists here, so emptying the staging folder and dropping a draft that was never published is safe.
 	rmSync(files.draft, { force: true });
 	emptyFolder(files.staging);
 	try {
-		const found = await chosenSnapshot(backups, wanted, executable, clock);
-		const repository = restic(executable, backups, { clock, timer: realTimer(clock) });
-		const { code } = await repository.run(
+		const found = await chosenSnapshot(restic, wanted);
+		const { code } = await restic.run(
 			[
 				"restore",
 				found.id,
@@ -244,12 +261,12 @@ async function prepare(
 			],
 			never(),
 		);
-		if (code !== 0) throw new Error(`restic restore exited with code ${code}`);
-		if (!existsSync(files.prepared)) throw new Error("the snapshot holds no domus.db");
+		if (code !== 0) throw new Error(resticExited("restore", code));
+		if (!existsSync(files.staged)) throw new Error("the snapshot holds no domus.db");
 
-		sanitizeCopy(files, modules, backups, found, clock());
-		syncFile(files.prepared);
-		syncFolder(files.staging);
+		sanitizeCopy(files, modules, found, clock());
+		syncToDisk(files.staged);
+		syncToDisk(files.staging);
 		return { snapshot: found.id, capturedAt: found.capturedAt };
 	} catch (error) {
 		emptyFolder(files.staging);
@@ -259,12 +276,10 @@ async function prepare(
 
 /** The snapshot to restore: the one whose id starts with `wanted`, or the latest. */
 async function chosenSnapshot(
-	backups: BackupConfig,
+	restic: Restic,
 	wanted: string | undefined,
-	executable: string,
-	clock: Clock,
 ): Promise<SnapshotSummary> {
-	const all = await listSnapshots(backups, { clock, restic: executable }, RETRY_LOCK);
+	const all = await snapshotsOf(restic, RETRY_LOCK);
 	if (wanted === undefined) {
 		const latest = all[all.length - 1];
 		if (!latest) throw new Error("there is no snapshot of host domus to restore");
@@ -284,11 +299,10 @@ async function chosenSnapshot(
 function sanitizeCopy(
 	files: Files,
 	modules: readonly ModuleDefinition[],
-	backups: BackupConfig,
 	from: SnapshotSummary,
 	now: number,
 ): void {
-	const copy = new Database(files.prepared, { fileMustExist: true });
+	const copy = new Database(files.staged, { fileMustExist: true });
 	try {
 		let check: unknown;
 		try {
@@ -303,20 +317,12 @@ function sanitizeCopy(
 			...modules.map((module) => ({ module: module.id, migrations: module.migrations })),
 		]);
 
-		const clock = () => now;
-		// The same tasks the platform declares with the backups on, so each one's next run comes from its frequency.
-		const { tasks } = createBackups({
-			connection: copy,
-			clock,
-			timer: realTimer(clock),
-			config: backups,
-			dataDir: files.dataDir,
-		});
 		const marks = createMarkStore(copy);
 		copy.transaction(() => {
 			// Nothing of the copy repeats a notice or an effect that already went out; a normal restart still recovers.
 			discardUnfinishedJobs(copy, now, DISCARDED);
-			rescheduleTasks(copy, clock, tasks);
+			// The tasks the platform declares with the backups on, each one's next run from its frequency.
+			rescheduleTasks(copy, () => now, BACKUP_SCHEDULES);
 			// A session revoked, or a password changed, after the copy must not come back.
 			endEverySession(copy);
 			endEveryConfirmation(copy);
@@ -329,7 +335,7 @@ function sanitizeCopy(
 	} finally {
 		copy.close();
 	}
-	if (existsSync(`${files.prepared}-wal`)) throw new Error("the copy kept a WAL after closing");
+	if (existsSync(`${files.staged}-wal`)) throw new Error("the copy kept a WAL after closing");
 }
 
 /**
@@ -340,7 +346,7 @@ function sanitizeCopy(
  */
 async function publish(
 	files: Files,
-	prepared: Prepared,
+	staged: Staged,
 	now: number,
 	cut: RestoreRuntime["cut"],
 ): Promise<Marker> {
@@ -351,13 +357,13 @@ async function publish(
 		if (!existsSync(path)) continue;
 		const link = join(folder, basename(path));
 		linkSync(path, link);
-		syncFile(link);
+		syncToDisk(link);
 	}
-	syncFolder(folder);
-	syncFolder(files.dataDir);
+	syncToDisk(folder);
+	syncToDisk(files.dataDir);
 
-	// The prepared copy is already synced: preparing did it before returning.
-	const marker: Marker = { preserved, ...prepared, at: now };
+	// The staged copy is already synced: staging did it before returning.
+	const marker: Marker = { preserved, ...staged, at: now };
 	const draft = openSync(files.draft, "w");
 	try {
 		writeSync(draft, JSON.stringify(marker));
@@ -367,36 +373,36 @@ async function publish(
 	}
 	await cut?.("marker-written");
 	renameSync(files.draft, files.marker);
-	syncFolder(files.dataDir);
+	syncToDisk(files.dataDir);
 	await cut?.("marker-published");
 	return marker;
 }
 
 /**
- * Installs the prepared copy with the marker on disk: removes the old auxiliary files, renames the copy over the
- * database and removes the marker, syncing each step. Resuming runs it again with the marker found: the prepared copy
+ * Installs the staged copy with the marker on disk: removes the old auxiliary files, renames the copy over the
+ * database and removes the marker, syncing each step. Resuming runs it again with the marker found: the staged copy
  * still in its folder means the rename is missing; gone, only the syncs and the marker's removal are left.
  */
 async function install(files: Files, marker: Marker, cut: RestoreRuntime["cut"]): Promise<void> {
 	// The marker is on disk: SQLite never checks that a WAL is its database's, so none may outlive the exchange.
 	for (const path of files.auxiliaries) rmSync(path, { force: true });
-	syncFolder(files.dataDir);
+	syncToDisk(files.dataDir);
 	await cut?.("auxiliaries-removed");
 
-	if (existsSync(files.prepared)) {
-		renameSync(files.prepared, files.database);
+	if (existsSync(files.staged)) {
+		renameSync(files.staged, files.database);
 		await cut?.("database-renamed");
 	} else if (!existsSync(files.database)) {
 		throw new Error(
-			`the prepared copy of ${marker.snapshot} is gone and no database is installed`,
+			`the staged copy of ${marker.snapshot} is gone and no database is installed`,
 		);
 	}
-	if (existsSync(files.staging)) syncFolder(files.staging);
-	syncFolder(files.dataDir);
+	if (existsSync(files.staging)) syncToDisk(files.staging);
+	syncToDisk(files.dataDir);
 	await cut?.("database-installed");
 
 	rmSync(files.marker);
-	syncFolder(files.dataDir);
+	syncToDisk(files.dataDir);
 }
 
 /**
@@ -408,7 +414,7 @@ function readMarker(dataDir: string): Marker | undefined {
 	try {
 		text = readFileSync(join(dataDir, MARKER), "utf8");
 	} catch (error) {
-		if ((error as { code?: unknown }).code === "ENOENT") return undefined;
+		if (errorCode(error) === "ENOENT") return undefined;
 		throw new Error("restore marker unreadable");
 	}
 	try {
@@ -443,25 +449,14 @@ function compactInstant(instant: number): string {
 		.replace(/[-:]/g, "");
 }
 
-/** Writes a file's data to disk. */
-function syncFile(path: string): void {
+/** Writes a file's data to disk or, for a folder, its entries: what was created, renamed or removed in it. */
+function syncToDisk(path: string): void {
 	const handle = openSync(path, "r");
 	try {
 		fsyncSync(handle);
 	} finally {
 		closeSync(handle);
 	}
-}
-
-/** Writes a folder's entries to disk: what was created, renamed or removed in it. */
-function syncFolder(path: string): void {
-	syncFile(path);
-}
-
-/** Removes the folder with whatever it holds and creates it again, empty. */
-function emptyFolder(folder: string): void {
-	rmSync(folder, { recursive: true, force: true });
-	mkdirSync(folder, { recursive: true });
 }
 
 /** A signal nobody aborts: restoring is not a job, and nothing cancels its restic. */

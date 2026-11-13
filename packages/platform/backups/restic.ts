@@ -2,7 +2,7 @@
 // password file through its environment, never its arguments. Its environment is built here and holds nothing else
 // of `api`'s: the session secret never reaches it. `TZ=UTC` makes `--time` read in UTC. A cancelled job ends it
 // as any child of the backups.
-import { type ChildResult, runChild, type Waiting } from "./child";
+import { type ChildResult, type ClockAndTimer, runChild } from "./child";
 
 /** Where the backups go and how to open them. Both are absolute paths. */
 export interface BackupConfig {
@@ -23,6 +23,9 @@ export interface Restic {
 
 export type ResticResult = ChildResult;
 
+/** The host of every snapshot of Domus, fixed so the retention groups them whatever the container is called. */
+export const HOST = "domus";
+
 /** The exit code of restic when the repository does not exist (restic 0.17 and later). */
 export const REPOSITORY_MISSING = 10;
 /** The exit code of restic when another process holds a lock of the repository it needs. */
@@ -42,11 +45,20 @@ export class ResticLockedError extends Error {
 	}
 }
 
+/** What a step of restic that did not exit with `0` says: the step and the code, never restic's output. */
+export function resticExited(step: string, code: number): string {
+	return `restic ${step} exited with code ${code}`;
+}
+
 /**
  * restic from `executable` (a path, or a name the `PATH` finds) on the repository of `config`, waiting on the
  * platform's clock and timer to kill one that ignores SIGTERM.
  */
-export function restic(executable: string, config: BackupConfig, waiting: Waiting): Restic {
+export function createRestic(
+	executable: string,
+	config: BackupConfig,
+	clockAndTimer: ClockAndTimer,
+): Restic {
 	const env: NodeJS.ProcessEnv = {
 		RESTIC_REPOSITORY: config.repository,
 		RESTIC_PASSWORD_FILE: config.passwordFile,
@@ -63,7 +75,7 @@ export function restic(executable: string, config: BackupConfig, waiting: Waitin
 				executable,
 				[...args, "--no-cache"],
 				{ env, signal, ...(cwd === undefined ? {} : { cwd }) },
-				waiting,
+				clockAndTimer,
 			),
 	};
 }

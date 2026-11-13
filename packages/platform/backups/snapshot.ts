@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 
 import type Database from "better-sqlite3";
 
-import { cancelled, runChild, type Waiting } from "./child";
+import { cancelled, type ClockAndTimer, runChild } from "./child";
 
 /** better-sqlite3 as this file resolves it: in the image, the copy next to the bundle. */
 const SQLITE = createRequire(import.meta.url).resolve("better-sqlite3");
@@ -45,13 +45,13 @@ export async function takeSnapshot(
 export async function passesQuickCheck(
 	file: string,
 	signal: AbortSignal,
-	waiting: Waiting,
+	clockAndTimer: ClockAndTimer,
 ): Promise<boolean> {
 	const { code, stdout } = await runChild(
 		process.execPath,
 		["-e", QUICK_CHECK, SQLITE, file],
 		{ env: {}, signal },
-		waiting,
+		clockAndTimer,
 	);
 	return code === 0 && stdout === "ok";
 }

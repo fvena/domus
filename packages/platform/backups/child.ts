@@ -9,8 +9,8 @@ import { PermanentJobError, type Timer } from "../background";
 /** How long a child has after SIGTERM before SIGKILL: under the 10 s after which a job counts as stuck. */
 export const KILL_GRACE = 5 * 1000;
 
-/** How the backups wait: the platform's clock and timer, which the tests control. */
-export interface Waiting {
+/** The platform's clock and timer, which the tests control: how the backups wait. */
+export interface ClockAndTimer {
 	readonly clock: Clock;
 	readonly timer: Timer;
 }
@@ -40,7 +40,7 @@ export function runChild(
 	command: string,
 	args: readonly string[],
 	{ env, cwd, signal }: ChildRun,
-	{ clock, timer }: Waiting,
+	{ clock, timer }: ClockAndTimer,
 ): Promise<ChildResult> {
 	if (signal.aborted) return Promise.reject(cancelled());
 	return new Promise((resolve, reject) => {

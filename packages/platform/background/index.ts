@@ -5,12 +5,14 @@
 import type Database from "better-sqlite3";
 
 import type { Clock } from "../actions";
-import { cleanupTask } from "./cleanup";
+import { CLEANUP_SCHEDULE, cleanupTask } from "./cleanup";
 import { createEngine, type JobKind } from "./engine";
 import {
 	createScheduler,
+	moveNextRuns,
 	type ScheduledTask,
 	type TaskOverview,
+	type TaskSchedule,
 	type TaskSettings,
 } from "./scheduler";
 import type { Timer } from "./timer";
@@ -272,22 +274,15 @@ function platformTasks(
 }
 
 /**
- * Moves the next run of each of the platform's tasks, with the backups' `backupTasks`, to its next occurrence from
- * the clock's now, a paused one left as it is. Restoring does it on the copy it prepares.
+ * Moves the next run of each of the platform's tasks, with the backups' `backupSchedules`, to its next occurrence
+ * from the clock's now, a paused one left as it is. Restoring does it on the copy it stages.
  */
 export function rescheduleTasks(
 	connection: Database.Database,
 	clock: Clock,
-	backupTasks: readonly ScheduledTask[],
+	backupSchedules: readonly TaskSchedule[],
 ): void {
-	createScheduler({
-		connection,
-		clock,
-		tasks: platformTasks(connection, clock, backupTasks),
-		enqueue: () => {
-			throw new Error("rescheduling enqueues nothing");
-		},
-	}).reschedule();
+	moveNextRuns(connection, clock, [CLEANUP_SCHEDULE, ...backupSchedules]);
 }
 
 export { controlledTimer, type ControlledTimer, realTimer, type Timer } from "./timer";
@@ -298,6 +293,7 @@ export {
 	type TaskRun,
 	TaskBusyError,
 	type TaskOverview,
+	type TaskSchedule,
 	type TaskSettings,
 	type TaskState,
 	UnknownTaskError,

@@ -755,7 +755,7 @@ describe("restoring over a database in trouble", { timeout: RESTIC_TIMEOUT }, ()
 		expect(notes(test)).toEqual([{ value: 1 }]);
 	});
 
-	it("installs the prepared copy when there is no database, and never leaves an empty one", async () => {
+	it("installs the staged copy when there is no database, and never leaves an empty one", async () => {
 		using target = restoreTarget();
 		await backedUpThenNoted(target);
 		for (const name of ["domus.db", "domus.db-wal", "domus.db-shm"])

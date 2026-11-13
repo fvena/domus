@@ -13,9 +13,15 @@
 import type Database from "better-sqlite3";
 
 import type { Clock } from "../actions";
-import type { ScheduledTask } from "./scheduler";
+import type { ScheduledTask, TaskSchedule } from "./scheduler";
 
 export const CLEANUP_TASK = "cleanup";
+
+/** The daily cleanup, at 04:30. */
+export const CLEANUP_SCHEDULE: TaskSchedule = {
+	id: CLEANUP_TASK,
+	frequency: { every: "day", at: "04:30" },
+};
 
 /** How many rows one batch changes at most: small, so the API waits little for each transaction. */
 const BATCH_SIZE = 500;
@@ -82,8 +88,7 @@ export function cleanupTask(
 	}));
 
 	return {
-		id: CLEANUP_TASK,
-		frequency: { every: "day", at: "04:30" },
+		...CLEANUP_SCHEDULE,
 		job: {
 			lane: "maintenance",
 			async run({ signal }) {
