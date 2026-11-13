@@ -143,6 +143,10 @@ export interface TestBackgroundRuntime {
 	 * waits until the promise the test returns settles. Only here.
 	 */
 	readonly interleave?: Interleave;
+	/** The free bytes of the uploads' volume, as the test wants them: what `statfs` tells unless given. */
+	readonly freeSpace?: () => number;
+	/** Whether the next write of an upload's temporary file fails with `ENOSPC`. Only here. */
+	readonly diskFull?: () => boolean;
 }
 
 /**
@@ -152,7 +156,16 @@ export interface TestBackgroundRuntime {
 export function createPlatformWithClock(
 	options: PlatformOptions,
 	clock: Clock,
-	{ timer, tasks, jobs, restic, node, interleave }: TestBackgroundRuntime = {},
+	{
+		timer,
+		tasks,
+		jobs,
+		restic,
+		node,
+		interleave,
+		freeSpace,
+		diskFull,
+	}: TestBackgroundRuntime = {},
 ): Platform {
 	return openPlatform(options, {
 		clock,
@@ -162,6 +175,8 @@ export function createPlatformWithClock(
 		...(restic === undefined ? {} : { restic }),
 		...(node === undefined ? {} : { node }),
 		...(interleave === undefined ? {} : { interleave }),
+		...(freeSpace === undefined ? {} : { freeSpace }),
+		...(diskFull === undefined ? {} : { diskFull }),
 	});
 }
 

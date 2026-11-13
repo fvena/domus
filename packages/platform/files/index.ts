@@ -12,18 +12,24 @@ import type Database from "better-sqlite3";
 
 import type { Clock } from "../actions";
 import { type AccessView, mayUpload, type VerifiedContext } from "../authorization";
+import type { Timer } from "../background/timer";
 import { randomId } from "../identity/accounts";
 import { sessionLookup } from "../identity/sessions";
 import { fileError } from "./failures";
 import { readFileName } from "./name";
+import { createReservations, type FreeSpace } from "./reservations";
 import { createFileStore, createHashLocks, syncFolder } from "./store";
 import { detectFileType, type FileType } from "./type";
 
 export { errorResponse } from "./failures";
+export type { FreeSpace } from "./reservations";
 export type { FileType } from "./type";
 
 /** The largest upload, 25 MB, in bytes (ADR 0028). */
 const MAX_SIZE = 25 * 1024 * 1024;
+
+/** How long an upload may go without bytes, at any point, before it is given up: one minute. */
+const IDLE_LIMIT = 60 * 1000;
 
 /** How long a prepared file stays usable from the end of its preparation: 24 hours. */
 const PREPARED_LIFETIME = 24 * 60 * 60 * 1000;
@@ -56,6 +62,11 @@ export interface Files {
 	upload(context: VerifiedContext, request: Request): Promise<PreparedFile>;
 	/** Empties the uploads in progress of an earlier process: before the door admits requests. */
 	clearIncoming(): void;
+	/**
+	 * Whether the file named `name` in `incoming/` is the temporary file of an upload in progress. Its reservation is
+	 * taken before the file exists and freed after it is removed, so one for which this is false was left behind.
+	 */
+	inProgress(name: string): boolean;
 	/** Closes the descriptor of every upload in progress, which then fails and removes its temporary file. */
 	close(): void;
 }
@@ -63,10 +74,16 @@ export interface Files {
 export interface FilesOptions {
 	readonly connection: Database.Database;
 	readonly clock: Clock;
+	/** How an upload waits for its next bytes: the platform's timer, over the same clock. */
+	readonly timer: Timer;
 	readonly view: AccessView;
 	/** The `files` folder: absolute. */
 	readonly directory: string;
 	readonly interleave?: Interleave;
+	/** The free space of the volume of `directory`: `statfs` unless a test gives another. */
+	readonly freeSpace?: FreeSpace;
+	/** Only from the testing entry: whether the next write of a temporary file fails with `ENOSPC`. */
+	readonly diskFull?: () => boolean;
 }
 
 /** A content received in full into its temporary file, synced to disk. */
@@ -77,24 +94,47 @@ interface Received {
 	readonly size: number;
 }
 
-/** An upload being received: its descriptor, open until it ends or the platform closes, and its body. */
+/** Who uploads: the account and the session the prepared file will be of. */
+interface Owner {
+	readonly account: string;
+	readonly session: string;
+}
+
+/** An upload being received: its descriptor, open until it ends or the platform closes. */
 interface Receiving {
 	readonly descriptor: number;
-	readonly reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 	open: boolean;
+	/** Why it was stopped before its body ended, if it was. */
+	stopped?: unknown;
+	/** Stops it at its next read with `failure`, the first one given. */
+	stop(failure: unknown): void;
 }
 
 export function createFiles({
 	connection,
 	clock,
+	timer,
 	view,
 	directory,
 	interleave,
+	freeSpace,
+	diskFull,
 }: FilesOptions): Files {
 	const store = createFileStore(directory);
+	const preparedHeld = connection.prepare<[string, number], { files: number; bytes: number }>(
+		`SELECT count(*) AS files, coalesce(sum(contents.size), 0) AS bytes
+		FROM platform_prepared_files AS prepared JOIN platform_file_contents AS contents ON contents.hash = prepared.content
+		WHERE prepared.session = ? AND prepared.consumed = 0 AND prepared.expires_at > ?`,
+	);
+	const reservations = createReservations({
+		directory: () => store.incoming(),
+		prepared: (session) => preparedHeld.get(session, clock()) ?? { files: 0, bytes: 0 },
+		...(freeSpace === undefined ? {} : { freeSpace }),
+	});
 	const locks = createHashLocks();
 	const receiving = new Set<Receiving>();
 	const lookup = sessionLookup(connection);
+	const sessionLives = ({ account, session }: Owner) => lookup(session)?.account === account;
 	const contentState = connection.prepare<[string], { state: "present" | "claimed" }>(
 		"SELECT state FROM platform_file_contents WHERE hash = ?",
 	);
@@ -105,34 +145,62 @@ export function createFiles({
 		"INSERT INTO platform_prepared_files (id, content, name, session, account, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
 	);
 
-	/** Writes the body to a temporary file while hashing it and detecting its type; removes it on any failure. */
-	async function receive(request: Request): Promise<Received> {
-		const temporary = join(store.incoming(), randomUUID());
+	/**
+	 * Writes the body to a temporary file while hashing it and detecting its type, until it ends with exactly the
+	 * `declared` bytes. A minute without bytes, on the platform's clock and timer, stops it, as do the client's
+	 * cancelling and the end of its session, checked at each chunk. On any failure what is left of the body is
+	 * cancelled; the caller removes the file.
+	 */
+	async function receive(
+		request: Request,
+		{ owner, temporary, declared }: { owner: Owner; temporary: string; declared: number },
+	): Promise<Received> {
 		const reader = request.body?.getReader();
-		const upload: Receiving = { descriptor: openSync(temporary, "wx"), reader, open: true };
+		const upload: Receiving = {
+			descriptor: openSync(temporary, "wx"),
+			open: true,
+			stop: (failure) => {
+				upload.stopped ??= failure;
+				// The read it waits for ends now, and the upload fails without writing again.
+				reader?.cancel().catch(() => undefined);
+			},
+		};
 		receiving.add(upload);
+		const cancelled = () => upload.stop(new Error("the client cancelled the upload"));
+		request.signal.addEventListener("abort", cancelled, { once: true });
+		if (request.signal.aborted) cancelled();
 		try {
 			const hash = createHash("sha256");
 			const detector = detectFileType();
 			let size = 0;
 			for (;;) {
-				const chunk = reader ? await reader.read() : { done: true as const };
-				// The platform closed while the bytes arrived: its descriptor is gone, and its number may be another's.
-				if (!upload.open) throw new Error("the platform closed during the upload");
+				const disarm = timer.at(clock() + IDLE_LIMIT, () =>
+					upload.stop(fileError("UPLOAD_TIMEOUT")),
+				);
+				const chunk = await (
+					reader?.read() ?? Promise.resolve({ done: true as const })
+				).finally(disarm);
+				if (upload.stopped !== undefined) throw upload.stopped;
 				if (chunk.done) break;
+				if (!sessionLives(owner)) throw new ORPCError("UNAUTHORIZED");
+				size += chunk.value.length;
+				// Not a byte past the declared size reaches the disk: the reservation holds no more.
+				if (size > declared) throw fileError("BODY_MISMATCH");
 				hash.update(chunk.value);
 				detector.push(chunk.value);
+				if (diskFull?.()) throw noSpace();
 				writeWhole(upload.descriptor, chunk.value);
-				size += chunk.value.length;
 			}
+			if (size !== declared) throw fileError("BODY_MISMATCH");
 			fsyncSync(upload.descriptor);
 			const type = detector.finish();
 			if (type === undefined) throw fileError("FILE_TYPE_NOT_ALLOWED");
 			return { temporary, hash: hash.digest("hex"), type, size };
 		} catch (error) {
-			rmSync(temporary, { force: true });
+			reader?.cancel().catch(() => undefined);
 			throw error;
 		} finally {
+			request.signal.removeEventListener("abort", cancelled);
 			if (upload.open) {
 				upload.open = false;
 				closeSync(upload.descriptor);
@@ -147,7 +215,7 @@ export function createFiles({
 	 * transaction, checks the session again and writes the rows.
 	 */
 	function publish(
-		{ account, session }: { readonly account: string; readonly session: string },
+		owner: Owner,
 		name: string,
 		{ temporary, hash, type, size }: Received,
 	): Promise<PreparedFile> {
@@ -162,7 +230,7 @@ export function createFiles({
 			}
 			await interleave?.("published");
 			return connection.transaction(() => {
-				if (lookup(session)?.account !== account) throw new ORPCError("UNAUTHORIZED");
+				if (!sessionLives(owner)) throw new ORPCError("UNAUTHORIZED");
 				const now = clock();
 				const current = contentState.get(hash)?.state;
 				if (current === "claimed") throw fileError("CONTENT_BUSY");
@@ -174,7 +242,14 @@ export function createFiles({
 					size,
 					expiresAt: now + PREPARED_LIFETIME,
 				};
-				insertPrepared.run(prepared.id, hash, name, session, account, prepared.expiresAt);
+				insertPrepared.run(
+					prepared.id,
+					hash,
+					name,
+					owner.session,
+					owner.account,
+					prepared.expiresAt,
+				);
 				return prepared;
 			})();
 		});
@@ -185,23 +260,32 @@ export function createFiles({
 			const { session } = context;
 			if (session === undefined) throw new ORPCError("UNAUTHORIZED");
 			if (!mayUpload(view, context)) throw new ORPCError("FORBIDDEN");
-			declaredSize(request.headers.get("content-length"));
+			const size = declaredSize(request.headers.get("content-length"));
 			const name = readFileName(request.headers.get("x-file-name") ?? undefined);
 			if (name === undefined) throw fileError("INVALID_FILE_NAME");
-			const received = await receive(request);
+			const id = randomUUID();
+			const temporary = join(store.incoming(), id);
+			const reservation = reservations.reserve({ session, temporary: id, size });
+			const owner: Owner = { account: context.account, session };
 			try {
-				return await publish({ account: context.account, session }, name.name, received);
+				const received = await receive(request, { owner, temporary, declared: size });
+				return await publish(owner, name.name, received);
+			} catch (error) {
+				throw isNoSpace(error) ? fileError("DISK_FULL") : error;
 			} finally {
-				rmSync(received.temporary, { force: true });
+				// The temporary file goes before its reservation: one outside every reservation is left behind.
+				rmSync(temporary, { force: true });
+				reservation.release();
 			}
 		},
 		clearIncoming: () => store.clearIncoming(),
+		inProgress: (name) => reservations.holds(name),
 		close: () => {
 			for (const upload of receiving) {
 				upload.open = false;
 				closeSync(upload.descriptor);
-				// The read it waits for ends now, and the upload fails without touching the descriptor again.
-				upload.reader?.cancel().catch(() => undefined);
+				// Its descriptor is gone, and its number may be another's: it fails without touching it again.
+				upload.stop(new Error("the platform closed during the upload"));
 			}
 		},
 	};
@@ -214,6 +298,18 @@ function declaredSize(header: string | null): number {
 	if (size === 0) throw fileError("FILE_EMPTY");
 	if (size > MAX_SIZE) throw fileError("FILE_TOO_LARGE");
 	return size;
+}
+
+/** The error of a write that finds the volume full, as Node's own. */
+function noSpace(): NodeJS.ErrnoException {
+	return Object.assign(new Error("ENOSPC: no space left on device, write"), {
+		code: "ENOSPC",
+		syscall: "write",
+	});
+}
+
+function isNoSpace(error: unknown): boolean {
+	return error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOSPC";
 }
 
 /** Writes every byte of `chunk`: one write may take only part of it. */

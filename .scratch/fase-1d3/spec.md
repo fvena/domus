@@ -114,6 +114,12 @@ La limpieza diaria recoge lo que ya nada protege. La copia sube, junto a la base
     - 25 MB son 25 × 1024 × 1024 bytes;
     - un `Content-Length` que no es un número decimal cuenta como ausente: `LENGTH_REQUIRED`;
     - Kira, con `via`, tampoco sube, y una cuenta sin perfil no sube.
+- Decidido al implementar la 03:
+    - la reserva se toma después del nombre y antes de crear el temporal;
+    - la recepción se corta en el primer trozo que pasa de lo declarado: ni un byte de más llega al disco; un cuerpo que acaba antes de lo declarado se rechaza al acabar;
+    - el minuto sin bytes se cuenta desde cada lectura que espera un trozo, la primera incluida;
+    - la sesión se vuelve a comprobar con cada trozo recibido, y la transacción de las filas la comprueba otra vez; una subida parada de una sesión revocada termina con su siguiente trozo o con el minuto sin bytes;
+    - la cancelación del cliente (la señal de la petición) y el cuerpo que se corta terminan la subida como un fallo interno: nadie lee esa respuesta.
 
 ### Errores de las rutas de archivos
 
@@ -167,6 +173,13 @@ Un fichero que falta en disco con su contenido presente es un fallo interno (`IN
 - La reserva se libera al terminar, fallar o cancelar, también si se corta la conexión.
 - Un `ENOSPC` al escribir el temporal termina la subida con el error de disco lleno, borra el temporal y libera la reserva.
 - Los tres números son provisionales: los revisa el primer consumidor real.
+- Decidido al implementar la 03:
+    - 200 MB son 200 × 1024 × 1024 bytes y 2 GB, 2 × 1024³; el espacio libre es el que `statfs` da a un proceso sin privilegios (`bavail × bsize`) de `files/incoming/`;
+    - primero el límite de la sesión (`UPLOAD_LIMIT`) y después el del volumen (`INSUFFICIENT_STORAGE`);
+    - un archivo preparado cuenta mientras no se consume y el instante es anterior a su caducidad: en el instante exacto de `expiresAt` ya no cuenta;
+    - el límite es de la sesión, no de la persona: otra sesión suya tiene el suyo;
+    - una reserva se guarda por el nombre de su temporal, se toma antes de que el fichero exista y se libera después de borrarlo; `files.inProgress(name)` dice si un temporal de `incoming/` es de una subida en curso, para la limpieza;
+    - en la entrada de pruebas, `createTestPlatform` gana `freeSpace` (sin valor, `statfs`) y `diskFull`, que se pregunta antes de cada escritura del temporal y la hace fallar con un `ENOSPC` como el de Node; un `ENOSPC` en cualquier paso de la subida responde `DISK_FULL`.
 
 ### Reconocer el tipo (Q8)
 
