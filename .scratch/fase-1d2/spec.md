@@ -367,6 +367,7 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
     - Los puntos de corte son `marker-written`, `marker-published`, `auxiliaries-removed`, `database-renamed` y `database-installed`. Solo `runRestore` de la entrada de pruebas los recibe, como `cut` del runtime; `ChildTask` gana `{ hold: "restore", dataDirectory, backups, restic?, at }`, que avisa al llegar al punto y espera el SIGKILL con el cerrojo.
 - Decisiones tomadas en la revisión del código:
     - La regla `backups-stay-in-platform` cubre también `packages/platform/lock.ts`: `module-sdk` no puede ofrecer el cerrojo de la base, tampoco a través de una cadena de importaciones.
+    - Restaurar comprueba la lista de módulos con `checkModules`, como abrir la plataforma, antes de tomar el cerrojo y de tocar la carpeta de datos.
 - La copia necesita en el NVMe un espacio libre del tamaño de la base, para la instantánea, además del repositorio.
 - Al repartir las tareas se acordó que la fila de las marcas y la forma de `/health` nacen completas en la 01, que la 05 entrega el procedimiento entero de restaurar (retomar y la marca al abrir incluidos) y que la 06 lo demuestra con procesos cortados y casos de desastre.
 

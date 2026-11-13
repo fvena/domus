@@ -24,7 +24,7 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
 
-import { type ModuleDefinition, PLATFORM_ID } from "@domus/module-sdk";
+import { checkModules, type ModuleDefinition, PLATFORM_ID } from "@domus/module-sdk";
 import Database from "better-sqlite3";
 
 import type { Clock } from "../actions";
@@ -130,6 +130,8 @@ export async function runRestore(
 ): Promise<RestoreResult> {
 	if (!isAbsolute(databaseFile))
 		throw new Error(`databaseFile must be an absolute path, got "${databaseFile}"`);
+	// The same check as opening the platform, before anything of the data folder is touched.
+	checkModules(modules);
 	const dataDir = dirname(databaseFile);
 	const files = filesOf(databaseFile);
 	// Held, and referenced, until the end: the garbage collector would close an unreachable connection, and its lock.

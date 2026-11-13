@@ -459,6 +459,19 @@ describe("restoring a backup", { timeout: RESTIC_TIMEOUT }, () => {
 		).rejects.toThrow("the database is in use: stop api and accounts first");
 	});
 
+	it("refuses modules that opening would refuse, before touching the data folder", async () => {
+		using target = restoreTarget();
+
+		await expect(
+			restoreBackup({
+				file: target.databaseFile,
+				modules: [ledger, ledger],
+				backups: target.backups,
+			}),
+		).rejects.toThrow(/module "ledger"/);
+		expect(readdirSync(target.data)).toEqual([]);
+	});
+
 	it("keeps the previous set apart in before-restore-<instant>, and leaves no old auxiliary file beside the restored database", async () => {
 		using target = restoreTarget();
 		await backedUpThenNoted(target);
