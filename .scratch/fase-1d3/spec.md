@@ -106,7 +106,7 @@ La limpieza diaria recoge lo que ya nada protege. La copia sube, junto a la base
 
 ### Errores de las rutas de archivos
 
-Las dos rutas responden sus errores con la misma forma JSON que los de oRPC (`code`, `status`, `message` y `data`), para que `api-client` y la app los traten igual. «Reintento» dice si la misma petición puede salir bien más tarde sin cambiar nada.
+Las dos rutas responden sus errores con el estado HTTP de la tabla y, como cuerpo, el JSON de `ORPCError.toJSON()` (`defined`, `code`, `status`, `message` y `data`) tal cual, sin el sobre `{ json }` del serializador RPC: no son procedimientos de oRPC, y así la app lee el mismo `code` y `data` que en una RPC. «Reintento» dice si la misma petición puede salir bien más tarde sin cambiar nada.
 
 | Ruta y causa                                                                          | Código                                           | HTTP            | Reintento                              |
 | ------------------------------------------------------------------------------------- | ------------------------------------------------ | --------------- | -------------------------------------- |
