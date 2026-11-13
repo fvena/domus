@@ -365,6 +365,8 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
     - `--snapshot` acepta el identificador o su comienzo, en hexadecimal, si solo uno empieza así. `list` escribe el identificador entero y la captura en ISO UTC.
     - `restore.mjs` lee `DOMUS_DATA_DIR` y las dos rutas de las copias con `readRestoreConfig`, sin el secreto de las sesiones, y no mira `DOMUS_BACKUPS_OFF`: el interruptor apaga las tareas de `api`, no restaurar.
     - Los puntos de corte son `marker-written`, `marker-published`, `auxiliaries-removed`, `database-renamed` y `database-installed`. Solo `runRestore` de la entrada de pruebas los recibe, como `cut` del runtime; `ChildTask` gana `{ hold: "restore", dataDirectory, backups, restic?, at }`, que avisa al llegar al punto y espera el SIGKILL con el cerrojo.
+- Decisiones tomadas en la revisión del código:
+    - La regla `backups-stay-in-platform` cubre también `packages/platform/lock.ts`: `module-sdk` no puede ofrecer el cerrojo de la base, tampoco a través de una cadena de importaciones.
 - La copia necesita en el NVMe un espacio libre del tamaño de la base, para la instantánea, además del repositorio.
 - Al repartir las tareas se acordó que la fila de las marcas y la forma de `/health` nacen completas en la 01, que la 05 entrega el procedimiento entero de restaurar (retomar y la marca al abrir incluidos) y que la 06 lo demuestra con procesos cortados y casos de desastre.
 
