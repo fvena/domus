@@ -7,6 +7,7 @@ export {
 	type DelegationChange,
 	listBackups,
 	restoreBackup,
+	type TestBackups,
 	type TestRestoreOptions,
 	pendingFrom,
 	type PermissionChange,
@@ -19,6 +20,7 @@ export {
 	type TestPreparation,
 	type WriteOptions,
 } from "./platform";
-export { PermanentJobError, type VerifiedContext } from "@domus/platform/testing";
+export { requireRestic } from "./restic";
+export { fakeNode, PermanentJobError, type VerifiedContext } from "@domus/platform/testing";
 /** The platform's own operations, for HTTP tests of modules, whose rules keep them from platform's contracts. */
 export { platformContract } from "@domus/platform/contracts";

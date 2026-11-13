@@ -284,6 +284,12 @@ Un fichero que falta en disco con su contenido presente es un fallo interno (`IN
 - Cada contenido de la lista se enlaza con un enlace duro dentro de la carpeta de preparación, bajo `files/`, así que la ruta guardada en restic no depende de la carpeta de datos. Si falta uno, la copia falla sin reintento, con su motivo, y no se guarda como buena.
 - restic sube `domus.db` y esos enlaces en una sola instantánea suya, con `--files-from-verbatim`. La preparación, enlaces incluidos, se vacía al terminar, también tras un error, una cancelación o una caída, como en la 1d2: un enlace olvidado conservaría unos bytes que la limpieza ya retiró del almacén.
 - Una copia parcial no cuenta como buena ni da paso a la retención (ADR 0026).
+- Decidido al implementar la 08:
+    - en la instantánea de restic, la base sigue en `/domus.db` y cada contenido va en `/files/contents/<dos primeros caracteres del hash>/<hash>`, la misma forma que la carpeta `files` del almacén;
+    - el hijo de `quick_check` escribe en la primera línea lo que dice `quick_check` y, solo si es `ok`, el hash de un contenido necesario por línea, sacado de la instantánea con el instante de captura como argumento. La consulta es `NEEDED_CONTENTS` de `packages/platform/files/needed.ts`, con el instante como único parámetro, para que restaurar use la misma;
+    - un hash de la lista que no sean 64 caracteres hexadecimales en minúscula hace fallar la copia sin reintento: es una ruta del almacén;
+    - la lista de rutas para `--files-from-verbatim` es el fichero `paths` de la preparación, que no se sube;
+    - un contenido que falta falla con `a file content the backup needs is missing`, sin el hash. Otro error al enlazar (una carpeta `files` en otro volumen, por ejemplo) se reintenta como cualquier error.
 
 ### Restaurar (Q12)
 

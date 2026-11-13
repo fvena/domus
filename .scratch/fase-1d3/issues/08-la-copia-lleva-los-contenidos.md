@@ -1,6 +1,6 @@
 # 08. La copia lleva los contenidos
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 04
 
 Spec: [`../spec.md`](../spec.md), sección «Copia» y costura 3 de «Decisiones de prueba». ADR 0028 y ADR 0026.
@@ -15,9 +15,9 @@ Que la copia de cada noche suba, en la misma instantánea de restic que la base,
 
 ## Criterios de aceptación
 
-- [ ] Con restic real, la instantánea tiene `domus.db` y los contenidos de una referencia viva y de una soltada aún deshacible, con rutas que no dependen de la carpeta de datos.
-- [ ] No tiene el contenido de un archivo preparado ni el de una referencia soltada ya caducada en la captura, aunque caduque mientras restic trabaja.
-- [ ] Un contenido necesario que falta en disco hace fallar la copia sin reintento, sin marca de copia guardada y con `/health` como en una copia fallida.
-- [ ] La preparación queda vacía, sin enlaces, tras una copia buena, una fallida y una cancelada.
-- [ ] Las pruebas de la copia de la 1d2 siguen pasando.
-- [ ] `pnpm check` pasa.
+- [x] Con restic real, la instantánea tiene `domus.db` y los contenidos de una referencia viva y de una soltada aún deshacible, con rutas que no dependen de la carpeta de datos.
+- [x] No tiene el contenido de un archivo preparado ni el de una referencia soltada ya caducada en la captura, aunque caduque mientras restic trabaja.
+- [x] Un contenido necesario que falta en disco hace fallar la copia sin reintento, sin marca de copia guardada y con `/health` como en una copia fallida.
+- [x] La preparación queda vacía, sin enlaces, tras una copia buena, una fallida y una cancelada.
+- [x] Las pruebas de la copia de la 1d2 siguen pasando.
+- [x] `pnpm check` pasa.
