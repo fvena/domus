@@ -337,7 +337,7 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
     - `DOMUS_BACKUPS_OFF` con un valor que no sea `1` impide arrancar. Las dos rutas tienen que ser absolutas, y un fichero de la contraseña con solo espacios o saltos de línea cuenta como vacío.
     - `/health` lista ya `scheduler-silent` y `lane-stuck` a la vez cuando se dan los dos; en la 1d1 solo salía el primero.
     - La imagen no declara `/backups` como volumen: compose lo monta siempre, y un volumen anónimo escondería que falta.
-    - El job `unit` corre en el contenedor `node:22-trixie` e instala restic con apt allí: el apt de Ubuntu 24.04 trae restic 0.16, sin el código `10`.
+    - El job `unit` instala en el runner el restic 0.18.0 de la imagen desde su release oficial, comprobado con su checksum publicado: el apt de Ubuntu 24.04 trae restic 0.16, sin el código `10`. No corre en un contenedor: como root, git rechaza la carpeta del checkout («dubious ownership») y una carpeta sin permisos no detiene las pruebas, que tienen que correr como un usuario normal (cambiado en la PR, tras su primer fallo).
     - La comprobación de restic de las pruebas es un `globalSetup` de `test-utils`, que es donde corren las pruebas de las copias.
 - Decisiones tomadas al implementar la 03:
     - Con un intento fallido y ninguna copia guardada, `backups` dice `none`: la spec solo tenía `off`, `none-yet` y `saved`, y la tarea pide que deje de decir `none-yet`.
