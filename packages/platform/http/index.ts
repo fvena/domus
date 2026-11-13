@@ -19,7 +19,7 @@ import { internalError } from "../actions/failures";
 import { sealContext, type VerifiedContext } from "../authorization";
 import { LIST_TASKS } from "../background/operations";
 import { PROTOCOL, platformContract } from "../contracts";
-import { errorResponse } from "../files";
+import { contentDisposition, errorResponse } from "../files";
 import { AUTH_PREFIX, type AuthOptions, createAuth } from "../identity/auth";
 import { replacePassword, SessionGoneError, verifiedPasswordHash } from "../identity/passwords";
 import { requestProof, WrongPasswordError } from "../identity/proofs";
@@ -41,6 +41,9 @@ export interface HttpHandler {
 
 /** Where a file is uploaded (ADR 0028): a route of Hono, not of oRPC, to control its receipt. */
 const FILES_PATH = "/api/files";
+
+/** Where a file is downloaded through the read that returns it (ADR 0028). */
+const DOWNLOAD_PATH = "/api/files/download";
 
 /** Where RPC procedures live; @domus/api-client calls the same path. */
 const RPC_PREFIX = "/api/rpc";
@@ -318,6 +321,43 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 		return answer;
 	});
 
+	// Downloading a file: a read of a module on the path of the actions, which must return the file at a position
+	// marked with `fileRef()`. The input never goes in the URL. The bytes go after its transaction, never cached.
+	app.post(DOWNLOAD_PATH, async (c) => {
+		const responseHeaders = new Headers();
+		let answer: Response;
+		try {
+			const verified = await contextOf(c.req.raw, responseHeaders);
+			if (!verified?.session) throw new ORPCError("UNAUTHORIZED");
+			const { action, input, file } = downloadRequest(
+				await c.req.json().catch(() => undefined),
+			);
+			const found = actions.download({
+				context: verified,
+				action,
+				input,
+				file,
+				...(c.req.header(PROOF_HEADER) === undefined
+					? {}
+					: { proof: c.req.header(PROOF_HEADER) }),
+			});
+			answer = new Response(found.content.stream(), {
+				headers: {
+					"cache-control": "no-store",
+					"x-content-type-options": "nosniff",
+					"content-type": found.type,
+					"content-length": String(found.size),
+					"content-disposition": contentDisposition(found.name),
+				},
+			});
+		} catch (error) {
+			answer = errorResponse(error);
+		}
+		for (const cookie of responseHeaders.getSetCookie())
+			answer.headers.append("set-cookie", cookie);
+		return answer;
+	});
+
 	/**
 	 * The verified context of a request, from its session alone. Over HTTP, in phase 1c, the account is the
 	 * session's and asks itself: no via, the app channel, proven by password, no conversation.
@@ -339,4 +379,18 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	}
 
 	return { fetch: async (request) => app.fetch(request) };
+}
+
+/** The body of a download: `{ action, input, file }`, else a bad request. */
+function downloadRequest(body: unknown): {
+	readonly action: string;
+	readonly input: unknown;
+	readonly file: string;
+} {
+	if (typeof body !== "object" || body === null || Array.isArray(body))
+		throw new ORPCError("BAD_REQUEST");
+	const { action, input, file, ...rest } = body as Record<string, unknown>;
+	if (typeof action !== "string" || typeof file !== "string" || Object.keys(rest).length > 0)
+		throw new ORPCError("BAD_REQUEST");
+	return { action, input, file };
 }

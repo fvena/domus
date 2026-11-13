@@ -33,7 +33,7 @@ describe("probe via Kira, with the delegation table", () => {
 			test.invoke(kira, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" }),
 		).toEqual({ result: { id: 1, body: "regar" }, entry: 1 });
 		expect(test.invoke(test.context("ana"), "probe.listNotes")).toEqual([
-			{ id: 1, body: "regar" },
+			{ id: 1, body: "regar", files: [] },
 		]);
 	});
 
@@ -52,7 +52,7 @@ describe("probe via Kira, with the delegation table", () => {
 			result: { id: 1, body: "regar" },
 			entry: 1,
 		});
-		expect(test.invoke(kira, "probe.listNotes")).toEqual([{ id: 1, body: "regar" }]);
+		expect(test.invoke(kira, "probe.listNotes")).toEqual([{ id: 1, body: "regar", files: [] }]);
 		// Born via Kira, it is logged via Kira, under the key Kira gave.
 		expect(test.log()).toMatchObject([{ actor: { account: "ana", via: "kira" } }]);
 	});

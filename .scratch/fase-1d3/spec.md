@@ -153,15 +153,15 @@ Las dos rutas responden sus errores con el estado HTTP de la tabla y, como cuerp
 
 Y desde `ctx.files`, por el camino de las acciones:
 
-| Causa                                                                            | Código                                              | HTTP |
-| -------------------------------------------------------------------------------- | --------------------------------------------------- | ---- |
-| `attach` con un archivo preparado que no existe o es de otra sesión              | `NOT_FOUND`                                         | 404  |
-| `attach` con un archivo preparado caducado                                       | `CONFLICT`, `data.reason: "prepared-file-expired"`  | 409  |
-| `attach` con un archivo preparado ya consumido                                   | `CONFLICT`, `data.reason: "prepared-file-consumed"` | 409  |
-| `attach`, `detach` o `reattach` sobre un registro que no se ve                   | `NOT_FOUND`                                         | 404  |
-| `attach`, `detach` o `reattach` sobre un registro que se ve y no se puede editar | `FORBIDDEN`                                         | 403  |
-| `detach` de un archivo que no es de ese registro                                 | `NOT_FOUND`                                         | 404  |
-| `reattach` fuera del deshacer de la entrada que soltó la referencia              | `NOT_FOUND`                                         | 404  |
+| Causa                                                                                      | Código                                              | HTTP |
+| ------------------------------------------------------------------------------------------ | --------------------------------------------------- | ---- |
+| `attach` con un archivo preparado que no existe, es de otra sesión o de una que ya terminó | `NOT_FOUND`                                         | 404  |
+| `attach` con un archivo preparado caducado                                                 | `CONFLICT`, `data.reason: "prepared-file-expired"`  | 409  |
+| `attach` con un archivo preparado ya consumido                                             | `CONFLICT`, `data.reason: "prepared-file-consumed"` | 409  |
+| `attach`, `detach` o `reattach` sobre un registro que no se ve                             | `NOT_FOUND`                                         | 404  |
+| `attach`, `detach` o `reattach` sobre un registro que se ve y no se puede editar           | `FORBIDDEN`                                         | 403  |
+| `detach` de un archivo que no es de ese registro                                           | `NOT_FOUND`                                         | 404  |
+| `reattach` fuera del deshacer de la entrada que soltó la referencia                        | `NOT_FOUND`                                         | 404  |
 
 Un fichero que falta en disco con su contenido presente es un fallo interno (`INTERNAL_SERVER_ERROR`, 500), que no debería ocurrir nunca.
 
@@ -225,6 +225,14 @@ Un fichero que falta en disco con su contenido presente es un fallo interno (`IN
 - `@domus/module-sdk/contracts` ofrece `fileRef()`: un esquema de Zod `{ id, name, type, size }` con una marca en sus metadatos. La plataforma reconoce en tiempo de ejecución las posiciones de una salida marcadas con `fileRef()`, también dentro de arrays, objetos opcionales y anulables. Una lectura que devuelve un `fileRef()` con un id que no es una referencia viva del registro del módulo es un error del módulo.
 - El módulo no guarda ids de archivo en sus tablas: la referencia apunta a su dueño. Al borrar un registro, el módulo suelta sus referencias en la misma acción.
 - `module-sdk` no ofrece rutas, manejadores ni nada del almacén fuera de `ctx.files`.
+- Decidido al implementar la 04:
+    - `detach` y `reattach` devuelven el `fileRef()` de la referencia, como `attach`, para que una acción pueda responder qué archivo quitó o devolvió;
+    - `attach`, `detach` y `reattach` en una lectura son un error del módulo (`INTERNAL_SERVER_ERROR`); `of` vale en las dos y da los archivos más antiguos primero;
+    - se comprueba primero el registro (no se ve: «no encontrado»; se ve y no se edita: «prohibido») y después el archivo preparado: no existe, es de otra sesión o su sesión ya no existe, «no encontrado»; consumido, `prepared-file-consumed`; en el instante exacto de `expiresAt` o después, `prepared-file-expired`, la misma frontera que el límite de la sesión de la 03;
+    - lo que rechaza `ctx.files` sale de la acción tal cual, como `forbidden()`, aunque el contrato no lo declare;
+    - el camino de las acciones da a cada escritura un descriptor de su ejecución: si es deshacible, qué entrada deshace y, para rellenar, los registros que tocó `ctx.files` y las referencias que soltó. Los registros se suman a los que declara el manejador antes de comprobar que una escritura deshacible toca algo; las referencias soltadas se ligan a la entrada justo después de anotarla, en la misma transacción, porque su número no existe antes. Dentro de esa escritura, `of` ya no da una referencia que soltó;
+    - `fileRef()` es `{ id, name, type, size }` con textos no vacíos y un tamaño entero no negativo, marcado con `domusFileRef` en el registro global de Zod; `@domus/module-sdk/contracts` exporta también `isFileRef(schema)` y el tipo `FileRef`, y `zod` pasa a dependencia de `module-sdk`. El recorrido entra en objetos, arrays, opcionales, anulables, valores por defecto y de solo lectura; en una unión no busca;
+    - que una lectura devuelva en una posición marcada un id que no es una referencia viva de su módulo se descubre solo al descargarlo, y responde `INTERNAL_SERVER_ERROR`.
 
 ### Deshacer con referencias soltadas (Q9)
 
@@ -239,6 +247,11 @@ Un fichero que falta en disco con su contenido presente es un fallo interno (`IN
 - Los bytes salen después, como flujo desde el descriptor, con `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, el tipo detectado y `Content-Disposition` con el nombre saneado (`filename*` en UTF-8). Sin peticiones por rangos.
 - Un `file` que no salió de esa lectura responde «no encontrado», igual que uno que no existe.
 - Las descargas no entran en el registro de acciones, como cualquier lectura.
+- Decidido al implementar la 04:
+    - las lecturas siguen fuera de toda transacción; la descarga autoriza la lectura antes, fuera de la transacción, para que una pendiente que guarde la autorización no se revierta, y después ejecuta la lectura con `query_only`, comprueba el archivo y abre el fichero en una transacción. Así lo amplía la 05 para la pendiente de tipo descarga;
+    - el cuerpo es exactamente `{ action, input, file }`: otra clave, también `confirmation` hasta la 05, es `BAD_REQUEST`. Un comprobante va en la cabecera `step-up-proof`, como en las RPC;
+    - la respuesta lleva también `Content-Length`, y `Content-Type` es el tipo detectado tal cual, sin `charset`;
+    - cerrar la plataforma cierra el descriptor de cada descarga sin terminar, que acaba con un error.
 
 ### Descarga confirmada (Q7)
 
@@ -290,6 +303,12 @@ Un fichero que falta en disco con su contenido presente es un fallo interno (`IN
     - `restoreFile({ noteId, file })`: deshacible, con inversa `detachFile`, que solo funciona como inversa.
 - `deleteNote` suelta los archivos de la nota y su inversa, `restoreNote`, lleva sus ids y los vuelve a vincular.
 - Las áreas de salud y secretas no tienen archivos.
+- Decidido al implementar la 04:
+    - solo las lecturas de notas devuelven `files`; las escrituras siguen respondiendo la nota sin ellos, y `notesWithComments` también;
+    - las tres acciones nuevas responden el `fileRef()` del archivo;
+    - `deleteNote` suelta los archivos después del bloqueo por comentarios, y su inversa lleva siempre `files`, vacía si no había; en `restoreNote`, `files` es opcional, porque deshacer valida la inversa guardada con el contrato de ahora;
+    - para provocar un fallo después de `attach`, `detach` o `reattach`, la prueba envuelve el manejador de `probe` antes de abrir la plataforma, como ya hacían las pruebas de permisos con `listNotes`; `probe` no gana acciones para fallar;
+    - `test-utils` gana `test.contextOf(browser)`: el contexto que la puerta sella para la sesión del navegador, para vincular con `invoke` lo que ese navegador subió.
 
 ### El ensayo y la comprobación en la Pi (Q14)
 

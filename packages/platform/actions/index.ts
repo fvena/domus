@@ -13,7 +13,8 @@
 // the same transaction as the operation, so one that rolls back leaves it unused (ADR 0023). The platform's own
 // sensitive operations, such as changing permissions, take this same path as writes of the platform's area, and
 // reading the action log, which answers only the annotations of one's own entries, as a read of it. Only the
-// represented account that wrote an entry undoes it; for any other, the entry does not exist.
+// represented account that wrote an entry undoes it; for any other, the entry does not exist. A download (ADR
+// 0028) is a read that, in one transaction, also opens the file it returned at a position marked `fileRef()`.
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
@@ -49,6 +50,10 @@ import {
 	visibleTo,
 } from "../authorization";
 import { checkTransition, editableTo, type RecordArea } from "../authorization/writes";
+import { markedFiles } from "../files/marked";
+import { FilesRefusal, type References, type WriteRun } from "../files/references";
+import type { OpenedContent } from "../files/store";
+import type { FileType } from "../files/type";
 import { answeringWith, type ConfirmationCall } from "./answering";
 import type { Capture, CapturedTransition } from "./capture";
 import { type ConfirmationTimes, type Confirmations, type NewPending } from "./confirmations";
@@ -122,6 +127,31 @@ export interface Actions {
 	 * bad request for an invalid input or an operation that is not sensitive.
 	 */
 	fingerprintOf(operation: ProvenOperation): string;
+	/**
+	 * Runs the read `action` with `input` as {@link invoke} does and, in the same transaction, opens the file
+	 * `file` it returned at a position its contract marks with `fileRef()` (ADR 0028). Throws like the read, and
+	 * "not found" for an action that is not a read or a file the read did not return there. The descriptor is
+	 * closed if anything fails after it opened; the caller sends its bytes and the stream closes it.
+	 */
+	download(call: DownloadCall): Download;
+}
+
+/** A download: who asks, the read that returns the file and its input, and the file's id. */
+export interface DownloadCall {
+	readonly context: VerifiedContext;
+	readonly action: string;
+	readonly input?: unknown;
+	readonly file: string;
+	/** The step-up proof of the read, when it is sensitive. */
+	readonly proof?: string;
+}
+
+/** A file ready to send: its open content and what the answer says of it. */
+export interface Download {
+	readonly content: OpenedContent;
+	readonly name: string;
+	readonly type: FileType;
+	readonly size: number;
 }
 
 /** The operation a step-up proof is asked for: an action, or an operation of the platform, and its input, or an undo. */
@@ -158,6 +188,10 @@ export interface ActionsOptions {
 	readonly proofs: Proofs;
 	/** The platform's own sensitive operations. */
 	readonly operations?: readonly PlatformOperation[];
+	/** The references of files, which a handler's `ctx.files` changes. */
+	readonly references: References;
+	/** Opens a content for a download: unset when the platform has no folder for files. */
+	readonly openContent?: (hash: string) => OpenedContent;
 }
 
 export type { ConfirmationCall, ConfirmationTimes, PlatformOperation };
@@ -177,6 +211,8 @@ export function createActions({
 	confirmations,
 	proofs,
 	operations = [],
+	references,
+	openContent,
 }: ActionsOptions): Actions {
 	const registry = new Map<string, RegisteredAction>();
 	for (const module of modules) {
@@ -186,7 +222,7 @@ export function createActions({
 			const handler = module.actions?.[name];
 			if (!handler) continue;
 			const { meta, inputSchema, outputSchema, errorMap } = contract["~orpc"];
-			const parts: ModuleParts = { handler, db, errorMap, ownedTables };
+			const parts: ModuleParts = { module: module.id, handler, db, errorMap, ownedTables };
 			registry.set(`${module.id}.${name}`, {
 				module: module.id,
 				name,
@@ -199,7 +235,8 @@ export function createActions({
 				},
 				inputSchema,
 				outputSchema,
-				execute: (context, input, now) => runHandler(parts, actorOf(context), input, now),
+				execute: (context, input, now, write) =>
+					runHandler(parts, context, input, now, write),
 			});
 		}
 	}
@@ -222,7 +259,39 @@ export function createActions({
 		confirm: (call) => guarded(() => answering.confirm(call)),
 		reject: (call) => guarded(() => answering.reject(call)),
 		fingerprintOf: (operation) => guarded(() => fingerprintOf(operation)),
+		download: (call) => guarded(() => download(call)),
 	};
+
+	function download({ context, action, input, file, proof }: DownloadCall): Download {
+		if (!isVerified(context)) throw internalError();
+		const { found, value } = validated(action, input);
+		if (found.kind !== "read")
+			throw new ORPCError("NOT_FOUND", { message: `no read "${action}"` });
+		// Authorization first, outside the transaction, so a pending confirmation it stores stays.
+		const checked = authorizeRead(found, context, action, value, { proof });
+		let opened: OpenedContent | undefined;
+		try {
+			return connection.transaction((): Download => {
+				const output = answerRead(found, context, value, { proof, checked });
+				if (!markedFiles(found.outputSchema, output).includes(file))
+					throw new ORPCError("NOT_FOUND", { message: `no file "${file}"` });
+				const reference = references.live(found.module, file);
+				// A file the read returned that is not a live reference of its module: the module's mistake.
+				if (!reference || !openContent) throw internalError();
+				opened = openContent(reference.content);
+				return {
+					content: opened,
+					name: reference.name,
+					type: reference.type,
+					size: reference.size,
+				};
+			})();
+		} catch (error) {
+			// Rolled back after the file opened: nobody sends it.
+			opened?.close();
+			throw error;
+		}
+	}
 
 	function invoke({ context, action, input, idempotencyKey, proof }: ActionCall): unknown {
 		// Only a context the door or the testing entry sealed: nothing on the way can stand in for it.
@@ -308,14 +377,33 @@ export function createActions({
 		});
 	}
 
-	/** Runs a handler; only an error its contract declares leaves as it is. */
-	function runHandler(parts: ModuleParts, actor: Actor, input: unknown, now: number): unknown {
+	/**
+	 * Runs a handler; only an error its contract declares leaves as it is, besides the platform's own refusals of
+	 * `forbidden()` and `ctx.files`. A write passes its run, which collects what `ctx.files` changed.
+	 */
+	function runHandler(
+		parts: ModuleParts,
+		context: VerifiedContext,
+		input: unknown,
+		now: number,
+		write: WriteRun | undefined,
+	): unknown {
+		const actor = actorOf(context);
 		/** The area of one of the module's owned tables; any other table is a mistake of the handler. */
 		const areaOf = (table: OwnedTable): RecordArea => {
 			const area = parts.ownedTables.get(table);
 			if (!area) throw new Error("not an owned table of this module");
 			return area;
 		};
+		const files = references.forRun({
+			module: parts.module,
+			db: parts.db,
+			areaOf,
+			account: actor.account,
+			session: context.session,
+			now,
+			write,
+		});
 		let outcome: unknown;
 		try {
 			outcome = parts.handler({
@@ -332,9 +420,10 @@ export function createActions({
 				forbidden: () => new HandlerForbidden(),
 				ownership: (table) =>
 					newOwnership(actor.account, areaOf(table).policy.defaultVisibility),
+				files,
 			});
 		} catch (error) {
-			if (error instanceof HandlerForbidden) throw error;
+			if (error instanceof HandlerForbidden || error instanceof FilesRefusal) throw error;
 			throw declaredOrInternal(parts.errorMap, error);
 		}
 		// An async handler, which its type forbids: what it would do later falls outside the transaction.
@@ -350,8 +439,23 @@ export function createActions({
 		context: VerifiedContext,
 		action: string,
 		input: unknown,
-		{ proof, confirmed = false }: { readonly proof?: string; readonly confirmed?: boolean },
+		options: { readonly proof?: string; readonly confirmed?: boolean },
 	): unknown {
+		const checked = authorizeRead(found, context, action, input, options);
+		return answerRead(found, context, input, { proof: options.proof, checked });
+	}
+
+	/**
+	 * Authorizes a read, or stores it as a pending confirmation and answers `CONFIRMATION_REQUIRED`. Returns how its
+	 * proof checked, for {@link answerRead} to use it.
+	 */
+	function authorizeRead(
+		found: RegisteredAction,
+		context: VerifiedContext,
+		action: string,
+		input: unknown,
+		{ proof, confirmed = false }: { readonly proof?: string; readonly confirmed?: boolean },
+	): ProofCheck | undefined {
 		const fingerprint = operationFingerprint(action, input);
 		const checked = proofs.check(proof, context, fingerprint, clock());
 		const request: AuthorizationRequest = {
@@ -368,7 +472,19 @@ export function createActions({
 			{ kind: "read", operation: { action, input }, fingerprint, origin: context },
 			() => authorize(request),
 		);
+		return checked;
+	}
 
+	/** Runs an authorized read with `query_only` on, validates its result and uses its proof. */
+	function answerRead(
+		found: RegisteredAction,
+		context: VerifiedContext,
+		input: unknown,
+		{
+			proof,
+			checked,
+		}: { readonly proof: string | undefined; readonly checked: ProofCheck | undefined },
+	): unknown {
 		let result: unknown;
 		connection.pragma("query_only = ON");
 		try {
@@ -620,8 +736,15 @@ export function createActions({
 	): WriteReceipt {
 		const now = clock();
 		const actor = actorOf(context);
-		const { value, transitions } = capture.watch(() => found.execute(context, input, now));
-		const outcome = checkOutcome(found, value);
+		const run: WriteRun = {
+			undoable: found.undoable,
+			undoes: logged.undoes,
+			touched: [],
+			released: new Set(),
+		};
+		const { value, transitions } = capture.watch(() => found.execute(context, input, now, run));
+		// The records `ctx.files` changed count as touched without the handler declaring them.
+		const outcome = checkOutcome(found, value, run.touched);
 		checkTransitions(found, actor.account, transitions, outcome.touched);
 		const entry = actionLog.record({
 			module: found.module,
@@ -636,6 +759,8 @@ export function createActions({
 			touched: outcome.touched,
 			undoes: logged.undoes,
 		});
+		// Its entry exists only now: each reference it released is linked to it, in the same transaction.
+		references.linkReleased(run.released, entry);
 		capture.clear();
 		return { result: outcome.result, entry };
 	}
@@ -665,15 +790,30 @@ export function createActions({
 		}
 	}
 
-	/** A write's outcome as its contract and the log need it, or an internal error that rolls it back. */
+	/**
+	 * A write's outcome as its contract and the log need it, or an internal error that rolls it back. Its touched
+	 * records are the handler's and those `ctx.files` changed, each once.
+	 */
 	function checkOutcome(
 		found: RegisteredAction,
 		outcome: unknown,
+		changedFiles: readonly TouchedRecord[],
 	): { result: unknown; touched: readonly TouchedRecord[]; inverse: Inverse | undefined } {
 		if (typeof outcome !== "object" || outcome === null) throw internalError();
-		const { result, touched, inverse } = outcome as Record<string, unknown>;
+		const { result, touched: declared, inverse } = outcome as Record<string, unknown>;
 
-		if (!Array.isArray(touched) || !touched.every(isTouchedRecord)) throw internalError();
+		if (!Array.isArray(declared) || !declared.every(isTouchedRecord)) throw internalError();
+		const touched = [
+			...declared,
+			...changedFiles.filter(
+				(changed) =>
+					!declared.some(
+						(record) =>
+							record.type === changed.type &&
+							String(record.id) === String(changed.id),
+					),
+			),
+		];
 		// An undo is stopped by a later write of what this one touched (`changed-since`): an undoable write that
 		// declares nothing could be undone over any later change.
 		if (found.undoable && touched.length === 0) throw internalError();
@@ -715,8 +855,9 @@ export function createActions({
 	}
 }
 
-/** What running a module's handler needs: the handler, its module's database, errors and owned tables. */
+/** What running a module's handler needs: its module, the handler, its module's database, errors and owned tables. */
 interface ModuleParts {
+	readonly module: string;
 	readonly handler: ActionHandler<ActionContract, ModuleSchema>;
 	readonly db: ModuleDatabase<ModuleSchema>;
 	/** The errors its contract declares: the only ones its handler's throws leave with. */

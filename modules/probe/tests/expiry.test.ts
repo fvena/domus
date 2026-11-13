@@ -62,7 +62,9 @@ describe("probe expiry", () => {
 			).toStrictEqual(acknowledged(1));
 		}
 
-		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([
+			{ id: 1, body: "comprar pan", files: [] },
+		]);
 		expect(test.log()).toHaveLength(1);
 	});
 
@@ -114,7 +116,9 @@ describe("probe expiry", () => {
 			expect(() => test.undo(ana, added.entry, { idempotencyKey: key })).toThrow(expired);
 		}
 
-		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([
+			{ id: 1, body: "comprar pan", files: [] },
+		]);
 		expect(test.log()).toEqual([expect.objectContaining({ entry: 1, undoneBy: null })]);
 	});
 
@@ -230,7 +234,9 @@ describe("probe expiry", () => {
 					{ idempotencyKey: "k1" },
 				),
 			).toStrictEqual(acknowledged(1));
-			expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
+			expect(test.invoke(ana, "probe.listNotes")).toEqual([
+				{ id: 1, body: "comprar pan", files: [] },
+			]);
 			expect(test.log()).toHaveLength(1);
 		});
 	});

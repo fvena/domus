@@ -23,7 +23,9 @@ describe("probe writes", () => {
 		);
 
 		expect(added).toEqual({ result: { id: 1, body: "comprar pan" }, entry: 1 });
-		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([
+			{ id: 1, body: "comprar pan", files: [] },
+		]);
 		expect(test.log()).toEqual([
 			expect.objectContaining({
 				entry: 1,
@@ -56,6 +58,7 @@ describe("probe writes", () => {
 		expect(test.invoke(ana, "probe.getNote", { id: 1 })).toEqual({
 			id: 1,
 			body: "comprar leche",
+			files: [],
 		});
 		expect(test.log()[1]).toMatchObject({
 			action: "probe.editNote",
@@ -84,7 +87,9 @@ describe("probe writes", () => {
 				{ idempotencyKey: "k3" },
 			),
 		).toEqual({ result: { id: 1, body: "comprar pan" }, entry: 3 });
-		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([
+			{ id: 1, body: "comprar pan", files: [] },
+		]);
 
 		expect(
 			test.log().map(({ action, touched, inverse }) => ({ action, touched, inverse })),
@@ -95,7 +100,7 @@ describe("probe writes", () => {
 				touched: [{ module: "probe", type: "note", id: "1" }],
 				inverse: {
 					action: "probe.restoreNote",
-					input: { id: 1, body: "comprar pan", visibility: "private" },
+					input: { id: 1, body: "comprar pan", visibility: "private", files: [] },
 				},
 			},
 			{
@@ -193,7 +198,9 @@ describe("probe writes", () => {
 		expect(() =>
 			test.invoke(ana, "probe.deleteNote", { id: 1 }, { idempotencyKey: "k1" }),
 		).toThrow(expect.objectContaining({ code: "NOTE_HAS_COMMENTS", defined: true }));
-		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([
+			{ id: 1, body: "comprar pan", files: [] },
+		]);
 		expect(test.log()).toEqual([]);
 	});
 });

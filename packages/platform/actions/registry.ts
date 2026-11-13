@@ -3,6 +3,7 @@
 import type { AnySchema } from "@orpc/contract";
 
 import type { RequiredPermission, SensitiveOperation, VerifiedContext } from "../authorization";
+import type { WriteRun } from "../files/references";
 
 /** One action as its contract declared it, read once at registration. */
 export interface RegisteredAction {
@@ -23,6 +24,14 @@ export interface RegisteredAction {
 	readonly subject?: (input: unknown, context: VerifiedContext) => string | undefined;
 	/** For a write of the platform: what its input names must exist for who asks, else `NOT_FOUND`. */
 	readonly find?: (input: unknown, context: VerifiedContext) => void;
-	/** Runs it with its validated input, and returns what a module's handler would. */
-	readonly execute: (context: VerifiedContext, input: unknown, now: number) => unknown;
+	/**
+	 * Runs it with its validated input, and returns what a module's handler would. A write passes its run, which
+	 * collects what its handler's `ctx.files` changed.
+	 */
+	readonly execute: (
+		context: VerifiedContext,
+		input: unknown,
+		now: number,
+		write?: WriteRun,
+	) => unknown;
 }

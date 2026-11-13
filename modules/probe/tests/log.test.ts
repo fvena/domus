@@ -100,7 +100,9 @@ describe("undoing", () => {
 			test.undo(test.context("bea", { via: "kira" }), 2, { idempotencyKey: "u1" }),
 		).toThrow(notFound);
 		expect(test.log()).toHaveLength(2);
-		expect(test.invoke(bea, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
+		expect(test.invoke(bea, "probe.listNotes")).toEqual([
+			{ id: 1, body: "comprar pan", files: [] },
+		]);
 	});
 
 	it("lets the same account undo, by the app, what it wrote through Kira, and the reverse", async () => {
@@ -125,7 +127,9 @@ describe("undoing", () => {
 
 		expect(() => test.undo(kira, 1, { idempotencyKey: "u1" })).toThrow(forbidden);
 		expect(test.log()).toHaveLength(1);
-		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([
+			{ id: 1, body: "comprar pan", files: [] },
+		]);
 	});
 
 	it("through Kira, waits for the person when the inverse's delegation asks, and runs once confirmed", async () => {

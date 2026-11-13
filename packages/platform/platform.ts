@@ -25,7 +25,13 @@ import {
 import { taskOperations } from "./background/operations";
 import { type BackupConfig, createBackups } from "./backups";
 import { refuseWhileRestorePending } from "./backups/restore";
-import { createFiles, type Files, type FreeSpace, type Interleave } from "./files";
+import {
+	createFiles,
+	createReferences,
+	type Files,
+	type FreeSpace,
+	type Interleave,
+} from "./files";
 import { accessView, registeredAreas } from "./identity/access";
 import { ensureDeviceAccount } from "./identity/accounts";
 import { platformOperations } from "./identity/operations";
@@ -286,6 +292,8 @@ export function openPlatform(
 		confirmations: createConfirmations(db, confirmationTimes),
 		proofs,
 		operations: [...platformOperations(db, areas), ...taskOperations(background)],
+		references: createReferences(db, view),
+		...(files === undefined ? {} : { openContent: (hash: string) => files.open(hash) }),
 	});
 	internals.set(platform, {
 		db,
