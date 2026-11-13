@@ -13,6 +13,7 @@ import {
 	openSync,
 	readdirSync,
 	readFileSync,
+	renameSync,
 	rmSync,
 	statSync,
 	writeFileSync,
@@ -682,5 +683,251 @@ describe("the backups in /health", { timeout: RESTIC_TIMEOUT }, () => {
 		const [snapshot] = snapshots(target);
 		expect(body).not.toContain(snapshot?.id.slice(0, 8));
 		expect(body).not.toMatch(/ana|@|\/|domus-backups|repository/);
+	});
+});
+
+/** 05:30 in Madrid on the first Sunday of the test clock, when the first check of the repository is due. */
+const FIRST_CHECK = Date.parse("2026-01-04T04:30:00Z");
+const WEEK = 7 * DAY;
+
+/** The runs of the check task, oldest first. */
+const checkRuns = (test: TestPlatform) =>
+	test.background.runs().filter((run) => run.task === "backup-check");
+
+describe("the weekly check of the repository", { timeout: 2 * RESTIC_TIMEOUT }, () => {
+	it("runs on Sunday at 05:30 in Madrid and reads the whole repository with restic", async () => {
+		using target = backupTarget();
+		using fake = fakeRestic(() => ({}));
+		await using test = createTestPlatform({
+			modules: [],
+			file: true,
+			backups: { ...target, restic: fake.executable },
+		});
+		test.background.start();
+		test.clock.set(FIRST_BACKUP);
+		await test.background.settled();
+
+		test.clock.set(FIRST_CHECK);
+		await test.background.settled();
+
+		expect(checkRuns(test)).toEqual([
+			expect.objectContaining({ result: "ok", error: null, plannedAt: FIRST_CHECK }),
+		]);
+		expect(fake.calls().slice(-2)).toEqual(["unlock", "check"]);
+		expect(await health(test)).toEqual({
+			status: "ok",
+			background: { status: "ok", backups: "saved" },
+		});
+	});
+
+	it("fails on a repository that lost a pack, says so in /health, and a good check clears it", async () => {
+		using target = backupTarget();
+		await using test = createTestPlatform({ modules: [], file: true, backups: target });
+		test.background.start();
+		test.clock.set(FIRST_BACKUP);
+		await test.background.settled();
+		// No new backup touches the damaged repository: from Sunday on, the saved one is stale.
+		test.background.pause("backup");
+		const [pack] = readdirSync(join(target.repository, "data"), {
+			recursive: true,
+			withFileTypes: true,
+		}).filter((entry) => entry.isFile());
+		if (pack === undefined) throw new Error("the repository holds no pack");
+		const packFile = join(pack.parentPath, pack.name);
+		const aside = join(dirname(target.repository), "pack-aside");
+		renameSync(packFile, aside);
+
+		test.clock.set(FIRST_CHECK);
+		await test.background.settled();
+
+		expect(checkRuns(test)).toEqual([
+			expect.objectContaining({
+				result: "failed",
+				error: "PermanentJobError: restic check exited with code 1",
+			}),
+		]);
+		expect(await health(test)).toEqual({
+			status: "ok",
+			background: {
+				status: "degraded",
+				reasons: ["backup-stale", "backup-check-failed"],
+				backups: "saved",
+			},
+		});
+
+		renameSync(aside, packFile);
+		test.clock.set(FIRST_CHECK + WEEK);
+		await test.background.settled();
+
+		expect(checkRuns(test).map((run) => run.result)).toEqual(["failed", "ok"]);
+		expect(await health(test)).toEqual({
+			status: "ok",
+			background: { status: "degraded", reasons: ["backup-stale"], backups: "saved" },
+		});
+	});
+
+	it("ends well without checking while the repository does not exist yet, and its mark stays", async () => {
+		using target = backupTarget();
+		using fake = fakeRestic((path) => ({ unlock: `[ -e '${path("failing")}' ] && exit 1` }));
+		writeFileSync(fake.path("failing"), "");
+		await using test = createTestPlatform({
+			modules: [],
+			file: true,
+			backups: { ...target, restic: fake.executable },
+		});
+		test.background.start();
+		test.background.pause("backup");
+		test.clock.set(FIRST_CHECK);
+		await test.background.settled();
+		const failed = {
+			status: "ok",
+			background: {
+				status: "degraded",
+				reasons: ["backup-check-failed"],
+				backups: "none-yet",
+			},
+		};
+		expect(await health(test)).toEqual(failed);
+
+		rmSync(fake.path("failing"));
+		test.clock.set(FIRST_CHECK + WEEK);
+		await test.background.settled();
+
+		expect(checkRuns(test).map((run) => run.result)).toEqual(["failed", "ok"]);
+		expect(fake.calls()).toEqual(["unlock", "unlock"]);
+		expect(readdirSync(target.repository)).toEqual([]);
+		expect(await health(test)).toEqual(failed);
+	});
+});
+
+describe("a check that finds the repository locked", { timeout: RESTIC_TIMEOUT }, () => {
+	it("is retried, and counts as a failed check once it used up its attempts", async () => {
+		using target = backupTarget();
+		restic(target, "init");
+		using fake = fakeRestic(() => ({ check: "exit 11" }));
+		await using test = createTestPlatform({
+			modules: [],
+			file: true,
+			backups: { ...target, restic: fake.executable },
+		});
+		test.background.start();
+		test.background.pause("backup");
+		test.clock.set(FIRST_CHECK);
+		await test.background.settled();
+
+		const checkJob = () => test.background.jobs().find((job) => job.kind === "backup-check");
+		expect(checkJob()).toEqual(
+			expect.objectContaining({
+				state: "pending",
+				attempts: 1,
+				error: "ResticLockedError check-11",
+			}),
+		);
+		expect(await health(test)).toEqual({
+			status: "ok",
+			background: { status: "ok", backups: "none-yet" },
+		});
+
+		// The waits between the five attempts: 30 s, doubling.
+		for (const wait of [30, 60, 120, 240]) {
+			test.clock.advance(wait * 1000);
+			await test.background.settled();
+		}
+
+		expect(checkJob()).toEqual(expect.objectContaining({ state: "failed", attempts: 5 }));
+		expect(fake.calls().filter((call) => call === "check")).toHaveLength(5);
+		expect(checkRuns(test)).toEqual([
+			expect.objectContaining({ result: "failed", error: "ResticLockedError check-11" }),
+		]);
+		expect(await health(test)).toEqual({
+			status: "ok",
+			background: {
+				status: "degraded",
+				reasons: ["backup-check-failed"],
+				backups: "none-yet",
+			},
+		});
+	});
+});
+
+describe("the marks of the backups", { timeout: 2 * RESTIC_TIMEOUT }, () => {
+	/** Every reason of the backups at once: the saved backup stale, its retention failed and the check failed. */
+	const allReasons = ["backup-stale", "backup-retention-failed", "backup-check-failed"];
+
+	/**
+	 * Opens the platform on `databaseFile` with a restic whose retention and check fail, saves the first backup,
+	 * pauses it and fails the first check.
+	 */
+	async function everyBackupReason(
+		databaseFile: string,
+		backups: { repository: string; passwordFile: string; restic: string },
+	): Promise<TestPlatform> {
+		const test = createTestPlatform({ modules: [], file: databaseFile, backups });
+		test.background.start();
+		test.clock.set(FIRST_BACKUP);
+		await test.background.settled();
+		test.background.pause("backup");
+		test.clock.set(FIRST_CHECK);
+		await test.background.settled();
+		return test;
+	}
+
+	/** A data folder of its own, so closing the platform keeps its database. */
+	function dataFolder() {
+		const dir = mkdtempSync(join(tmpdir(), "domus-backups-data-"));
+		return {
+			databaseFile: join(dir, "domus.db"),
+			[Symbol.dispose]: () => rmSync(dir, { recursive: true, force: true }),
+		};
+	}
+
+	it("give every reason at once, in their order after the scheduler's, and the same after closing and opening", async () => {
+		using target = backupTarget();
+		using fake = fakeRestic(() => ({ forget: "exit 1", check: "exit 1" }));
+		using data = dataFolder();
+		const backups = { ...target, restic: fake.executable };
+		{
+			await using test = await everyBackupReason(data.databaseFile, backups);
+			test.clock.advance(6 * 60 * 1000, { wake: false });
+
+			expect(await health(test)).toEqual({
+				status: "ok",
+				background: {
+					status: "degraded",
+					reasons: ["scheduler-silent", ...allReasons],
+					backups: "saved",
+				},
+			});
+		}
+
+		await using test = createTestPlatform({ modules: [], file: data.databaseFile, backups });
+		test.clock.set(FIRST_CHECK);
+		test.background.start();
+
+		expect(await health(test)).toEqual({
+			status: "ok",
+			background: { status: "degraded", reasons: allReasons, backups: "saved" },
+		});
+	});
+
+	it("outlive the purge of the runs older than 90 days: a backup paused that long still says saved", async () => {
+		using target = backupTarget();
+		using fake = fakeRestic(() => ({ forget: "exit 1", check: "exit 1" }));
+		using data = dataFolder();
+		await using test = await everyBackupReason(data.databaseFile, {
+			...target,
+			restic: fake.executable,
+		});
+		test.background.pause("backup-check");
+		expect([...backupRuns(test), ...checkRuns(test)]).toHaveLength(2);
+
+		test.clock.set(FIRST_CHECK + 100 * DAY);
+		await test.background.settled();
+
+		expect([...backupRuns(test), ...checkRuns(test)]).toEqual([]);
+		expect(await health(test)).toEqual({
+			status: "ok",
+			background: { status: "degraded", reasons: allReasons, backups: "saved" },
+		});
 	});
 });
