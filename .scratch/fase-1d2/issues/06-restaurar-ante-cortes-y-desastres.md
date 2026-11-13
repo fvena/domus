@@ -1,6 +1,6 @@
 # 06. Restaurar ante cortes y desastres
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 05
 
 Spec: [`../spec.md`](../spec.md), sección «Restaurar» (instalar, retomar e invariantes) y, en «Decisiones de prueba», las costuras 2 y 3 (los cortes). ADR 0026.
@@ -25,10 +25,17 @@ La demostración de que el procedimiento de la 05 aguanta lo que tiene que aguan
 
 ## Criterios de aceptación
 
-- [ ] Las cinco posiciones de corte tienen su prueba con un proceso muerto por SIGKILL, y en cada una abrir hace lo esperado y restaurar otra vez termina la restauración: retomando sin otra carpeta `before-restore` en la 2–5, y empezando de cero en la 1.
-- [ ] En ninguna posición queda un auxiliar viejo junto a la base restaurada ni una `domus.db` vacía.
-- [ ] Restaurar sobre una base dañada funciona y conserva sus ficheros.
-- [ ] Restaurar sin base actual funciona.
-- [ ] El conjunto conservado con WAL conserva sus escrituras confirmadas.
-- [ ] Lo que estas pruebas descubran queda corregido en el procedimiento.
-- [ ] `pnpm check` pasa.
+- [x] Las cinco posiciones de corte tienen su prueba con un proceso muerto por SIGKILL, y en cada una abrir hace lo esperado y restaurar otra vez termina la restauración: retomando sin otra carpeta `before-restore` en la 2–5, y empezando de cero en la 1.
+- [x] En ninguna posición queda un auxiliar viejo junto a la base restaurada ni una `domus.db` vacía.
+- [x] Restaurar sobre una base dañada funciona y conserva sus ficheros.
+- [x] Restaurar sin base actual funciona.
+- [x] El conjunto conservado con WAL conserva sus escrituras confirmadas.
+- [x] Lo que estas pruebas descubran queda corregido en el procedimiento.
+- [x] `pnpm check` pasa.
+
+## Comments
+
+- Hecho en `c7fb379`. Las pruebas están en `packages/test-utils/restore.test.ts` («restoring over a database in trouble» y «a restore killed by SIGKILL») y no encontraron ningún fallo: el procedimiento de la 05 queda como estaba. Repasados en el código el orden y los `fsync` de preparar, publicar e instalar.
+- El conjunto anterior de las pruebas de corte lleva la segunda nota solo en su WAL (se copian la base y su WAL con la plataforma abierta y se ponen en su sitio tras cerrar), así que en la posición 2 la prueba ve que retomar retira el WAL viejo, y en todas que el conjunto conservado lo guarda.
+- En la posición 1 la prueba escribe en la base anterior antes de restaurar otra vez, y la carpeta `before-restore` nueva guarda esa escritura: por eso empezar de cero es lo correcto.
+- Quitadas dos pruebas de la 05 que ahora cubren las de esta tarea: el corte en el mismo proceso en `auxiliaries-removed` y el hijo en `marker-published`. Queda la de la marca puesta a mano.
