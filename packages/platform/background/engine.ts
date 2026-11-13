@@ -9,6 +9,7 @@
 import type Database from "better-sqlite3";
 
 import type { Clock } from "../actions";
+import { errorCode } from "../error-code";
 import type { jobs } from "../schema";
 import type { Timer } from "./timer";
 
@@ -379,8 +380,8 @@ function messageOf(error: unknown): string {
 	if (!(error instanceof Error)) return "a non-Error value was thrown";
 	if (error instanceof PermanentJobError)
 		return `${error.name}: ${error.message}`.slice(0, MAX_ERROR);
-	const code = (error as { code?: unknown }).code;
-	return (typeof code === "string" ? `${error.name} ${code}` : error.name).slice(0, MAX_ERROR);
+	const code = errorCode(error);
+	return (code === undefined ? error.name : `${error.name} ${code}`).slice(0, MAX_ERROR);
 }
 
 /**

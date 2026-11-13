@@ -38,14 +38,7 @@ import {
 } from "../background";
 import type { BackupConfig, BackupMarks } from "../backups";
 import { createMarkStore } from "../backups/marks";
-import {
-	listSnapshots,
-	type RestoreOptions,
-	type RestoreResult,
-	type RestoreRuntime,
-	runRestore,
-	type SnapshotSummary,
-} from "../backups/restore";
+import { listSnapshots, type SnapshotSummary } from "../backups/restore";
 import {
 	ensureDeviceAccount,
 	insertAccount,
@@ -101,25 +94,19 @@ export type {
 export { PermanentJobError } from "../background";
 export { STOP_MARGIN } from "../background/engine";
 export type { BackupMarks } from "../backups";
+/**
+ * `runRestore` restores with the runtime the test gives: its clock, the restic executable and, only here, the points
+ * where the test cuts the exchange.
+ */
 export {
 	MARKER as RESTORE_MARKER,
 	type RestoreOptions,
 	type RestorePoint,
 	type RestoreResult,
 	type RestoreRuntime,
+	runRestore,
 	type SnapshotSummary,
 } from "../backups/restore";
-
-/**
- * Restores with the runtime the test gives: its clock, the restic executable and, only here, the points where the
- * test cuts the exchange.
- */
-export function restoreWithRuntime(
-	options: RestoreOptions,
-	runtime: RestoreRuntime,
-): Promise<RestoreResult> {
-	return runRestore(options, runtime);
-}
 
 /** The snapshots of host `domus` in the repository, oldest first, as `restore list` shows them. */
 export function listSnapshotsOf(

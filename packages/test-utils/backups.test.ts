@@ -582,6 +582,68 @@ describe("a failed retention", { timeout: 2 * RESTIC_TIMEOUT }, () => {
 	});
 });
 
+describe("a retention that finds the repository locked", { timeout: RESTIC_TIMEOUT }, () => {
+	it("waits for the lock, and prunes once it is gone", async () => {
+		using target = backupTarget();
+		// Without `--retry-lock 10m` it gives up at once, as restic does; with it, it waits for the lock to go.
+		using fake = fakeRestic((path) => ({
+			forget: `case "$*" in *"--retry-lock 10m"*) while [ -e '${path("locked")}' ]; do sleep 0.05; done ;; *) exit 11 ;; esac`,
+		}));
+		writeFileSync(fake.path("locked"), "");
+		await using test = createTestPlatform({
+			modules: [],
+			file: true,
+			backups: { ...target, restic: fake.executable },
+		});
+		test.background.start();
+
+		test.clock.set(FIRST_BACKUP);
+		await vi.waitFor(() => expect(fake.calls()).toContain("forget"), {
+			timeout: RESTIC_TIMEOUT,
+		});
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		expect(backupJob(test)).toEqual(expect.objectContaining({ state: "running" }));
+		expect(test.background.marks().retention).toBeNull();
+
+		rmSync(fake.path("locked"));
+		await test.background.settled();
+
+		expect(backupRuns(test)).toEqual([expect.objectContaining({ result: "ok" })]);
+		expect(test.background.marks().retention).toEqual({ at: FIRST_BACKUP, result: "ok" });
+	});
+
+	it("counts a lock still held after the wait as a failed retention, without repeating the backup", async () => {
+		using target = backupTarget();
+		// restic gives up with code 11 once `--retry-lock` ran out; without it, the fake says so with another code.
+		using fake = fakeRestic(() => ({
+			forget: `case "$*" in *"--retry-lock 10m"*) exit 11 ;; *) exit 1 ;; esac`,
+		}));
+		await using test = createTestPlatform({
+			modules: [],
+			file: true,
+			backups: { ...target, restic: fake.executable },
+		});
+		test.background.start();
+
+		test.clock.set(FIRST_BACKUP);
+		await test.background.settled();
+		test.clock.advance(60 * 60 * 1000);
+		await test.background.settled();
+
+		expect(backupRuns(test)).toEqual([
+			expect.objectContaining({
+				result: "failed",
+				error: "PermanentJobError: restic forget exited with code 11",
+			}),
+		]);
+		expect(snapshots(target)).toHaveLength(1);
+		expect(test.background.marks().retention).toEqual({
+			at: FIRST_BACKUP,
+			result: "failed",
+		});
+	});
+});
+
 describe("the backups in /health", { timeout: RESTIC_TIMEOUT }, () => {
 	it("say none-yet before the first backup and saved after it, without a reason", async () => {
 		using target = backupTarget();
@@ -797,6 +859,38 @@ describe("the weekly check of the repository", { timeout: 2 * RESTIC_TIMEOUT }, 
 		expect(fake.calls()).toEqual(["unlock", "unlock"]);
 		expect(readdirSync(target.repository)).toEqual([]);
 		expect(await health(test)).toEqual(failed);
+	});
+});
+
+describe("a check that stopping cancels", { timeout: RESTIC_TIMEOUT }, () => {
+	it("leaves its mark as it was", async () => {
+		using target = backupTarget();
+		restic(target, "init");
+		using fake = fakeRestic((path) => ({
+			check: `[ -e '${path("hang")}' ] && exec sleep 60`,
+		}));
+		await using test = createTestPlatform({
+			modules: [],
+			file: true,
+			backups: { ...target, restic: fake.executable },
+		});
+		test.background.start();
+		test.background.pause("backup");
+		test.clock.set(FIRST_CHECK);
+		await test.background.settled();
+		const before = test.background.marks().check;
+		expect(before).toEqual({ at: FIRST_CHECK, result: "ok" });
+
+		writeFileSync(fake.path("hang"), "");
+		test.clock.set(FIRST_CHECK + WEEK);
+		await vi.waitFor(
+			() => expect(fake.calls().filter((call) => call === "check")).toHaveLength(2),
+			{ timeout: RESTIC_TIMEOUT },
+		);
+		await test.background.stop();
+
+		expect(checkRuns(test).map((run) => run.result)).toEqual(["ok", "cancelled"]);
+		expect(test.background.marks().check).toEqual(before);
 	});
 });
 

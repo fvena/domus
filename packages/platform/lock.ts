@@ -10,6 +10,8 @@ import { join } from "node:path";
 
 import Database from "better-sqlite3";
 
+import { errorCode } from "./error-code";
+
 /** The lock's file, in the data folder next to `domus.db`. */
 export const LOCK_FILE = "domus.lock";
 
@@ -56,8 +58,7 @@ function hold(
 		take(db);
 	} catch (error) {
 		db.close();
-		if (String((error as { code?: unknown }).code).startsWith("SQLITE_BUSY"))
-			throw new Error(busy);
+		if (errorCode(error)?.startsWith("SQLITE_BUSY")) throw new Error(busy);
 		throw error;
 	}
 	return {

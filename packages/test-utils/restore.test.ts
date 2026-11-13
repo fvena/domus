@@ -459,6 +459,19 @@ describe("restoring a backup", { timeout: RESTIC_TIMEOUT }, () => {
 		).rejects.toThrow("the database is in use: stop api and accounts first");
 	});
 
+	it("refuses modules that opening would refuse, before touching the data folder", async () => {
+		using target = restoreTarget();
+
+		await expect(
+			restoreBackup({
+				file: target.databaseFile,
+				modules: [ledger, ledger],
+				backups: target.backups,
+			}),
+		).rejects.toThrow(/module "ledger"/);
+		expect(readdirSync(target.data)).toEqual([]);
+	});
+
 	it("keeps the previous set apart in before-restore-<instant>, and leaves no old auxiliary file beside the restored database", async () => {
 		using target = restoreTarget();
 		await backedUpThenNoted(target);
@@ -742,7 +755,7 @@ describe("restoring over a database in trouble", { timeout: RESTIC_TIMEOUT }, ()
 		expect(notes(test)).toEqual([{ value: 1 }]);
 	});
 
-	it("installs the prepared copy when there is no database, and never leaves an empty one", async () => {
+	it("installs the staged copy when there is no database, and never leaves an empty one", async () => {
 		using target = restoreTarget();
 		await backedUpThenNoted(target);
 		for (const name of ["domus.db", "domus.db-wal", "domus.db-shm"])

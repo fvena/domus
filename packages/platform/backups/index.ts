@@ -5,7 +5,7 @@
 // runs, and the staging folder is emptied at the start and at the end of every run. The weekly `backup-check` reads
 // the whole repository and marks its result. The marks feed the watcher of `/health`. module-sdk offers none of
 // this, and a dependency rule keeps modules out.
-import { mkdirSync, readdirSync, rmSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import type Database from "better-sqlite3";
@@ -16,18 +16,22 @@ import {
 	type BackupsWatch,
 	PermanentJobError,
 	type ScheduledTask,
+	type TaskSchedule,
 	type Timer,
 } from "../background";
 import { type BackupMarks, createMarkStore } from "./marks";
 import {
 	type BackupConfig,
+	createRestic,
+	HOST,
 	REPOSITORY_LOCKED,
 	REPOSITORY_MISSING,
 	type Restic,
-	restic,
+	resticExited,
 	ResticLockedError,
 } from "./restic";
 import { passesQuickCheck, takeSnapshot } from "./snapshot";
+import { emptyFolder, SNAPSHOT_FILE } from "./staging";
 
 export type { BackupConfig } from "./restic";
 export type { BackupMarks } from "./marks";
@@ -35,19 +39,25 @@ export type { BackupMarks } from "./marks";
 export const BACKUP_TASK = "backup";
 export const BACKUP_CHECK_TASK = "backup-check";
 
+/** The nightly backup at 05:00, and the weekly check on Sunday at 05:30. */
+export const BACKUP_SCHEDULES = [
+	{ id: BACKUP_TASK, frequency: { every: "day", at: "05:00" } },
+	{ id: BACKUP_CHECK_TASK, frequency: { every: "week", on: "sunday", at: "05:30" } },
+] as const satisfies readonly TaskSchedule[];
+const [BACKUP_SCHEDULE, BACKUP_CHECK_SCHEDULE] = BACKUP_SCHEDULES;
+
 /** The staging folder of the backups, inside the data folder. */
 const STAGING = "backup-staging";
-/** The snapshot's name, in the staging folder and in each restic snapshot, at its root. */
-const SNAPSHOT_FILE = "domus.db";
-/** The host of every snapshot, fixed so the retention groups them whatever the container is called. */
-const HOST = "domus";
 /** How long after its capture the last saved backup stays fresh for the watcher. */
 const STALE_AFTER = 48 * 60 * 60 * 1000;
 /**
  * What the retention keeps of host `domus`, as one group whatever path the snapshots had (restic groups by host and
- * paths unless told), and the prune of what it forgets.
+ * paths unless told), and the prune of what it forgets. It waits up to 10 min for a lock another process holds, such
+ * as the shared one of the rehearsal's restore: only a lock still held after that fails it.
  */
 const RETENTION = [
+	"--retry-lock",
+	"10m",
 	"--group-by",
 	"host",
 	"--keep-daily",
@@ -81,14 +91,13 @@ export function createBackups({
 	executable = "restic",
 }: BackupsOptions): BackupsWatch {
 	const marks = createMarkStore(connection);
-	const waiting = { clock, timer };
-	const repository = restic(executable, config, waiting);
+	const clockAndTimer = { clock, timer };
+	const restic = createRestic(executable, config, clockAndTimer);
 	const staging = join(dataDir, STAGING);
 
-	/** The nightly backup, at 05:00 in the maintenance lane. */
+	/** The nightly backup, in the maintenance lane. */
 	const backupTask: ScheduledTask = {
-		id: BACKUP_TASK,
-		frequency: { every: "day", at: "05:00" },
+		...BACKUP_SCHEDULE,
 		job: {
 			lane: "maintenance",
 			async run({ signal }) {
@@ -100,16 +109,10 @@ export function createBackups({
 						await takeSnapshot(connection, file, signal);
 						// The data is the database's as the copy ended.
 						const capturedAt = clock();
-						if (!(await passesQuickCheck(file, signal, waiting)))
+						if (!(await passesQuickCheck(file, signal, clockAndTimer)))
 							throw new PermanentJobError("the snapshot failed quick_check");
-						await unlock(repository, signal);
-						const snapshot = await save(
-							repository,
-							config,
-							staging,
-							capturedAt,
-							signal,
-						);
+						await unlock(restic, signal);
+						const snapshot = await save(restic, config, staging, capturedAt, signal);
 						marks.saved(capturedAt, snapshot);
 					} catch (error) {
 						marks.failed(clock());
@@ -117,13 +120,12 @@ export function createBackups({
 					}
 					// A failed retention fails the run without a retry: the backup is saved, and repeating it would
 					// only add a snapshot. The next night tries again.
-					const { code } = await repository.run(
+					const { code } = await restic.run(
 						["forget", "--host", HOST, ...RETENTION],
 						signal,
 					);
 					marks.retention(clock(), code === 0 ? "ok" : "failed");
-					if (code !== 0)
-						throw new PermanentJobError(`restic forget exited with code ${code}`);
+					if (code !== 0) throw new PermanentJobError(resticExited("forget", code));
 				} finally {
 					emptyFolder(staging);
 				}
@@ -132,18 +134,17 @@ export function createBackups({
 	};
 
 	/**
-	 * The weekly check, on Sunday at 05:30 in the maintenance lane: restic reads the whole repository. A repository
+	 * The weekly check, in the maintenance lane: restic reads the whole repository. A repository
 	 * that does not exist yet has nothing to check, and its mark stays. A live lock is retried; any failure for good,
 	 * also one that used up its attempts, marks the check failed.
 	 */
 	const checkTask: ScheduledTask = {
-		id: BACKUP_CHECK_TASK,
-		frequency: { every: "week", on: "sunday", at: "05:30" },
+		...BACKUP_CHECK_SCHEDULE,
 		job: {
 			lane: "maintenance",
 			async run({ signal }) {
-				if (!(await unlock(repository, signal))) return;
-				const { code } = await repository.run(["check", "--read-data"], signal);
+				if (!(await unlock(restic, signal))) return;
+				const { code } = await restic.run(["check", "--read-data"], signal);
 				if (code === REPOSITORY_MISSING) return;
 				if (code !== 0) throw resticFailure("check", code);
 				marks.check(clock(), "ok");
@@ -176,8 +177,8 @@ function watch(
  * Removes the repository's stale locks, never a live one, and tells whether the repository exists. One that does
  * not exist yet is for the caller to decide: `save` may initialize it, and the check has nothing to read.
  */
-async function unlock(repository: Restic, signal: AbortSignal): Promise<boolean> {
-	const { code } = await repository.run(["unlock"], signal);
+async function unlock(restic: Restic, signal: AbortSignal): Promise<boolean> {
+	const { code } = await restic.run(["unlock"], signal);
 	if (code === REPOSITORY_MISSING) return false;
 	if (code !== 0) throw resticFailure("unlock", code);
 	return true;
@@ -189,7 +190,7 @@ async function unlock(repository: Restic, signal: AbortSignal): Promise<boolean>
  * anything in it, is never initialized.
  */
 async function save(
-	repository: Restic,
+	restic: Restic,
 	config: BackupConfig,
 	staging: string,
 	capturedAt: number,
@@ -204,11 +205,11 @@ async function save(
 		resticTime(capturedAt),
 		SNAPSHOT_FILE,
 	];
-	let backup = await repository.run(args, signal, staging);
+	let backup = await restic.run(args, signal, staging);
 	if (backup.code === REPOSITORY_MISSING && isEmptyFolder(config.repository)) {
-		const init = await repository.run(["init"], signal);
+		const init = await restic.run(["init"], signal);
 		if (init.code !== 0) throw resticFailure("init", init.code);
-		backup = await repository.run(args, signal, staging);
+		backup = await restic.run(args, signal, staging);
 	}
 	// Code 3, a source restic could not read whole, leaves a partial snapshot: it is no saved backup.
 	if (backup.code !== 0) throw resticFailure("backup", backup.code);
@@ -223,8 +224,9 @@ async function save(
  */
 function resticFailure(step: string, code: number): Error {
 	if (code === REPOSITORY_LOCKED) return new ResticLockedError(step);
-	return new PermanentJobError(`restic ${step} exited with code ${code}`);
+	return new PermanentJobError(resticExited(step, code));
 }
+
 /** The id in the summary line of `restic backup --json`. */
 function snapshotIdOf(stdout: string): string | undefined {
 	for (const line of stdout.split("\n").reverse()) {
@@ -242,12 +244,6 @@ function snapshotIdOf(stdout: string): string | undefined {
 /** An instant as restic's `--time` reads it, `YYYY-MM-DD HH:MM:SS`, in UTC: restic runs with `TZ=UTC`. */
 function resticTime(instant: number): string {
 	return new Date(instant).toISOString().slice(0, 19).replace("T", " ");
-}
-
-/** Removes the folder with whatever it holds and creates it again, empty. */
-function emptyFolder(folder: string): void {
-	rmSync(folder, { recursive: true, force: true });
-	mkdirSync(folder, { recursive: true });
 }
 
 /** True when the folder exists and holds nothing. */

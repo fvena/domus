@@ -240,13 +240,13 @@ module.exports = {
 		{
 			name: "backups-stay-in-platform",
 			comment:
-				"The backups belong to platform (ADR 0026): module-sdk does not expose them and no module reaches them, through any chain of imports. Tests may, through test-utils.",
+				"The backups and the lock of the database belong to platform (ADR 0026): module-sdk does not expose them and no module reaches them, through any chain of imports. Tests may, through test-utils.",
 			severity: "error",
 			from: {
 				path: "^(modules|packages/module-sdk)/",
 				pathNot: ["\\.test\\.ts$", "^modules/[^/]+/tests/"],
 			},
-			to: { path: "^packages/platform/backups/", reachable: true },
+			to: { path: "^packages/platform/(backups/|lock\\.ts$)", reachable: true },
 		},
 		{
 			name: "only-test-utils-reaches-platform-testing",

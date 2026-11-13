@@ -55,6 +55,7 @@ describe("dependency rules", () => {
 			"background-stays-in-platform: packages/module-sdk/src/engine.ts -> packages/platform/background/index.ts",
 			"backups-stay-in-platform: modules/lists/server/backups.ts -> packages/platform/backups/index.ts",
 			"backups-stay-in-platform: packages/module-sdk/src/backups.ts -> packages/platform/backups/index.ts",
+			"backups-stay-in-platform: packages/module-sdk/src/lock.ts -> packages/platform/lock.ts",
 			"business-free-packages-stay-business-free: packages/api-client/index.ts -> packages/platform/contracts/index.ts",
 			"business-free-packages-stay-business-free: packages/i18n/index.ts -> packages/platform/http/index.ts",
 			"business-free-packages-stay-business-free: packages/ui/src/bad.ts -> packages/platform/src/index.ts",

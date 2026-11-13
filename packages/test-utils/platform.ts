@@ -60,7 +60,7 @@ import {
 	type BackupMarks,
 	listSnapshotsOf,
 	readBackupMarks,
-	restoreWithRuntime,
+	runRestore,
 	type RestorePoint,
 	type RestoreResult,
 	type SnapshotSummary,
@@ -609,7 +609,7 @@ export interface TestRestoreOptions<TModules extends readonly AnyModule[]> {
 }
 
 /**
- * Restores a backup with the platform's real procedure: the exclusive lock, preparing apart and the exchange, or
+ * Restores a backup with the platform's real procedure: the exclusive lock, staging apart and the exchange, or
  * ending one that was cut. The platform on `file` must be closed, else it refuses.
  */
 export function restoreBackup<const TModules extends readonly AnyModule[]>({
@@ -620,7 +620,7 @@ export function restoreBackup<const TModules extends readonly AnyModule[]>({
 	at = TEST_START,
 	cut,
 }: TestRestoreOptions<TModules>): Promise<RestoreResult> {
-	return restoreWithRuntime(
+	return runRestore(
 		{
 			databaseFile: file,
 			modules,

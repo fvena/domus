@@ -82,7 +82,7 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
     3. Un proceso hijo de Node abre la instantánea en solo lectura y pasa `PRAGMA quick_check`. Si no da `ok`, la ejecución falla sin reintentos y no sube nada.
     4. `restic unlock` quita solo los bloqueos viejos.
     5. `restic backup` de la carpeta de preparación, con host fijo `domus` y el instante de captura como hora de la instantánea, para que la antigüedad la lea quien restaure.
-    6. Si la copia quedó guardada, anota la marca de copia guardada y, después, `restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 3 --prune` con el mismo host, y anota la marca de retención.
+    6. Si la copia quedó guardada, anota la marca de copia guardada y, después, `restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 3 --prune --retry-lock 10m` con el mismo host, y anota la marca de retención. Si otro proceso tiene un bloqueo del repositorio, como la restauración del ensayo, espera hasta 10 min a que lo suelte.
     7. Vacía la carpeta de preparación, también si algo falló o se canceló.
 - restic corre siempre como proceso hijo, con `--no-cache`, y recibe el repositorio y el fichero de la contraseña por su entorno, nunca por argumentos.
 - **Lo que sale de restic:**
@@ -91,7 +91,7 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
     - `10` (el repositorio no existe): si la carpeta del repositorio existe y está vacía, `restic init` y se sigue. Si no existe o tiene algo, la ejecución falla sin reintentos: nunca se reinicializa un destino con contenido.
     - `11` (no pudo bloquear el repositorio): error pasajero, que el motor reintenta.
     - `12` (contraseña incorrecta) y cualquier otro: la ejecución falla sin reintentos.
-- **Una retención fallida no repite la copia.** Si `forget --prune` falla después de una copia guardada, la ejecución termina como fallida sin reintentos y con el mensaje de la retención. La copia sigue guardada y su marca, anotada. La próxima noche se vuelve a intentar.
+- **Una retención fallida no repite la copia.** Si `forget --prune` falla después de una copia guardada, la ejecución termina como fallida sin reintentos y con el mensaje de la retención. Un bloqueo que sigue ahí tras los 10 min de espera (el código `11`) también es una retención fallida. La copia sigue guardada y su marca, anotada. La próxima noche se vuelve a intentar.
 - **Cancelación.** Si se agota el tiempo máximo, `db.backup()` se aborta lanzando un error desde su callback de progreso. Un proceso hijo recibe SIGTERM y, si no termina en unos segundos, SIGKILL. El carril se libera solo cuando el hijo ha terminado de verdad.
 - El tiempo máximo es el del carril de mantenimiento (30 min), revisable con la medición.
 - El mensaje de error de una ejecución sigue la regla de la 1d1: en inglés, sin datos personales y con 200 caracteres como mucho. La salida de restic no se copia entera: solo el paso y el código.
@@ -192,12 +192,12 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
     1. Crea `before-restore-<instante UTC compacto>/` en la carpeta de datos. Enlaza con enlaces duros `domus.db`, `domus.db-wal` y `domus.db-shm`, los que existan y sin abrirlos. Hace `fsync` de cada fichero, de esa carpeta y de la de datos. Así vale igual con una base sana, dañada o ausente.
     2. Publica la marca: escribe `restore.pending.tmp` con la carpeta del paso anterior, el identificador de la instantánea y el instante, hace `fsync`, lo renombra a `restore.pending` y hace `fsync` de la carpeta de datos.
     3. Borra `domus.db-wal` y `domus.db-shm` y hace `fsync` de la carpeta de datos.
-    4. Renombra la copia preparada sobre `domus.db` y hace `fsync` de la carpeta de preparación y de la de datos.
+    4. Renombra la copia en preparación sobre `domus.db` y hace `fsync` de la carpeta de preparación y de la de datos.
     5. Borra la marca y hace `fsync` de la carpeta de datos.
     6. Suelta el cerrojo.
-- **Retomar** repite los pasos 3–5 con la carpeta que nombra la marca, sin volver a enlazar. Si la copia preparada sigue en su carpeta, falta el renombrado; si no está, ya se hizo y solo quedan las sincronizaciones y borrar la marca.
+- **Retomar** repite los pasos 3–5 con la carpeta que nombra la marca, sin volver a enlazar. Si la copia en preparación sigue en su carpeta, falta el renombrado; si no está, ya se hizo y solo quedan las sincronizaciones y borrar la marca.
 - **Invariantes:**
-    - La copia preparada está sincronizada antes de publicar la marca.
+    - La copia en preparación está sincronizada antes de publicar la marca.
     - El cerrojo exclusivo dura todo el procedimiento, también al retomar.
     - Mientras exista la marca, nada vacía la carpeta de preparación de restaurar ni crea otra carpeta `before-restore`.
     - Desde el primer borrado de un auxiliar, la marca ya está en disco.
@@ -352,19 +352,23 @@ La 1d2 termina con una restauración real en un entorno aislado de la Pi y con u
     - Un `check` que una parada cancela no cambia su marca: no ha fallado, y un falso «check fallido» avisaría de un repositorio dañado hasta el domingo siguiente.
     - Un `unlock` que falla (una contraseña incorrecta, por ejemplo) cuenta como `check` fallido. El código `10` en `unlock` o en `check` termina bien sin tocar la marca.
 - Decisiones tomadas al implementar la 05:
-    - Restaurar vive en `packages/platform/backups/` (`restore.ts`, y el núcleo del comando en `command.ts`), así que la regla `backups-stay-in-platform` lo cubre. La carpeta de preparación de restaurar es `restore-staging/` en la carpeta de datos, y la copia preparada se llama `domus.db`.
+    - Restaurar vive en `packages/platform/backups/` (`restore.ts`, y el núcleo del comando en `command.ts`), así que la regla `backups-stay-in-platform` lo cubre. La carpeta de preparación de restaurar es `restore-staging/` en la carpeta de datos, y la copia en preparación se llama `domus.db`.
     - Si preparar falla (restic, `quick_check`, migraciones), la carpeta de preparación se vacía: no queda una copia en claro. Todavía no hay marca, así que no rompe la invariante.
     - Al preparar se borra un `restore.pending.tmp` que nunca se publicó. Un corte con el temporal escrito y sin renombrar no deja marca, así que la siguiente ejecución prepara otra vez y crea otra carpeta `before-restore`: `api` pudo abrir y escribir en la base entretanto, y el conjunto nuevo es el bueno. La 06 debe tenerlo en cuenta en la posición 1.
     - La marca es JSON con la carpeta conservada, el identificador de la instantánea, su captura y el instante de restaurar. Es ilegible si no se puede leer por otra cosa que no existir, o si no tiene esa forma.
-    - Al retomar, si no está la copia preparada ni `domus.db`, restaurar falla y deja la marca.
+    - Al retomar, si no está la copia en preparación ni `domus.db`, restaurar falla y deja la marca.
     - `before-restore-<instante>` va al segundo (`before-restore-20260101T040000Z`); si ya existe, restaurar falla antes de publicar la marca.
     - `quick_check` de restaurar corre en el propio proceso: el comando no atiende nada más. `journal_mode=DELETE` se pone al final, como dice el paso 7, y un `-wal` que quede tras cerrar es un error.
-    - Las próximas ejecuciones se recalculan con las tareas que la plataforma declara con las copias encendidas (`cleanup` y las de `createBackups`, también `backup-check`). Las filas de tareas no declaradas no se tocan.
+    - Las próximas ejecuciones se recalculan con las tareas que la plataforma declara con las copias encendidas (`cleanup` y las dos de las copias, también `backup-check`), por sus horarios: `CLEANUP_SCHEDULE` y `BACKUP_SCHEDULES`. Las filas de tareas no declaradas no se tocan.
     - La marca de copia guardada pasa a la instantánea restaurada solo si su captura es estrictamente más reciente.
     - `restic snapshots` y `restic restore` de restaurar llevan `--retry-lock 30m`, el bloqueo compartido que pide el ensayo; `list` no espera. `list` con el código `10` (repositorio sin iniciar) da una lista vacía y escribe `no snapshots of host domus yet`.
     - `--snapshot` acepta el identificador o su comienzo, en hexadecimal, si solo uno empieza así. `list` escribe el identificador entero y la captura en ISO UTC.
     - `restore.mjs` lee `DOMUS_DATA_DIR` y las dos rutas de las copias con `readRestoreConfig`, sin el secreto de las sesiones, y no mira `DOMUS_BACKUPS_OFF`: el interruptor apaga las tareas de `api`, no restaurar.
     - Los puntos de corte son `marker-written`, `marker-published`, `auxiliaries-removed`, `database-renamed` y `database-installed`. Solo `runRestore` de la entrada de pruebas los recibe, como `cut` del runtime; `ChildTask` gana `{ hold: "restore", dataDirectory, backups, restic?, at }`, que avisa al llegar al punto y espera el SIGKILL con el cerrojo.
+- Decisiones tomadas en la revisión del código:
+    - La regla `backups-stay-in-platform` cubre también `packages/platform/lock.ts`: `module-sdk` no puede ofrecer el cerrojo de la base, tampoco a través de una cadena de importaciones.
+    - Restaurar comprueba la lista de módulos con `checkModules`, como abrir la plataforma, antes de tomar el cerrojo y de tocar la carpeta de datos.
+    - `forget` lleva `--retry-lock 10m`, para que «si coincide espera» valga en los dos sentidos: la restauración del ensayo tiene el bloqueo compartido de restic a las 05:00 y la retención espera a que termine, igual que el ensayo espera a un `prune`. Solo un bloqueo que sigue tras la espera cuenta como retención fallida, sin reintento. Los 10 min caben en los 30 min del carril de mantenimiento junto a la copia.
 - La copia necesita en el NVMe un espacio libre del tamaño de la base, para la instantánea, además del repositorio.
 - Al repartir las tareas se acordó que la fila de las marcas y la forma de `/health` nacen completas en la 01, que la 05 entrega el procedimiento entero de restaurar (retomar y la marca al abrir incluidos) y que la 06 lo demuestra con procesos cortados y casos de desastre.
 
