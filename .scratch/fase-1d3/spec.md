@@ -147,7 +147,7 @@ Las dos rutas responden sus errores con el estado HTTP de la tabla y, como cuerp
 | Descargar, si la lectura pide confirmación                                            | `CONFIRMATION_REQUIRED`, `data.confirmation`     | 428             | se confirma en la misma ruta           |
 | Descargar, con un error que declara el contrato de la lectura                         | el del contrato                                  | el del contrato | el del contrato                        |
 | Descargar, con un `file` que no salió de la lectura o no existe                       | `NOT_FOUND`                                      | 404             | no                                     |
-| Descargar con `{ confirmation }`, una pendiente fuera de alcance                      | `NOT_FOUND`                                      | 404             | no                                     |
+| Descargar con `{ confirmation }`, una pendiente fuera de alcance o que no es descarga | `NOT_FOUND`                                      | 404             | no                                     |
 | Descargar con `{ confirmation }`, caducada, consumida o rechazada                     | `CONFLICT`, `data.reason` como en `confirm`      | 409             | no                                     |
 | `confirmations/confirm` con una pendiente de descarga, sin consumirla                 | `CONFLICT`, `data.reason: "confirm-by-download"` | 409             | no, se confirma en su ruta             |
 
@@ -259,6 +259,12 @@ Un fichero que falta en disco con su contenido presente es un fallo interno (`IN
 - Se confirma solo con `POST /api/files/download` y `{ confirmation }`. Reutiliza el mecanismo de confirmación de `platform/actions`, ampliado para terminar en un descriptor abierto: las reglas del ADR 0023 (la misma persona, desde cualquiera de sus sesiones válidas, la vigencia del origen) y la reevaluación de permisos, delegación, visibilidad y comprobante.
 - Ejecutar la lectura, comprobar que devuelve el archivo pedido, abrir el fichero y consumir la pendiente van en una sola transacción. Si se pierde la respuesta, la pendiente queda consumida y repetir responde «ya consumida».
 - `confirmations/confirm` rechaza una pendiente de descarga sin consumirla, con un error que dice que se confirma en su ruta. `confirmations/reject` la rechaza como cualquier otra.
+- Decidido al implementar la 05:
+    - la pendiente de descarga se guarda con `kind` `read`, sin migración: el `CHECK` de `platform_confirmations.kind` sigue en `('read', 'write')`. Lo que la distingue es su operación, `{ action, input, file }`, y su huella, `download:<huella de la lectura>:<id del archivo>`, que nunca coincide con la de una lectura, cuyo nombre de acción lleva siempre un punto antes de los dos puntos. Así una descarga y la misma lectura pedida como lectura esperan en pendientes distintas, y repetir la misma descarga desde la misma sesión encuentra la suya. Una descarga es una lectura, y una columna nueva habría pedido reconstruir la tabla y chocar con las migraciones de las tareas en paralelo;
+    - el comprobante de una descarga sensible es el de su lectura, con la misma huella que `fingerprintOf` da a la lectura y su entrada;
+    - el cuerpo es exactamente `{ action, input, file }` o exactamente `{ confirmation }`, con un texto; cualquier otra forma es `BAD_REQUEST`;
+    - en la ruta de la descarga, una pendiente que no es una descarga es «no encontrada»; antes, como en `confirm`, se responde la de otra persona como no encontrada y una consumida, rechazada o caducada con su conflicto, también en `confirmations/confirm` para una de descarga;
+    - si la reevaluación falla (sin permiso, o un archivo que la lectura ya no devuelve), la transacción se revierte y la pendiente no se consume: sigue confirmable si se arregla antes de caducar.
 
 ### Mostrar en la app (Q7)
 
@@ -315,6 +321,7 @@ Un fichero que falta en disco con su contenido presente es un fallo interno (`IN
     - `deleteNote` suelta los archivos después del bloqueo por comentarios, y su inversa lleva siempre `files`, vacía si no había; en `restoreNote`, `files` es opcional, porque deshacer valida la inversa guardada con el contrato de ahora;
     - para provocar un fallo después de `attach`, `detach` o `reattach`, la prueba envuelve el manejador de `probe` antes de abrir la plataforma, como ya hacían las pruebas de permisos con `listNotes`; `probe` no gana acciones para fallar;
     - `test-utils` gana `test.contextOf(browser)`: el contexto que la puerta sella para la sesión del navegador, para vincular con `invoke` lo que ese navegador subió.
+- Decidido al implementar la 05: `probe` gana la lectura `getGuardedNote({ id })`, que responde como `getNote` con `alwaysConfirm: true`, el mismo recurso que usan las pruebas de confirmación por HTTP de la 1c con `deleteComment`. Ninguna lectura de `probe` pedía confirmación por la app.
 
 ### El ensayo y la comprobación en la Pi (Q14)
 

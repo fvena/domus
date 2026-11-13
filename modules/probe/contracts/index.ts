@@ -24,6 +24,13 @@ export const probeContract = {
 	getNote: readAction({ level: "read" })
 		.input(z.object({ id: recordId }))
 		.output(noteWithFiles.nullable()),
+	/**
+	 * One note as `getNote` answers it, after the person confirms every time: a download through it waits as a
+	 * pending confirmation (ADR 0028).
+	 */
+	getGuardedNote: readAction({ level: "read", alwaysConfirm: true })
+		.input(z.object({ id: recordId }))
+		.output(noteWithFiles.nullable()),
 	/** How many notes there are. */
 	countNotes: readAction({ level: "read" }).output(z.number().int()),
 	/** The notes whose text holds `text`, oldest first. */

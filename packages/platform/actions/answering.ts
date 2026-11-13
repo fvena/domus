@@ -6,7 +6,14 @@ import { ORPCError } from "@orpc/server";
 import type Database from "better-sqlite3";
 
 import { isVerified, sealContext, type VerifiedContext } from "../authorization";
-import type { Confirmations, PendingConfirmation } from "./confirmations";
+import type { OpenedContent } from "../files/store";
+import type { FileType } from "../files/type";
+import {
+	type Confirmations,
+	isDownload,
+	type PendingConfirmation,
+	type PendingDownload,
+} from "./confirmations";
 import { conflict, internalError } from "./failures";
 import type { RegisteredAction } from "./registry";
 
@@ -55,10 +62,30 @@ export interface AnsweringPath {
 		},
 		confirmed: true,
 	) => { readonly entry: number };
+	/**
+	 * Runs a download's read and opens its file, inside the caller's transaction (ADR 0028). The caller closes
+	 * the descriptor if that transaction rolls back.
+	 */
+	readonly download: (
+		found: RegisteredAction,
+		context: VerifiedContext,
+		operation: PendingDownload,
+		options: { readonly proof?: string; readonly confirmed: true },
+	) => Download;
+}
+
+/** A file ready to send: its open content and what the answer says of it. */
+export interface Download {
+	readonly content: OpenedContent;
+	readonly name: string;
+	readonly type: FileType;
+	readonly size: number;
 }
 
 export interface Answering {
 	confirm(call: ConfirmationCall): unknown;
+	/** Confirms a pending download and returns its file, open, for the caller to send after the transaction. */
+	confirmDownload(call: ConfirmationCall): Download;
 	reject(call: ConfirmationCall): void;
 }
 
@@ -70,6 +97,7 @@ export function answeringWith({
 	read,
 	write,
 	undo,
+	download,
 }: AnsweringPath): Answering {
 	return {
 		/**
@@ -77,22 +105,16 @@ export function answeringWith({
 		 * with consuming it: a write logs its entry with the key it was asked with and the confirmation links to
 		 * it; a read runs with `query_only` and only then, outside that stretch, is the confirmation consumed. It
 		 * is evaluated again with the account, via and delegation of its origin and the rest of the context of
-		 * now; the requirement to confirm counts as met, and nothing else does.
+		 * now; the requirement to confirm counts as met, and nothing else does. A pending download is confirmed
+		 * only through its own route, which this refuses without consuming it.
 		 */
 		confirm: ({ context, confirmation, proof }) => {
 			if (!isVerified(context)) throw internalError();
 			return connection.transaction(() => {
 				const pending = reachable(context, confirmation);
-				const asked = sealContext({
-					...context,
-					account: pending.origin.account,
-					...(pending.origin.via === undefined
-						? { via: undefined }
-						: { via: pending.origin.via }),
-				});
-				const { operation } = pending;
-				// Emptied only once it expired, which `reachable` already answered.
-				if (operation === undefined) throw internalError();
+				const asked = askedBy(context, pending);
+				const operation = operationOf(pending);
+				if (isDownload(operation)) throw conflict("confirm-by-download");
 				if ("undo" in operation) {
 					const outcome = undo(
 						{
@@ -125,6 +147,38 @@ export function answeringWith({
 				return outcome;
 			})();
 		},
+		/**
+		 * Confirms a pending download (ADR 0028): its read runs again as {@link Answering.confirm} runs one, and
+		 * running it, checking it returned the file, opening that file and consuming the confirmation go in one
+		 * transaction. A response lost after it leaves the confirmation consumed. Any other pending operation is not
+		 * found here.
+		 */
+		confirmDownload: ({ context, confirmation, proof }) => {
+			if (!isVerified(context)) throw internalError();
+			let opened: Download | undefined;
+			try {
+				return connection.transaction((): Download => {
+					const pending = reachable(context, confirmation);
+					const operation = operationOf(pending);
+					if (!isDownload(operation))
+						throw new ORPCError("NOT_FOUND", {
+							message: `no pending download "${confirmation}"`,
+						});
+					const found = registry.get(operation.action);
+					if (!found || found.kind !== "read") throw internalError();
+					opened = download(found, askedBy(context, pending), operation, {
+						...(proof === undefined ? {} : { proof }),
+						confirmed: true,
+					});
+					confirmations.consume(pending.id, undefined);
+					return opened;
+				})();
+			} catch (error) {
+				// Rolled back after the file opened: nobody sends it.
+				opened?.content.close();
+				throw error;
+			}
+		},
 		reject: ({ context, confirmation }) => {
 			if (!isVerified(context)) throw internalError();
 			connection.transaction(() => {
@@ -132,6 +186,23 @@ export function answeringWith({
 			})();
 		},
 	};
+
+	/** The context a pending operation runs in: the one of now, with the account and via of its origin. */
+	function askedBy(context: VerifiedContext, pending: PendingConfirmation): VerifiedContext {
+		return sealContext({
+			...context,
+			account: pending.origin.account,
+			...(pending.origin.via === undefined
+				? { via: undefined }
+				: { via: pending.origin.via }),
+		});
+	}
+
+	/** What a reachable pending confirmation runs: emptied only once it expired, which `reachable` answers first. */
+	function operationOf(pending: PendingConfirmation) {
+		if (pending.operation === undefined) throw internalError();
+		return pending.operation;
+	}
 
 	/**
 	 * The pending confirmation `context` may answer, still waiting. Another account's, or one out of reach of
