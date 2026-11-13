@@ -4,13 +4,22 @@
 // in the data folder.
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	copyFileSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { defineModule, type ModuleMigration } from "@domus/module-sdk";
 import { writeAction } from "@domus/module-sdk/contracts";
-import { startChild } from "@domus/platform/testing";
+import { type RestorePoint, startChild } from "@domus/platform/testing";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
@@ -163,6 +172,50 @@ async function backedUpThenNoted(target: RestoreTarget): Promise<void> {
 	test.background.start();
 	await backUp(test);
 	test.invoke(ana, "ledger.note", { value: 2 }, { idempotencyKey: "two" });
+}
+
+/**
+ * Notes 1, backs up and closes; then notes 2 and leaves the data folder as a process killed right then would: the
+ * second note committed only in the WAL, beside a database that holds the first one.
+ */
+async function backedUpThenNotedIntoWal(target: RestoreTarget): Promise<void> {
+	{
+		await using test = open(target);
+		test.invoke(test.member("ana"), "ledger.note", { value: 1 }, { idempotencyKey: "one" });
+		test.background.start();
+		await backUp(test);
+	}
+	const crashed = join(target.data, "..", "crashed");
+	mkdirSync(crashed);
+	{
+		await using test = open(target);
+		test.invoke(test.member("ana"), "ledger.note", { value: 2 }, { idempotencyKey: "two" });
+		for (const name of ["domus.db", "domus.db-wal"])
+			copyFileSync(join(target.data, name), join(crashed, name));
+	}
+	// Closing checkpointed the WAL into the database and removed it: put back the files of the moment before.
+	for (const name of ["domus.db", "domus.db-wal"])
+		copyFileSync(join(crashed, name), join(target.data, name));
+	rmSync(crashed, { recursive: true });
+}
+
+/** The notes of a database file opened apart, without the backups. */
+async function notesOf(file: string): Promise<unknown[]> {
+	await using test = createTestPlatform({ modules: [ledger], file });
+	return notes(test);
+}
+
+/** What the data folder holds as `domus.db`: nothing, an empty file, or a SQLite database with data. */
+function databaseIn(target: RestoreTarget): "absent" | "empty" | "sqlite" | "other" {
+	let size: number;
+	try {
+		size = statSync(target.databaseFile).size;
+	} catch {
+		return "absent";
+	}
+	if (size === 0) return "empty";
+	const header = readFileSync(target.databaseFile).subarray(0, 16).toString("latin1");
+	return header === "SQLite format 3\0" ? "sqlite" : "other";
 }
 
 /** What `/health` answers over the door. */
@@ -595,72 +648,6 @@ describe("restoring a backup with other migrations", { timeout: RESTIC_TIMEOUT }
 });
 
 describe("a restore that did not end", { timeout: RESTIC_TIMEOUT }, () => {
-	it("keeps the platform from opening, and restoring again ends it without linking the previous set again", async () => {
-		using target = restoreTarget();
-		await backedUpThenNoted(target);
-		// Cut once the old WAL is gone and before the prepared copy takes the database's place.
-		await expect(
-			restoreBackup({
-				file: target.databaseFile,
-				modules: [ledger],
-				backups: target.backups,
-				cut: (point) => {
-					if (point === "auxiliaries-removed") throw new Error("cut");
-				},
-			}),
-		).rejects.toThrow("cut");
-
-		expect(() => open(target)).toThrow("restore incomplete: run restore again");
-
-		const resumed = await restoreBackup({
-			file: target.databaseFile,
-			modules: [ledger],
-			backups: target.backups,
-			at: FIRST_BACKUP + DAY,
-		});
-
-		expect(resumed).toEqual(
-			expect.objectContaining({
-				resumed: true,
-				preserved: join(target.data, "before-restore-20260101T000000Z"),
-			}),
-		);
-		expect(
-			readdirSync(target.data).filter((name) => name.startsWith("before-restore")),
-		).toEqual(["before-restore-20260101T000000Z"]);
-		await using test = open(target);
-		expect(notes(test)).toEqual([{ value: 1 }]);
-	});
-
-	it("holds the lock while a child process restores, and once SIGKILL cut it after the marker, restoring again ends it", async () => {
-		using target = restoreTarget();
-		await backedUpThenNoted(target);
-		{
-			await using child = await startChild({
-				hold: "restore",
-				dataDirectory: target.data,
-				backups: target.backups,
-				at: "marker-published",
-			});
-			expect(() => open(target)).toThrow("restore in progress");
-			await child.kill();
-		}
-
-		expect(() => open(target)).toThrow("restore incomplete: run restore again");
-		const resumed = await restoreBackup({
-			file: target.databaseFile,
-			modules: [ledger],
-			backups: target.backups,
-		});
-
-		expect(resumed.resumed).toBe(true);
-		expect(
-			readdirSync(target.data).filter((name) => name.startsWith("before-restore")),
-		).toHaveLength(1);
-		await using test = open(target);
-		expect(notes(test)).toEqual([{ value: 1 }]);
-	});
-
 	it("follows a marker written by hand: opening refuses, and restoring again only ends the exchange", async () => {
 		using target = restoreTarget();
 		await backedUpThenNoted(target);
@@ -710,4 +697,191 @@ describe("a restore that did not end", { timeout: RESTIC_TIMEOUT }, () => {
 			}),
 		).rejects.toThrow("restore marker unreadable");
 	});
+});
+
+describe("restoring over a database in trouble", { timeout: RESTIC_TIMEOUT }, () => {
+	it("keeps a previous set whose committed writes are still in its WAL, and opened there it holds them", async () => {
+		using target = restoreTarget();
+		await backedUpThenNotedIntoWal(target);
+
+		const { preserved } = await restoreBackup({
+			file: target.databaseFile,
+			modules: [ledger],
+			backups: target.backups,
+		});
+
+		expect(readdirSync(preserved).sort()).toEqual(["domus.db", "domus.db-wal"]);
+		// The database alone lacks the second note: it lives only in the WAL kept beside it.
+		const alone = join(target.data, "..", "alone");
+		mkdirSync(alone);
+		copyFileSync(join(preserved, "domus.db"), join(alone, "domus.db"));
+		expect(await notesOf(join(alone, "domus.db"))).toEqual([{ value: 1 }]);
+		expect(await notesOf(join(preserved, "domus.db"))).toEqual([{ value: 1 }, { value: 2 }]);
+		await using test = open(target);
+		expect(notes(test)).toEqual([{ value: 1 }]);
+	});
+
+	it("works over a damaged database without opening it, and keeps its files as they were", async () => {
+		using target = restoreTarget();
+		await backedUpThenNoted(target);
+		const damaged = { "domus.db": randomBytes(8192), "domus.db-wal": randomBytes(4096) };
+		for (const [name, bytes] of Object.entries(damaged))
+			writeFileSync(join(target.data, name), bytes);
+
+		const { preserved } = await restoreBackup({
+			file: target.databaseFile,
+			modules: [ledger],
+			backups: target.backups,
+		});
+
+		expect(readdirSync(preserved).sort()).toEqual(["domus.db", "domus.db-wal"]);
+		for (const [name, bytes] of Object.entries(damaged))
+			expect(readFileSync(join(preserved, name)).equals(bytes)).toBe(true);
+		expect(readdirSync(target.data)).not.toContain("domus.db-wal");
+		await using test = open(target);
+		expect(notes(test)).toEqual([{ value: 1 }]);
+	});
+
+	it("installs the prepared copy when there is no database, and never leaves an empty one", async () => {
+		using target = restoreTarget();
+		await backedUpThenNoted(target);
+		for (const name of ["domus.db", "domus.db-wal", "domus.db-shm"])
+			rmSync(join(target.data, name), { force: true });
+		const seen: [string, string][] = [];
+
+		const { preserved } = await restoreBackup({
+			file: target.databaseFile,
+			modules: [ledger],
+			backups: target.backups,
+			cut: (point) => {
+				seen.push([point, databaseIn(target)]);
+			},
+		});
+
+		expect(seen).toEqual([
+			["marker-written", "absent"],
+			["marker-published", "absent"],
+			["auxiliaries-removed", "absent"],
+			["database-renamed", "sqlite"],
+			["database-installed", "sqlite"],
+		]);
+		expect(readdirSync(preserved)).toEqual([]);
+		await using test = open(target);
+		expect(notes(test)).toEqual([{ value: 1 }]);
+	});
+});
+
+describe("a restore killed by SIGKILL", { timeout: RESTIC_TIMEOUT }, () => {
+	/** The folders `before-restore-…` of the data folder, sorted. */
+	const preservedSets = (target: RestoreTarget) =>
+		readdirSync(target.data)
+			.filter((name) => name.startsWith("before-restore"))
+			.sort();
+
+	/** What the data folder holds besides the lock, the staging folders and the preserved sets. */
+	const installed = (target: RestoreTarget) =>
+		readdirSync(target.data)
+			.filter(
+				(name) =>
+					!/^(domus\.lock|before-restore|backup-staging$|restore-staging$)/.test(name),
+			)
+			.sort();
+
+	/** A child restoring over the target, killed once it reached `at`: while it holds, nothing opens. */
+	async function killedAt(target: RestoreTarget, at: RestorePoint): Promise<void> {
+		await using child = await startChild({
+			hold: "restore",
+			dataDirectory: target.data,
+			backups: target.backups,
+			at,
+		});
+		expect(() => open(target)).toThrow("restore in progress");
+		expect(databaseIn(target)).toBe("sqlite");
+		await child.kill();
+	}
+
+	/** Opens the restored database: the backup's data, and the backup's own running job discarded. */
+	async function expectRestoredSanitized(target: RestoreTarget): Promise<void> {
+		await using test = open(target);
+		expect(notes(test)).toEqual([{ value: 1 }]);
+		expect(test.background.jobs().filter((job) => job.kind === "backup")).toEqual([
+			expect.objectContaining({ state: "cancelled", error: "discarded by restore" }),
+		]);
+	}
+
+	it("before the marker is renamed: opening starts with the previous database whole, and restoring again starts over", async () => {
+		using target = restoreTarget();
+		await backedUpThenNotedIntoWal(target);
+		await killedAt(target, "marker-written");
+		const [cut] = preservedSets(target);
+
+		{
+			// No marker: the previous database is in its place, and api may write on it.
+			await using test = open(target);
+			expect(notes(test)).toEqual([{ value: 1 }, { value: 2 }]);
+			test.invoke(
+				test.member("ana"),
+				"ledger.note",
+				{ value: 3 },
+				{ idempotencyKey: "three" },
+			);
+		}
+		const again = await restoreBackup({
+			file: target.databaseFile,
+			modules: [ledger],
+			backups: target.backups,
+		});
+
+		expect(again).toEqual(
+			expect.objectContaining({
+				resumed: false,
+				preserved: join(target.data, "before-restore-20260101T000000Z"),
+			}),
+		);
+		// The set of the cut attempt stays behind, spare and harmless.
+		expect(preservedSets(target)).toEqual([cut, "before-restore-20260101T000000Z"].sort());
+		expect(installed(target)).toEqual(["domus.db"]);
+		expect(databaseIn(target)).toBe("sqlite");
+		await expectRestoredSanitized(target);
+		expect(await notesOf(join(again.preserved, "domus.db"))).toEqual([
+			{ value: 1 },
+			{ value: 2 },
+			{ value: 3 },
+		]);
+	});
+
+	it.each<RestorePoint>([
+		"marker-published",
+		"auxiliaries-removed",
+		"database-renamed",
+		"database-installed",
+	])(
+		"at %s: opening refuses, and restoring again resumes from the marker without another preserved set",
+		async (at) => {
+			using target = restoreTarget();
+			await backedUpThenNotedIntoWal(target);
+			await killedAt(target, at);
+			const [cut] = preservedSets(target);
+
+			expect(() => open(target)).toThrow("restore incomplete: run restore again");
+			const again = await restoreBackup({
+				file: target.databaseFile,
+				modules: [ledger],
+				backups: target.backups,
+			});
+
+			expect(again).toEqual(
+				expect.objectContaining({ resumed: true, preserved: join(target.data, cut ?? "") }),
+			);
+			expect(preservedSets(target)).toEqual([cut]);
+			expect(installed(target)).toEqual(["domus.db"]);
+			expect(databaseIn(target)).toBe("sqlite");
+			await expectRestoredSanitized(target);
+			// The previous set, its WAL with the second note included, is whole.
+			expect(await notesOf(join(again.preserved, "domus.db"))).toEqual([
+				{ value: 1 },
+				{ value: 2 },
+			]);
+		},
+	);
 });
