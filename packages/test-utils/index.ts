@@ -22,9 +22,13 @@ export {
 } from "./platform";
 export { requireRestic } from "./restic";
 export {
+	type ChildTask,
 	fakeNode,
 	type InterleavePoint,
 	PermanentJobError,
+	type RestorePoint,
+	startChild,
+	type TestChild,
 	type VerifiedContext,
 } from "@domus/platform/testing";
 /** The platform's own operations, for HTTP tests of modules, whose rules keep them from platform's contracts. */

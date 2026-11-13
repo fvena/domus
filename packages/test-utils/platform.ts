@@ -670,6 +670,11 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 export interface TestRestoreOptions<TModules extends readonly AnyModule[]> {
 	/** The live database's path, the one a test platform opens before and after. */
 	readonly file: string;
+	/**
+	 * The `files` folder of the store the restored contents go into: `files` beside `file` unless given, as the
+	 * platform has it. A test platform opened without `files` uses another folder, so pass it to both.
+	 */
+	readonly files?: string;
 	/** The modules of the code that restores: their migrations are checked and applied to the copy. */
 	readonly modules: TModules;
 	readonly backups: TestBackups;
@@ -687,6 +692,7 @@ export interface TestRestoreOptions<TModules extends readonly AnyModule[]> {
  */
 export function restoreBackup<const TModules extends readonly AnyModule[]>({
 	file,
+	files,
 	modules,
 	backups,
 	snapshot,
@@ -696,6 +702,7 @@ export function restoreBackup<const TModules extends readonly AnyModule[]>({
 	return runRestore(
 		{
 			databaseFile: file,
+			...(files === undefined ? {} : { filesDirectory: files }),
 			modules,
 			backups: { repository: backups.repository, passwordFile: backups.passwordFile },
 			...(snapshot === undefined ? {} : { snapshot }),
