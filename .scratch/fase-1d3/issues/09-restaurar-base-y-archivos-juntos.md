@@ -1,6 +1,6 @@
 # 09. Restaurar base y archivos juntos
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 07, 08
 
 Spec: [`../spec.md`](../spec.md), sección «Restaurar» y costuras 3 y 4 de «Decisiones de prueba». ADR 0028 y ADR 0026.
@@ -15,12 +15,21 @@ Que restaurar devuelva la base y sus contenidos de archivo juntos y comprobados,
 
 ## Criterios de aceptación
 
-- [ ] Restaurar devuelve base y contenidos: las descargas coinciden por hash y deshacer un borrado aún deshacible en la copia recupera su archivo.
-- [ ] Un contenido vivo dañado con el hash de uno necesario queda arreglado.
-- [ ] Un contenido necesario ausente o dañado en la copia niega la restauración sin tocar la base ni el almacén.
-- [ ] Los archivos preparados de la copia no sirven después de restaurar.
-- [ ] Muerto el proceso tras instalar parte o todos los contenidos y antes de la marca, la base anterior sigue entera y volver a restaurar termina bien; lo instalado de más lo recoge la limpieza.
-- [ ] Retomar desde la marca da los contenidos por instalados y deja la restaurada con todos sus archivos.
-- [ ] Los puntos de corte del intercambio de la base de la 1d2 siguen pasando.
-- [ ] La preparación de restaurar queda vacía tras éxito, error y cancelación.
-- [ ] `pnpm check` pasa.
+- [x] Restaurar devuelve base y contenidos: las descargas coinciden por hash y deshacer un borrado aún deshacible en la copia recupera su archivo.
+- [x] Un contenido vivo dañado con el hash de uno necesario queda arreglado.
+- [x] Un contenido necesario ausente o dañado en la copia niega la restauración sin tocar la base ni el almacén.
+- [x] Los archivos preparados de la copia no sirven después de restaurar.
+- [x] Muerto el proceso tras instalar parte o todos los contenidos y antes de la marca, la base anterior sigue entera y volver a restaurar termina bien; lo instalado de más lo recoge la limpieza.
+- [x] Retomar desde la marca da los contenidos por instalados y deja la restaurada con todos sus archivos.
+- [x] Los puntos de corte del intercambio de la base de la 1d2 siguen pasando.
+- [x] La preparación de restaurar queda vacía tras éxito, error y cancelación.
+- [x] `pnpm check` pasa.
+
+## Comments
+
+- Hecho en `10888b9`. Costuras para las tareas que siguen:
+    - **Dónde está.** Todo en `packages/platform/backups/restore.ts`: `stage` restaura `/domus.db` y `/files`; `sanitizeCopy` saca `NEEDED_CONTENTS` de la copia ya migrada con el instante de restaurar, comprueba cada uno (`checkStaged`) y sanea con `dropUnneededFiles` de `files/needed.ts` dentro de la transacción de la 1d2; `installContents` instala dentro de la preparación, antes de `publish`. `install` vacía la preparación tras borrar la marca.
+    - **Para la 10.** `restore.mjs` no cambia: la carpeta `files` es la de la carpeta de datos, como en `api`. En el ensayo, vaciar solo el volumen de `domus-restore` y restaurar deja base y contenidos; `despliegue.md` debería decir que un contenido necesario ausente o dañado en la copia niega la restauración (`the backup lacks a file content its database needs` o `a file content of the backup does not match its hash`) sin tocar nada, y que lo que una restauración cortada antes de la marca instaló lo recoge la limpieza.
+    - **Pruebas.** `modules/probe/tests/restore-files.test.ts`, costuras 3 y 4 con `probe`. El hijo de `restore` recibe `modules: [{ id, migrations }]` para restaurar una copia de `probe`, y `@domus/test-utils` exporta ahora `startChild`, `ChildTask`, `TestChild` y `RestorePoint`.
+    - Decisiones tomadas sin preguntar, también en la spec («Restaurar»): los puntos de corte `content-installed` (tras cada contenido) y `contents-installed` (todos, antes de la carpeta `before-restore`); comprobar los hashes después de migrar, porque una copia anterior a la 1d3 no tiene tablas de archivos hasta entonces; borrar las filas de contenidos sin ninguna referencia (con eso, una subida de los bytes de un archivo preparado o de una referencia caducada los vuelve a escribir: es la prueba de «los archivos preparados de la copia no sirven»); sincronizar cada contenido antes del renombrado, además de su carpeta después; vaciar la preparación tras borrar la marca. La prueba de la 1d2 que anota todos los puntos de corte gana `contents-installed` al principio de su lista: los cinco puntos de la 1d2 siguen igual y en el mismo orden.
+    - «Cancelación» de la preparación: restaurar no se cancela (su restic va con una señal que nadie aborta); lo que queda de un proceso muerto antes de la marca lo vacía la siguiente restauración al empezar, y las pruebas de corte comprueban la preparación vacía al terminar esa siguiente.

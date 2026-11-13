@@ -112,11 +112,16 @@ async function deleteUntil(task: Extract<ChildTask, { hold: "delete" }>): Promis
  */
 async function restoreUntil(task: Extract<ChildTask, { hold: "restore" }>): Promise<void> {
 	const { runRestore } = await import("../backups/restore");
+	const { defineModule } = await import("@domus/module-sdk");
+	// Only what restoring reads of a module: its id and its migrations.
+	const modules = (task.modules ?? []).map(({ id, migrations }) =>
+		defineModule({ id, schema: {}, migrations }),
+	);
 	await new Promise<void>((reached, failed) => {
 		runRestore(
 			{
 				databaseFile: join(task.dataDirectory, "domus.db"),
-				modules: [],
+				modules,
 				backups: task.backups,
 			},
 			{

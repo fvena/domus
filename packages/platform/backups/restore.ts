@@ -5,11 +5,18 @@
 // the restored one sanitized. A marker published before the first auxiliary file goes keeps the platform from
 // opening until running restore again ends the procedure.
 //
+// The file contents the restored copy needs come with it (ADR 0028): checked by their hash while staging, and
+// installed into the live store by a rename that overwrites, each synced, before the marker is published. A cut
+// before the marker repeats the staging; what it installed are orphans for the cleanup, since restoring never
+// deletes a live content.
+//
 // Invariants, each kept where its step is:
 // - the staged copy is synced to disk before the marker is published;
+// - every content the restored copy needs is installed and synced before the marker is published;
 // - the exclusive lock lasts the whole procedure, resuming included;
 // - while the marker exists, nothing empties the staging folder of restoring nor creates another `before-restore`;
 // - from the first removal of an auxiliary file on, the marker is already on disk.
+import { createHash } from "node:crypto";
 import {
 	closeSync,
 	existsSync,
@@ -18,6 +25,7 @@ import {
 	mkdirSync,
 	openSync,
 	readFileSync,
+	readSync,
 	renameSync,
 	rmSync,
 	writeSync,
@@ -32,6 +40,8 @@ import { endEveryConfirmation } from "../actions/confirmations";
 import { endEveryProof } from "../actions/proofs";
 import { discardUnfinishedJobs, realTimer, rescheduleTasks } from "../background";
 import { errorCode } from "../error-code";
+import { CONTENT_HASH, dropUnneededFiles, NEEDED_CONTENTS } from "../files/needed";
+import { createFileStore, type FileStore } from "../files/store";
 import { endEverySession } from "../identity/sessions";
 import { takeExclusiveLock } from "../lock";
 import { migrations } from "../migrations";
@@ -50,6 +60,10 @@ import { emptyFolder, SNAPSHOT_FILE } from "./staging";
 
 /** The staging folder of restoring, inside the data folder. */
 const STAGING = "restore-staging";
+/** The folder of the staged contents in the staging folder, as the store and each snapshot lay them out. */
+const STAGED_FILES = "files";
+/** How much of a staged content is read at a time to check its hash. */
+const HASH_CHUNK = 1024 * 1024;
 /** The marker of a restore that has not ended, in the data folder. */
 export const MARKER = "restore.pending";
 /** The marker while it is written, before its atomic rename. */
@@ -62,6 +76,11 @@ const DISCARDED = "discarded by restore";
 export interface RestoreOptions {
 	/** The absolute path of the live database, `domus.db` in the data folder. */
 	readonly databaseFile: string;
+	/**
+	 * The `files` folder of the store of file contents, an absolute path on the same volume as the data folder:
+	 * `files` in the data folder unless given, as the platform has it.
+	 */
+	readonly filesDirectory?: string;
 	/** The modules, in the order of their migrations, as createPlatform takes them. */
 	readonly modules: readonly ModuleDefinition[];
 	/** The repository and its password. */
@@ -91,6 +110,10 @@ export interface RestoreResult {
  * them: only the testing entry passes a {@link RestoreRuntime.cut}.
  */
 export type RestorePoint =
+	/** One content the restored copy needs installed in the live store and synced; called once for each. */
+	| "content-installed"
+	/** Every content the restored copy needs installed and synced, before keeping the previous set. */
+	| "contents-installed"
 	/** `restore.pending.tmp` written and synced, not renamed yet. */
 	| "marker-written"
 	/** The marker renamed to `restore.pending` and the data folder synced. */
@@ -129,16 +152,18 @@ export function restore(options: RestoreOptions): Promise<RestoreResult> {
  * stages the snapshot apart and installs it. While it stages, and when it refuses, the live database stays untouched.
  */
 export async function runRestore(
-	{ databaseFile, modules, backups, snapshot }: RestoreOptions,
+	{ databaseFile, filesDirectory, modules, backups, snapshot }: RestoreOptions,
 	runtime: RestoreRuntime,
 ): Promise<RestoreResult> {
 	const { clock, cut } = runtime;
 	if (!isAbsolute(databaseFile))
 		throw new Error(`databaseFile must be an absolute path, got "${databaseFile}"`);
+	if (filesDirectory !== undefined && !isAbsolute(filesDirectory))
+		throw new Error(`filesDirectory must be an absolute path, got "${filesDirectory}"`);
 	// The same check as opening the platform, before anything of the data folder is touched.
 	checkModules(modules);
 	const dataDir = dirname(databaseFile);
-	const files = filesOf(databaseFile);
+	const files = filesOf(databaseFile, filesDirectory ?? join(dataDir, "files"));
 	// Held, and referenced, until the end: the garbage collector would close an unreachable connection, and its lock.
 	const lock = takeExclusiveLock(dataDir);
 	try {
@@ -148,7 +173,14 @@ export async function runRestore(
 			return { ...result(files, pending), resumed: true };
 		}
 
-		const staged = await stage(files, modules, resticOf(backups, runtime), snapshot, clock);
+		const staged = await stage(
+			files,
+			modules,
+			resticOf(backups, runtime),
+			snapshot,
+			clock,
+			cut,
+		);
 		const marker = await publish(files, staged, clock(), cut);
 		await install(files, marker, cut);
 		return { ...result(files, marker), resumed: false };
@@ -199,11 +231,15 @@ interface Files {
 	readonly staging: string;
 	/** The staged copy, in the staging folder. */
 	readonly staged: string;
+	/** The staged contents, under the staging folder as the store lays them out. */
+	readonly stagedContents: FileStore;
+	/** The live store of file contents. */
+	readonly contents: FileStore;
 	readonly marker: string;
 	readonly draft: string;
 }
 
-function filesOf(databaseFile: string): Files {
+function filesOf(databaseFile: string, filesDirectory: string): Files {
 	const dataDir = dirname(databaseFile);
 	const staging = join(dataDir, STAGING);
 	return {
@@ -212,6 +248,8 @@ function filesOf(databaseFile: string): Files {
 		auxiliaries: [`${databaseFile}-wal`, `${databaseFile}-shm`],
 		staging,
 		staged: join(staging, SNAPSHOT_FILE),
+		stagedContents: createFileStore(join(staging, STAGED_FILES)),
+		contents: createFileStore(filesDirectory),
 		marker: join(dataDir, MARKER),
 		draft: join(dataDir, MARKER_DRAFT),
 	};
@@ -232,10 +270,11 @@ interface Staged {
 }
 
 /**
- * Stages the snapshot apart: restic leaves it in the emptied staging folder, `quick_check` passes, its migrations
- * are an exact prefix of the code's and the missing ones are applied, it is sanitized in one transaction, and it is
- * closed without a WAL and synced with its folder. Any failure empties the staging folder and leaves the live
- * database untouched: no marker exists yet.
+ * Stages the snapshot apart: restic leaves it and its contents in the emptied staging folder, `quick_check` passes,
+ * its migrations are an exact prefix of the code's and the missing ones are applied, every content it needs matches
+ * its hash, it is sanitized in one transaction, and it is closed without a WAL and synced with its folder. Then the
+ * contents it needs go into the live store. Any failure empties the staging folder and leaves the live database
+ * untouched: no marker exists yet. Nor does it ever delete a live content.
  */
 async function stage(
 	files: Files,
@@ -243,6 +282,7 @@ async function stage(
 	restic: Restic,
 	wanted: string | undefined,
 	clock: Clock,
+	cut: RestoreRuntime["cut"],
 ): Promise<Staged> {
 	// No marker exists here, so emptying the staging folder and dropping a draft that was never published is safe.
 	rmSync(files.draft, { force: true });
@@ -257,6 +297,8 @@ async function stage(
 				files.staging,
 				"--include",
 				`/${SNAPSHOT_FILE}`,
+				"--include",
+				`/${STAGED_FILES}`,
 				...RETRY_LOCK,
 			],
 			never(),
@@ -264,9 +306,10 @@ async function stage(
 		if (code !== 0) throw new Error(resticExited("restore", code));
 		if (!existsSync(files.staged)) throw new Error("the snapshot holds no domus.db");
 
-		sanitizeCopy(files, modules, found, clock());
+		const needed = sanitizeCopy(files, modules, found, clock());
 		syncToDisk(files.staged);
 		syncToDisk(files.staging);
+		await installContents(files, needed, cut);
 		return { snapshot: found.id, capturedAt: found.capturedAt };
 	} catch (error) {
 		emptyFolder(files.staging);
@@ -292,16 +335,18 @@ async function chosenSnapshot(
 }
 
 /**
- * Checks, migrates and sanitizes the copy in the staging folder, and closes it in `DELETE` mode, without a WAL. The
- * migrations are validated and applied as createPlatform does: a copy newer than the code, or a migration that
- * fails, stops here with the migrator's message.
+ * Checks, migrates and sanitizes the copy in the staging folder, and closes it in `DELETE` mode, without a WAL; it
+ * returns the hashes of the contents the copy needs at `now`. The migrations are validated and applied as
+ * createPlatform does: a copy newer than the code, or a migration that fails, stops here with the migrator's
+ * message. Each content the copy needs must be staged and match its hash before anything is sanitized.
  */
 function sanitizeCopy(
 	files: Files,
 	modules: readonly ModuleDefinition[],
 	from: SnapshotSummary,
 	now: number,
-): void {
+): readonly string[] {
+	let needed: readonly string[];
 	const copy = new Database(files.staged, { fileMustExist: true });
 	try {
 		let check: unknown;
@@ -317,6 +362,12 @@ function sanitizeCopy(
 			...modules.map((module) => ({ module: module.id, migrations: module.migrations })),
 		]);
 
+		needed = copy
+			.prepare<[number], { hash: string }>(NEEDED_CONTENTS)
+			.all(now)
+			.map(({ hash }) => hash);
+		for (const hash of needed) checkStaged(files.stagedContents, hash);
+
 		const marks = createMarkStore(copy);
 		copy.transaction(() => {
 			// Nothing of the copy repeats a notice or an effect that already went out; a normal restart still recovers.
@@ -327,6 +378,8 @@ function sanitizeCopy(
 			endEverySession(copy);
 			endEveryConfirmation(copy);
 			endEveryProof(copy);
+			// No prepared file serves once every session ended, and the contents left are exactly the needed ones.
+			dropUnneededFiles(copy, now);
 			marks.restored(from.id, from.capturedAt, now);
 		})();
 
@@ -336,6 +389,52 @@ function sanitizeCopy(
 		copy.close();
 	}
 	if (existsSync(`${files.staged}-wal`)) throw new Error("the copy kept a WAL after closing");
+	return needed;
+}
+
+/** Throws unless the staged content of `hash` exists and its bytes have that SHA-256. */
+function checkStaged(staged: FileStore, hash: string): void {
+	if (!CONTENT_HASH.test(hash))
+		throw new Error("the backup names a file content by an invalid hash");
+	let handle: number;
+	try {
+		handle = openSync(staged.contentPath(hash), "r");
+	} catch (error) {
+		if (errorCode(error) === "ENOENT")
+			throw new Error("the backup lacks a file content its database needs");
+		throw error;
+	}
+	try {
+		const digest = createHash("sha256");
+		const chunk = Buffer.alloc(HASH_CHUNK);
+		for (let read = readSync(handle, chunk); read > 0; read = readSync(handle, chunk))
+			digest.update(chunk.subarray(0, read));
+		if (digest.digest("hex") !== hash)
+			throw new Error("a file content of the backup does not match its hash");
+	} finally {
+		closeSync(handle);
+	}
+}
+
+/**
+ * Installs each content the restored copy needs from the staging folder into the live store: synced, renamed over
+ * whatever the store holds by that name, so a damaged live file is mended without reading it, and its folder
+ * synced. It never removes a live content.
+ */
+async function installContents(
+	files: Files,
+	needed: readonly string[],
+	cut: RestoreRuntime["cut"],
+): Promise<void> {
+	for (const hash of needed) {
+		const staged = files.stagedContents.contentPath(hash);
+		syncToDisk(staged);
+		const folder = files.contents.ensureContentFolder(hash);
+		renameSync(staged, files.contents.contentPath(hash));
+		syncToDisk(folder);
+		await cut?.("content-installed");
+	}
+	await cut?.("contents-installed");
 }
 
 /**
@@ -403,6 +502,8 @@ async function install(files: Files, marker: Marker, cut: RestoreRuntime["cut"])
 
 	rmSync(files.marker);
 	syncToDisk(files.dataDir);
+	// The marker is gone: what the staging folder still holds, contents the copy no longer needed, goes too.
+	emptyFolder(files.staging);
 }
 
 /**
