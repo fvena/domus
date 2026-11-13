@@ -1,6 +1,6 @@
 # 07. La Pi y el cierre de la 1d2
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01, 02, 03, 04, 05, 06
 
 Spec: [`../spec.md`](../spec.md), secciones «El ensayo y la medición en la Pi», «Decisiones de prueba» («En la Pi») y «Notas». ADR 0026.
@@ -22,12 +22,18 @@ Los pasos que piden contraseña o `sudo` los hace la persona, en español y paso
 
 ## Criterios de aceptación
 
-- [ ] En la Pi, el uid 1000 escribe en `/srv/backups/domus` y lee el secreto.
-- [ ] La copia corre a su hora en la Pi o, para no esperar, la lanza el admin a mano; `/health` pasa de `none-yet` a `saved` y la lista de tareas muestra el resultado.
-- [ ] El ensayo restaura en `domus-restore` la última copia de producción sin chocar con su retención, entra una sesión nueva y se ven los datos.
-- [ ] La medición está hecha y anotada: ninguna respuesta pasa de 500 ms ni da error, o la spec recoge qué se cambia.
-- [ ] `despliegue.md`, `plan.md`, la guía y el `AGENTS.md` raíz están al día.
+- [x] En la Pi, el uid 1000 escribe en `/srv/backups/domus` y lee el secreto.
+- [x] La copia corre a su hora en la Pi o, para no esperar, la lanza el admin a mano; `/health` pasa de `none-yet` a `saved` y la lista de tareas muestra el resultado.
+- [x] El ensayo restaura en `domus-restore` la última copia de producción sin chocar con su retención, entra una sesión nueva y se ven los datos.
+- [x] La medición está hecha y anotada: ninguna respuesta pasa de 500 ms ni da error, o la spec recoge qué se cambia.
+- [x] `despliegue.md`, `plan.md`, la guía y el `AGENTS.md` raíz están al día.
 
 ## Comments
 
 - La primera medición en la Pi, con una base de unos 500 MB, encontró un parón de 1,1 a 1,4 s en cada copia: todas las peticiones esperaban a la vez, sin errores. Al terminar, `db.backup()` forzaba a disco el fichero de destino de una vez, en el único hilo de `api`. El ADR 0027 saca la instantánea a un proceso hijo con su propia conexión, que toma el cerrojo compartido y hace `VACUUM INTO`; el instante de captura pasa a ser el de antes de empezar la copia. Hecho en `4871529`. Una copia que el hijo no termina bien falla ahora sin reintentos (`the snapshot could not be taken`), y las pruebas detienen el hijo en su copia con `fakeNode`. Falta repetir la medición, con el mismo umbral de 500 ms y las tres copias enteras.
+- Hecho en la Pi el 2026-11-13. El directorio `/srv/backups/domus` (700) y el fichero de la contraseña (600) son del uid 1000, que es `fvena` en la Pi y `node` en el contenedor; la contraseña está también en el gestor de contraseñas de casa. El `.env` lleva `DOMUS_BACKUPS` y `DOMUS_BACKUP_PASSWORD`, y sin la segunda `docker compose up` no arranca. Dentro de `api`: `1000`, `backups-writable`, `secret-readable` y restic 0.18.0 arm64. El log dice `backups to /backups`, y `platform_tasks` tiene `cleanup` a las 04:30, `backup` a las 05:00 y `backup-check` el domingo a las 05:30.
+- La primera copia la lanzó Paco a mano con `tasks/launch`: acabó `ok` en unos 4 s, `/health` pasó de `none-yet` a `saved`, la carpeta de preparación quedó vacía y la fila de las marcas tiene la captura, la instantánea y `retention_result: ok`. `restic snapshots` lista `80a41abd`, de 212 KiB, con host `domus`.
+- El ensayo (`docker/ensayo/compose.yml`, proyecto `domus-restore`) restauró `80a41abd` del repositorio de producción. Su `api` arrancó con `0 migrations applied` y `backups off`; el trabajo `backup` que corría dentro de la copia quedó `cancelled` con `discarded by restore`, con 0 sesiones y las mismas 3 cuentas y 5 entradas del registro que el real. Una sesión nueva entró (`200`), leyó las 5 entradas y vio solo su sesión, y la cookie del Domus real dio `401` en el ensayo.
+- La medición, sobre unos 500 MB sintéticos (353 000 entradas, 501 MB), con un minuto de base y tres copias enteras. Con `db.backup()` dentro de `api` no pasó: máximo 1410 ms, 0 errores. Medido aparte, del último paso de `db.backup` al final pasaban 1386 ms en el único hilo de `api`; de ahí el ADR 0027. Con la instantánea en un proceso hijo con `VACUUM INTO` (imagen de la rama, con `DOMUS_ENSAYO_IMAGE`) pasó: copias de 10,3, 5,1 y 5,0 s, máximo 162 ms (una escritura, cuya base ya llega a 137 ms porque verifica la contraseña) y 0 errores. El umbral de 500 ms no cambia y la spec tampoco. Los números completos están en `docs/despliegue.md` («Medir la copia»).
+- `docs/despliegue.md` sustituye «no borres el volumen» por «Las copias de seguridad», «Restaurar» (también retomar, las carpetas `before-restore` y qué vuelve y qué se pierde) y «Ensayar una restauración» con la medición. La guía gana `copias.md` y cambian `README.md`, `segundo-plano.md`, `la-pi.md`, `seguridad.md`, `datos.md` y `arquitectura.md`, revisados con `humanizer`. `docs/plan.md` marca la 1d2 como hecha y el `AGENTS.md` raíz añade `pnpm restore`.
+- Falta ver, una vez fusionada y desplegada esta rama, la copia nocturna de las 05:00 y el `backup-check` del domingo a las 05:30 en la Pi: es lo único que no está probado allí. Hasta entonces, la `api` real sigue con la instantánea de `db.backup()`; la del proceso hijo le llega con el despliegue.
