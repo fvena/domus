@@ -61,9 +61,10 @@ export interface PreparedFile extends FileDescription {
  * entry gives one. `published`: the content's file is in its place, renamed or reused, and its rows are not yet
  * written. `claimed`: the cleanup marked a content claimed and let its lock go, and its file is not yet removed.
  * `removed`: the cleanup removed the file of a claimed content and synced its folder, and its row is not yet deleted.
- * `opened`: a download has its file open and its transaction ended, and no byte is sent yet.
+ * `opened`: a download has its file open and its transaction ended, and no byte is sent yet. `entering`: a session
+ * being created wrote the new `entry` of its device, with no transaction open, and is not yet created (ADR 0029).
  */
-export type InterleavePoint = "published" | "claimed" | "removed" | "opened";
+export type InterleavePoint = "published" | "claimed" | "removed" | "opened" | "entering";
 
 export type Interleave = (point: InterleavePoint) => Promise<void> | void;
 

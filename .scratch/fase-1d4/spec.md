@@ -219,11 +219,19 @@ Una suscripción la registra la app desde la sesión que el aparato tiene habili
     - `PUT /api/notifications/subscription`, con `{ endpoint, keys: { p256dh, auth } }`: `platform/authorization` decide si la cuenta puede (personas sí; `device`, `via` o una cuenta sin perfil, no); se valida el endpoint y, en una transacción, se comprueba que la sesión es la habilitada del aparato y se escribe la suscripción del aparato, sustituyendo la que hubiera. Si es el mismo endpoint, de la misma sesión y con las mismas claves, no cambia nada. En otro caso, la suscripción anterior se borra y nace otra con id nuevo. Responde `{ subscribed: true }`.
     - `DELETE /api/notifications/subscription`: borra la suscripción del aparato si es de esta sesión. Responde `204`, también si no había.
 - **Las claves VAPID.** Una fila de una tabla nueva, `platform_push_keys`, con la pública y la privada, generadas al abrir la plataforma si no hay. El `subject` de VAPID es el primer origen `https` de `DOMUS_ORIGINS`, nunca un correo personal; sin ninguno, la plataforma no envía y la entrega falla como definitiva, `PUSH_NOT_CONFIGURED`.
+    - La 04 deja la función pura `vapidSubject(origins)`; llevar los orígenes hasta la entrega es de la 05.
+- **Detalles de la tarea 04.**
+    - Las rutas comprueban, en este orden: que la sesión vive con el reloj de la plataforma (`UNAUTHORIZED`, también al pedir la clave y al darse de baja), la autorización (`FORBIDDEN`), la forma del cuerpo (`BAD_REQUEST`), el endpoint (`push-endpoint-not-allowed`) y, ya en la transacción, otra vez que la sesión vive y que es la habilitada (`CONFLICT`).
+    - El cuerpo es exactamente `{ endpoint, keys: { p256dh, auth } }`, con textos no vacíos: el `expirationTime` que añade `PushSubscription.toJSON()` se rechaza, así que la app de la fase 2 manda solo esos campos.
+    - Las sesiones anteriores a la 1d4 no tienen `deviceEntry`: ninguna está habilitada hasta que se vuelva a entrar en el aparato.
+    - Un fallo en el punto `entering` (una promesa rechazada o un error) hace fallar el inicio de sesión, con el `entry` ya escrito.
+    - `test-utils` gana `test.subscriptions()`, cada suscripción como dato con su aparato, sesión, cuenta y si está habilitada (su sesión vive y es la habilitada del aparato).
 
 ### Servicios de push admitidos (Q9)
 
 - Un endpoint se acepta solo si es una URL `https`, sin usuario ni contraseña, en el puerto 443 (explícito o implícito) y con un hostname, en minúsculas, exactamente igual a uno de `web.push.apple.com`, `fcm.googleapis.com` y `updates.push.services.mozilla.com`. Una IP o cualquier otro host se rechaza.
 - La lista la recibe `notifications` como opción de la plataforma. Producción usa la de arriba; solo la composición de pruebas pone la del servicio falso.
+    - Es `pushServices` del `PlatformRuntime`, como el reloj o `interleave`, no de `PlatformOptions`: producción no puede cambiarla. La opción `push` de `test-utils` la pone la 05 con el servicio falso.
 
 ### El aviso de prueba (Q7, Q22)
 

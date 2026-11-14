@@ -57,6 +57,7 @@ import {
 	requestProof,
 	WrongPasswordError,
 } from "../identity/proofs";
+import { sessionEnabledWhere, sessionLivesWhere } from "../identity/sessions";
 import {
 	actionLogOf,
 	actionsOf,
@@ -421,6 +422,34 @@ export function sessionExpiresAt(platform: Platform, session: string): number | 
 			"SELECT expires_at AS expiresAt FROM platform_session WHERE id = ?",
 		)
 		.get(session)?.expiresAt;
+}
+
+/** A subscription to notices as the platform keeps it, with whether its session is the enabled one and lives. */
+export interface SubscriptionRow {
+	readonly id: string;
+	readonly device: string;
+	readonly session: string;
+	readonly account: string;
+	readonly endpoint: string;
+	readonly p256dh: string;
+	readonly auth: string;
+	readonly createdAt: number;
+	/** Its session lives on the platform clock and is the one its device has enabled for notices. */
+	readonly enabled: boolean;
+}
+
+/** Every subscription to notices, oldest first. Plain data: changing it changes nothing. */
+export function readSubscriptions(platform: Platform): readonly SubscriptionRow[] {
+	return connectionOf(platform)
+		.prepare<[number], Omit<SubscriptionRow, "enabled"> & { enabled: number }>(
+			`SELECT p.id, p.device, p.session, s.user_id AS account, p.endpoint, p.p256dh, p.auth,
+				p.created_at AS createdAt,
+				(${sessionEnabledWhere("p.session")} AND ${sessionLivesWhere("p.session", "s.user_id", "?")}) AS enabled
+			FROM platform_push_subscriptions p JOIN platform_session s ON s.id = p.session
+			ORDER BY p.created_at, p.id`,
+		)
+		.all(clockOf(platform)())
+		.map((row) => ({ ...row, enabled: row.enabled === 1 }));
 }
 
 /** The id of the one device account, which the platform created at start. */

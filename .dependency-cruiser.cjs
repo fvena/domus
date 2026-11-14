@@ -260,6 +260,17 @@ module.exports = {
 			to: { path: "^packages/platform/files/", reachable: true },
 		},
 		{
+			name: "notifications-stay-in-platform",
+			comment:
+				"The subscriptions, the VAPID keys, the notice and its delivery belong to platform (ADR 0029): module-sdk exposes only ctx.notify and no module reaches them, through any chain of imports. Tests may, through test-utils.",
+			severity: "error",
+			from: {
+				path: "^(modules|packages/module-sdk)/",
+				pathNot: ["\\.test\\.ts$", "^modules/[^/]+/tests/"],
+			},
+			to: { path: "^packages/platform/notifications/", reachable: true },
+		},
+		{
 			name: "only-test-utils-reaches-platform-testing",
 			comment:
 				"@domus/platform/testing hands out a module's raw Drizzle client, outside authorization: only test-utils takes it, for dbFor (ADR 0021).",

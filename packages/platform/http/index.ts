@@ -9,6 +9,8 @@
 // one's own annotations, undoing one's own entry). The sensitive ones (changing permissions and delegation,
 // revoking sessions and devices) are writes on that same path, and so are the settings of the scheduled tasks
 // (ADR 0025: listing them, a read; changing a time, pausing, resuming and launching, `manage` writes). A write's idempotency key and a sensitive operation's step-up proof come in headers.
+// Besides oRPC, routes of Hono only with a session: uploading and downloading files (ADR 0028), and the public key
+// of VAPID and the device's subscription to notices (ADR 0029).
 import type { ModuleDefinition } from "@domus/module-sdk";
 import { implement, ORPCError, os } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
@@ -30,6 +32,8 @@ import {
 	clockOf,
 	connectionOf,
 	filesOf,
+	interleaveOf,
+	notificationsOf,
 	type Platform,
 	proofIssuerOf,
 } from "../platform";
@@ -47,6 +51,12 @@ const FILES_PATH = "/api/files";
 
 /** Where a file is downloaded through the read that returns it (ADR 0028). */
 const DOWNLOAD_PATH = "/api/files/download";
+
+/** The public key of VAPID (ADR 0029). */
+const NOTIFICATIONS_KEY_PATH = "/api/notifications/key";
+
+/** The subscription of the session's device to notices (ADR 0029): put to subscribe, deleted to unsubscribe. */
+const SUBSCRIPTION_PATH = "/api/notifications/subscription";
 
 /** Where RPC procedures live; @domus/api-client calls the same path. */
 const RPC_PREFIX = "/api/rpc";
@@ -80,7 +90,12 @@ const actionProcedure = os.$context<DoorContext>();
 
 export function createHttpHandler({ platform, modules, auth }: HttpHandlerOptions): HttpHandler {
 	const connection = connectionOf(platform);
-	const identity = createAuth(connection, auth);
+	const notifications = notificationsOf(platform);
+	const interleave = interleaveOf(platform);
+	const identity = createAuth(connection, auth, {
+		entering: () => interleave?.("entering"),
+		entered: (session) => notifications.entered(session),
+	});
 	const actions = actionsOf(platform);
 	const files = filesOf(platform);
 	// What an earlier process left half uploaded goes before the door admits a request (ADR 0028).
@@ -314,10 +329,11 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	});
 
 	/**
-	 * A route of files (ADR 0028), only with a session: what `answer` gives, or the error of the spec's table as the
-	 * JSON of ORPCError without the RPC envelope; either way with the cookies that reading the session set.
+	 * A route of Hono only with a session, of files (ADR 0028) or notices (ADR 0029): what `answer` gives, or the
+	 * error of the spec's table as the JSON of ORPCError without the RPC envelope; either way with the cookies that
+	 * reading the session set.
 	 */
-	const fileRoute =
+	const sessionRoute =
 		(answer: (verified: VerifiedContext, request: Request) => Promise<Response>) =>
 		async (c: { readonly req: { readonly raw: Request } }): Promise<Response> => {
 			const responseHeaders = new Headers();
@@ -337,7 +353,7 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	// Uploading a file: who may upload, authorization decides. The answer is the prepared file.
 	app.post(
 		FILES_PATH,
-		fileRoute(async (verified, request) => {
+		sessionRoute(async (verified, request) => {
 			if (!files) throw internalError();
 			return Response.json(await files.upload(verified, request));
 		}),
@@ -348,7 +364,7 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	// A download whose read asks for confirmation waits, and is confirmed here alone, with `{ confirmation }`.
 	app.post(
 		DOWNLOAD_PATH,
-		fileRoute(async (verified, request) => {
+		sessionRoute(async (verified, request) => {
 			const body = downloadRequest(await request.json().catch(() => undefined));
 			const proof = request.headers.get(PROOF_HEADER) ?? undefined;
 			const download =
@@ -379,6 +395,31 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 					"content-disposition": contentDisposition(download.name),
 				},
 			});
+		}),
+	);
+
+	// The public key of VAPID, which the app compares with the one its subscription was made with.
+	app.get(
+		NOTIFICATIONS_KEY_PATH,
+		sessionRoute(async (verified) => Response.json({ key: notifications.key(verified) })),
+	);
+
+	// Subscribing the session's device to notices: who may, authorization decides; the body is the browser's
+	// subscription, `{ endpoint, keys: { p256dh, auth } }`.
+	app.put(
+		SUBSCRIPTION_PATH,
+		sessionRoute(async (verified, request) => {
+			notifications.subscribe(verified, await request.json().catch(() => undefined));
+			return Response.json({ subscribed: true });
+		}),
+	);
+
+	// Unsubscribing: the device's subscription goes when it is of this session; 204 also when there was none.
+	app.delete(
+		SUBSCRIPTION_PATH,
+		sessionRoute(async (verified) => {
+			notifications.unsubscribe(verified);
+			return new Response(null, { status: 204 });
 		}),
 	);
 

@@ -255,6 +255,20 @@ export function decisionOf(authorizer: Authorizer, request: AuthorizationRequest
  * its key (phase 1e).
  */
 export function mayUpload(view: AccessView, context: VerifiedContext): boolean {
+	return personByItself(view, context);
+}
+
+/**
+ * Whether the context may subscribe its device to notices (ADR 0029, «La suscripción no es una acción»): a person's
+ * account, by itself. Never the device account, which is shared and has nobody to tell, nor Kira, nor an account
+ * without a role.
+ */
+export function maySubscribe(view: AccessView, context: VerifiedContext): boolean {
+	return personByItself(view, context);
+}
+
+/** A person's account, admin or member, asking by itself: no via. */
+function personByItself(view: AccessView, context: VerifiedContext): boolean {
 	if (context.via !== undefined) return false;
 	const role = view.roleOf(context.account);
 	return role === "admin" || role === "member";
