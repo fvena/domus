@@ -21,13 +21,13 @@ import { isDeepStrictEqual } from "node:util";
 import {
 	type ActionHandler,
 	type Actor,
-	areaTableOf,
 	type Inverse,
 	type ModuleDatabase,
 	type ModuleDefinition,
 	type ModuleSchema,
 	type OwnedTable,
-	ownedTableOf,
+	type RecordTable,
+	recordTablesOf,
 	type TouchedRecord,
 } from "@domus/module-sdk";
 import type { ActionContract } from "@domus/module-sdk/contracts";
@@ -50,7 +50,7 @@ import {
 	type VerifiedContext,
 	visibleTo,
 } from "../authorization";
-import type { AreaRecordChange, RecordChange } from "../authorization/invalidations";
+import type { AreaRecordChange, RecordChange, RecordKey } from "../authorization/invalidations";
 import { checkTransition, editableTo, type RecordArea } from "../authorization/writes";
 import { markedFiles } from "../files/marked";
 import { FilesRefusal, type References, type WriteRun } from "../files/references";
@@ -154,6 +154,11 @@ export interface Actions {
  * as its data, never text. Its work belongs to platform/notifications.
  */
 export const NOTICE = "notice";
+
+/** The data `ctx.notify` leaves in a {@link NOTICE} job: its recipient and the record it is about. */
+export interface NoticePayload extends RecordKey {
+	readonly to: string;
+}
 
 /** A job a write leaves: its kind and its data. */
 export interface WriteJob {
@@ -262,13 +267,10 @@ export function createActions({
 	const areaTables = new Map<string, ReadonlyMap<string, string>>();
 	for (const module of modules) {
 		const db = drizzle({ client: connection, schema: module.schema });
-		const ownedTables = ownedTablesOf(module, areas);
-		const shared = areaTablesOf(module);
-		areaTables.set(module.id, shared);
-		const recordTypes = new Set([
-			...[...ownedTables.keys()].flatMap((table) => ownedTableOf(table)?.type ?? []),
-			...shared.keys(),
-		]);
+		const recordTables = recordTablesOf(module);
+		const ownedTables = ownedTablesOf(recordTables, areas);
+		areaTables.set(module.id, areaTablesOf(recordTables));
+		const recordTypes = new Set(recordTables.map(({ type }) => type));
 		for (const [name, contract] of Object.entries(module.contract ?? {})) {
 			const handler = module.actions?.[name];
 			if (!handler) continue;
@@ -509,17 +511,22 @@ export function createActions({
 				ownership: (table) =>
 					newOwnership(actor.account, areaOf(table).policy.defaultVisibility),
 				files,
-				// A mistake of the module, a read's or a type of no owned or area table of its own, rolls the write back.
+				// A mistake of the module, a read's, a type of no owned or area table of its own or an id that is not
+				// an integer, which those tables key on, rolls the write back.
 				notify: ({ to, about }) => {
 					if (!write) throw new Error("only a write leaves a notice");
 					if (!parts.recordTypes.has(about.type))
 						throw new Error(
 							`"${about.type}" is no record type of an owned or area table of the module`,
 						);
-					leave({
-						kind: NOTICE,
-						payload: { to, module: parts.module, type: about.type, id: about.id },
-					});
+					if (!isRecordId(about.id)) throw new Error("a record's id is an integer");
+					const payload: NoticePayload = {
+						to,
+						module: parts.module,
+						type: about.type,
+						id: about.id,
+					};
+					leave({ kind: NOTICE, payload });
 				},
 			});
 		} catch (error) {
@@ -945,7 +952,7 @@ export function createActions({
 		for (const { type, id } of touched) {
 			const area = tables?.get(type);
 			if (area === undefined) continue;
-			if (typeof id !== "number" || !Number.isSafeInteger(id)) throw internalError();
+			if (!isRecordId(id)) throw internalError();
 			changes.set(JSON.stringify([type, id]), { module, type, id, area });
 		}
 		return [...changes.values()];
@@ -1027,28 +1034,30 @@ interface ModuleParts {
 	readonly recordTypes: ReadonlySet<string>;
 }
 
-/** The owned tables of a module, which `checkModules` has accepted, each with its area. */
+/** The owned tables among a module's record tables, which `checkModules` has accepted, each with its area. */
 function ownedTablesOf(
-	module: ModuleDefinition,
+	recordTables: readonly RecordTable[],
 	areas: ReadonlyMap<string, AreaPolicy>,
 ): ReadonlyMap<OwnedTable, RecordArea> {
 	const owned = new Map<OwnedTable, RecordArea>();
-	for (const value of Object.values(module.schema)) {
-		const info = ownedTableOf(value);
-		const policy = info && areas.get(info.area);
-		if (info && policy) owned.set(value as OwnedTable, { id: info.area, policy });
+	for (const declared of recordTables) {
+		const policy = areas.get(declared.area);
+		if (declared.kind === "owned" && policy)
+			owned.set(declared.table, { id: declared.area, policy });
 	}
 	return owned;
 }
 
-/** The area tables of a module, which `checkModules` has accepted: the area of each one's record type. */
-function areaTablesOf(module: ModuleDefinition): ReadonlyMap<string, string> {
+/** The area tables among a module's record tables: the area of each one's record type. */
+function areaTablesOf(recordTables: readonly RecordTable[]): ReadonlyMap<string, string> {
 	const shared = new Map<string, string>();
-	for (const value of Object.values(module.schema)) {
-		const info = areaTableOf(value);
-		if (info) shared.set(info.type, info.area);
-	}
+	for (const { kind, type, area } of recordTables) if (kind === "area") shared.set(type, area);
 	return shared;
+}
+
+/** Whether `id` can name a record of an owned or area table, which key on an integer `id`: not `"1"` nor `1.5`. */
+function isRecordId(id: unknown): id is number {
+	return typeof id === "number" && Number.isSafeInteger(id);
 }
 
 /**

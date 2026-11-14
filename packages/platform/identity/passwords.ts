@@ -54,6 +54,14 @@ export async function createAccountWithPassword(
 	return id;
 }
 
+/** What else a change of password does with the account's sessions. */
+export interface ReplacingPassword {
+	/** The session that changes it, which goes on: it must still live, else {@link SessionGoneError}. */
+	readonly keep?: string;
+	/** Told which sessions ended, inside the transaction. */
+	readonly ended?: SessionsEnded;
+}
+
 /**
  * Sets a new password and ends the account's sessions, all but `keep` when it is given, in one transaction,
  * telling `ended` which ones. Returns how many sessions ended.
@@ -63,8 +71,7 @@ export async function replacePassword(
 	account: string,
 	password: string,
 	now: number,
-	keep?: string,
-	ended?: SessionsEnded,
+	{ keep, ended }: ReplacingPassword = {},
 ): Promise<number> {
 	const lives = sessionLives(connection);
 	const hash = await hashPassword(password);
@@ -73,12 +80,7 @@ export async function replacePassword(
 		setPasswordHash(connection, account, hash, now);
 		endConfirmationsOf(connection, account);
 		endProofsOf(connection, account);
-		return endSessions(
-			connection,
-			keep === undefined ? { account } : { account, keep },
-			"password",
-			ended,
-		);
+		return endSessions(connection, keep === undefined ? { account } : { account, keep }, ended);
 	})();
 }
 

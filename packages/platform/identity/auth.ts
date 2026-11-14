@@ -151,7 +151,7 @@ export function createAuth(
 				},
 				delete: {
 					after: async (deleted) => {
-						ended?.([deleted.id], "sign-out");
+						ended?.([deleted.id]);
 					},
 				},
 			},

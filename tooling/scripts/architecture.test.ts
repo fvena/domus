@@ -152,6 +152,7 @@ describe("module-sdk", () => {
 			"checkModules",
 			"defineModule",
 			"ownedTableOf",
+			"recordTablesOf",
 		]);
 		expect(await names("contracts/index.ts")).toEqual([
 			"fileRef",

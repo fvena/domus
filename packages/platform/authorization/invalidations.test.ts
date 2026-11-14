@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AccessView, AreaPolicy, Grant } from ".";
 import { invalidationReaches, type OwnedRecordChange, readLost } from "./invalidations";
+import type { Ownership } from "./visibility";
 
 const AREA: AreaPolicy = {
 	defaultVisibility: "private",
@@ -28,8 +29,8 @@ function view(grant?: Grant): AccessView {
 	};
 }
 
-const anaPrivate = { owner: "ana", visibility: "private" };
-const anaPublic = { owner: "ana", visibility: "public" };
+const anaPrivate: Ownership = { owner: "ana", visibility: "private" };
+const anaPublic: Ownership = { owner: "ana", visibility: "public" };
 
 function change(
 	before: OwnedRecordChange["before"],

@@ -184,8 +184,7 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 							account,
 							input.newPassword,
 							clockOf(platform)(),
-							session,
-							events.sessionsEnded,
+							{ keep: session, ended: events.sessionsEnded },
 						);
 						return { endedSessions };
 					} catch (error) {

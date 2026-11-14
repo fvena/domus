@@ -279,7 +279,11 @@ export function maySubscribe(view: AccessView, context: VerifiedContext): boolea
 
 /** A person's account, admin or member, asking by itself: no via. */
 function personByItself(view: AccessView, context: VerifiedContext): boolean {
-	if (context.via !== undefined) return false;
-	const role = view.roleOf(context.account);
+	return context.via === undefined && isPerson(view, context.account);
+}
+
+/** Whether `account` is a person's: admin or member, never the device account nor one without a role. */
+export function isPerson(view: AccessView, account: string): boolean {
+	const role = view.roleOf(account);
 	return role === "admin" || role === "member";
 }

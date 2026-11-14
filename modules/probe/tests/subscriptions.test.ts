@@ -183,6 +183,23 @@ describe("subscribing", () => {
 		expect(test.subscriptions()).toEqual([first]);
 	});
 
+	it.each([null, 1_800_000_000_000])(
+		"accepts and ignores the expirationTime %s that PushSubscription.toJSON() adds",
+		async (expirationTime) => {
+			await using test = await household();
+			const phone = await signedIn(test, "paco");
+			await subscribe(phone, pushSubscription("phone"));
+			const [first] = test.subscriptions();
+
+			expect(
+				await answer(
+					await subscribe(phone, { ...pushSubscription("phone"), expirationTime }),
+				),
+			).toEqual({ status: 200, body: { subscribed: true } });
+			expect(test.subscriptions()).toEqual([first]);
+		},
+	);
+
 	it("replaces the device's subscription with another id when its endpoint or keys change", async () => {
 		await using test = await household();
 		const phone = await signedIn(test, "paco");
@@ -278,7 +295,9 @@ describe("subscribing", () => {
 			{ endpoint, keys: { p256dh: "k" } },
 			{ endpoint, keys: { p256dh: "k", auth: "" } },
 			{ endpoint: 7, keys: { p256dh: "k", auth: "a" } },
-			{ ...pushSubscription("phone"), expirationTime: null },
+			{ ...pushSubscription("phone"), expirationTime: "soon" },
+			{ ...pushSubscription("phone"), extra: true },
+			{ endpoint, keys: { p256dh: "k", auth: "a", extra: "x" } },
 		])
 			expect(await answer(await subscribe(phone, body))).toEqual({
 				status: 400,

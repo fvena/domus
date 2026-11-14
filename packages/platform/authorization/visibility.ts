@@ -11,6 +11,20 @@ export function visibleTo(table: OwnedTable, account: string): SQL {
 	return predicate;
 }
 
+/** An owned record's owner and visibility, as the platform reads them: `null` where it read none. */
+export interface Ownership {
+	readonly owner: string | null;
+	readonly visibility: Visibility | null;
+}
+
+/**
+ * Whether `account` sees an owned record it already holds in memory: the rule of {@link visibleTo}, its own or a
+ * public one.
+ */
+export function isVisibleTo(record: Ownership, account: string): boolean {
+	return record.owner === account || record.visibility === "public";
+}
+
 /** A new record belongs to the represented account, with the default visibility of its area. */
 export function newOwnership(account: string, defaultVisibility: Visibility): NewOwnership {
 	return { owner: account, visibility: defaultVisibility };

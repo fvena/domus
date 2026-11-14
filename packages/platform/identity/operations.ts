@@ -125,7 +125,7 @@ export function platformOperations(
 						message: "the current session ends by signing out",
 					});
 				// Its pending confirmations and proofs end with it: their session becomes null.
-				endSessions(connection, { session }, "revoke-session", changes.sessionsEnded);
+				endSessions(connection, { session }, changes.sessionsEnded);
 				return { session };
 			},
 		}),
@@ -143,7 +143,6 @@ export function platformOperations(
 				const ended = endSessions(
 					connection,
 					{ device: found.device },
-					"revoke-device",
 					changes.sessionsEnded,
 				);
 				endProofsOnDevice(connection, found.device);

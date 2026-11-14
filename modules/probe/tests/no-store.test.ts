@@ -1,6 +1,6 @@
 // No answer of the API is kept in a cache (spec of phase 1d4, «`no-store`»): every response under `/api/*`, a good
-// one and an error, of the platform's RPC, a module's action, the routes of files and Better Auth's, carries
-// `Cache-Control: no-store`. `/health` stays as it was.
+// one and an error, of the platform's RPC, a module's action, the routes of files and of notices and Better Auth's,
+// carries `Cache-Control: no-store`. `/health` stays as it was.
 import { createTestPlatform, TEST_ORIGIN, type TestBrowser } from "@domus/test-utils";
 import { describe, expect, it } from "vitest";
 
@@ -53,6 +53,29 @@ function download(browser: TestBrowser, file: string): Promise<Response> {
 	});
 }
 
+const KEY_PATH = "/api/notifications/key";
+const SUBSCRIPTION_PATH = "/api/notifications/subscription";
+
+/** A request to a route of the notices, with `body` as JSON unless it is already text. */
+function notifications(
+	browser: TestBrowser,
+	method: "GET" | "PUT" | "DELETE",
+	path: string,
+	body?: unknown,
+): Promise<Response> {
+	return browser.fetch(
+		new Request(new URL(path, TEST_ORIGIN), {
+			method,
+			...(body === undefined
+				? {}
+				: {
+						headers: { "content-type": "application/json" },
+						body: typeof body === "string" ? body : JSON.stringify(body),
+					}),
+		}),
+	);
+}
+
 /** The status and the cache rule of a response. */
 function cached(response: Response) {
 	return { status: response.status, cacheControl: response.headers.get("cache-control") };
@@ -93,6 +116,26 @@ describe("no-store", () => {
 		if ("repeated" in attached) throw new Error("attached before");
 		expect(cached(await download(stranger, attached.result.id))).toEqual(noStore(401));
 		expect(cached(await download(phone, attached.result.id))).toEqual(noStore(200));
+
+		expect(cached(await notifications(stranger, "GET", KEY_PATH))).toEqual(noStore(401));
+		expect(cached(await notifications(phone, "GET", KEY_PATH))).toEqual(noStore(200));
+		expect(cached(await notifications(phone, "PUT", SUBSCRIPTION_PATH, "not json"))).toEqual(
+			noStore(400),
+		);
+		expect(
+			cached(
+				await notifications(phone, "PUT", SUBSCRIPTION_PATH, {
+					endpoint: "https://fcm.googleapis.com/fcm/send/phone",
+					keys: { p256dh: "p256dh-phone", auth: "auth-phone" },
+				}),
+			),
+		).toEqual(noStore(200));
+		expect(cached(await notifications(stranger, "DELETE", SUBSCRIPTION_PATH))).toEqual(
+			noStore(401),
+		);
+		expect(cached(await notifications(phone, "DELETE", SUBSCRIPTION_PATH))).toEqual(
+			noStore(204),
+		);
 
 		expect(cached(await post(phone, "/api/nothing"))).toEqual(noStore(404));
 		expect(cached(await phone.signOut())).toEqual(noStore(200));

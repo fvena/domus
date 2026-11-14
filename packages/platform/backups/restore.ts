@@ -379,7 +379,7 @@ function sanitizeCopy(
 			// The tasks the platform declares with the backups on, each one's next run from its frequency.
 			rescheduleTasks(copy, () => now, BACKUP_SCHEDULES);
 			// A session revoked, or a password changed, after the copy must not come back.
-			endSessions(copy, { every: true }, "restore");
+			endSessions(copy, { every: true });
 			endEveryConfirmation(copy);
 			endEveryProof(copy);
 			// No prepared file serves once every session ended, and the contents left are exactly the needed ones.

@@ -7,7 +7,7 @@ import { getTableConfig, SQLiteTable } from "drizzle-orm/sqlite-core";
 import type { ModuleActions, ModuleSchema } from "./actions";
 import type { AreaDefinition } from "./areas";
 import type { ActionMeta, ModuleContract } from "./contracts";
-import { areaTableOf, ownedTableOf } from "./db";
+import { areaTableOf, type OwnedTable, ownedTableOf } from "./db";
 
 export type { AreaDefinition } from "./areas";
 
@@ -138,6 +138,49 @@ function checkAreas(module: ModuleDefinition): void {
 			);
 }
 
+/** What every table of a module's records declares: its SQL name, its record type and its area's full id. */
+interface RecordTableBase {
+	readonly name: string;
+	readonly type: string;
+	readonly area: string;
+}
+
+/**
+ * A table of a module's records the platform knows: an owned table, whose records have an owner and a visibility,
+ * or an area table, the household's records of an area.
+ */
+export type RecordTable =
+	| (RecordTableBase & {
+			readonly kind: "owned";
+			readonly table: OwnedTable;
+			/** Built for an `alwaysPrivate` area. */
+			readonly alwaysPrivate: boolean;
+	  })
+	| (RecordTableBase & { readonly kind: "area"; readonly table: SQLiteTable });
+
+/** The owned tables and area tables of `module`'s schema, in its order; a plain `table` is none of them. */
+export function recordTablesOf(module: ModuleDefinition): RecordTable[] {
+	const tables: RecordTable[] = [];
+	for (const value of Object.values(module.schema)) {
+		if (!is(value, SQLiteTable)) continue;
+		const name = getTableName(value);
+		const owned = ownedTableOf(value);
+		const shared = areaTableOf(value);
+		if (owned)
+			tables.push({
+				kind: "owned",
+				table: value as OwnedTable,
+				name,
+				type: owned.type,
+				area: owned.area,
+				alwaysPrivate: owned.alwaysPrivate,
+			});
+		else if (shared)
+			tables.push({ kind: "area", table: value, name, type: shared.type, area: shared.area });
+	}
+	return tables;
+}
+
 /**
  * Each owned table and each area table keys on its integer `id` alone, sits in an area of its module, and names
  * its records with a type no other of those tables of the module uses. An owned table is built with the policy
@@ -147,13 +190,9 @@ function checkAreas(module: ModuleDefinition): void {
 function checkTables(module: ModuleDefinition): void {
 	const areas = new Set(areaIds(module));
 	const types = new Set<string>();
-	for (const value of Object.values(module.schema)) {
-		const owned = ownedTableOf(value);
-		const shared = areaTableOf(value);
-		const declared = owned ?? shared;
-		if (!declared || !is(value, SQLiteTable)) continue;
-		const config = getTableConfig(value);
-		const kind = owned ? "owned table" : "area table";
+	for (const declared of recordTablesOf(module)) {
+		const config = getTableConfig(declared.table);
+		const kind = declared.kind === "owned" ? "owned table" : "area table";
 		const key = config.columns.find((column) => column.name === "id");
 		if (
 			config.primaryKeys.length > 0 ||
@@ -169,13 +208,13 @@ function checkTables(module: ModuleDefinition): void {
 				`module "${module.id}": ${kind} "${config.name}" is in area "${declared.area}", which the module does not declare`,
 			);
 		const alwaysPrivate = module.areas?.[declared.area]?.alwaysPrivate === true;
-		if (owned && alwaysPrivate !== owned.alwaysPrivate)
+		if (declared.kind === "owned" && alwaysPrivate !== declared.alwaysPrivate)
 			throw new Error(
-				`module "${module.id}": owned table "${config.name}" was built for area "${owned.area}" ${owned.alwaysPrivate ? "always private" : "not always private"}, but the module declares it otherwise`,
+				`module "${module.id}": owned table "${config.name}" was built for area "${declared.area}" ${declared.alwaysPrivate ? "always private" : "not always private"}, but the module declares it otherwise`,
 			);
-		if (shared && alwaysPrivate)
+		if (declared.kind === "area" && alwaysPrivate)
 			throw new Error(
-				`module "${module.id}": area table "${config.name}" is in area "${shared.area}", which is always private`,
+				`module "${module.id}": area table "${config.name}" is in area "${declared.area}", which is always private`,
 			);
 		if (types.has(declared.type))
 			throw new Error(
