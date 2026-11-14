@@ -121,6 +121,11 @@ export function createEvents({
 	/**
 	 * Shares out what committed, in order. Only with no transaction open: one still open may hold rows that are not
 	 * committed yet, and its end schedules another pass.
+	 *
+	 * It relies on every transaction on this connection being synchronous, as better-sqlite3's are and ADR 0022 asks
+	 * of handlers: one begins and ends within a single turn, so the pass its write scheduled runs once it ended.
+	 * Were a transaction to await, that pass would find it still open and return, and what it commits would wait
+	 * for the next write or heartbeat to share it out, late.
 	 */
 	function share(): void {
 		scheduled = false;
