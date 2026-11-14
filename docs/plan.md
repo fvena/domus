@@ -2,18 +2,18 @@
 
 Única fuente del plan de Domus: qué entra en cada fase, cuándo se da por terminada y en qué estado está. Se construye solo lo que pide la fase en curso, y cada funcionalidad entra después de su propia revisión en grilling ([ADR 0001](architecture/adr/0001-domus-con-kira-dentro.md)). Al terminar cada fase, lo que ya funciona se publica en la Pi. Cuando una fase cambia de estado, o su grilling fija qué incluye o cuándo termina, se corrige aquí. Las decisiones que la justifican están en [`architecture/README.md`](architecture/README.md) y en los ADR.
 
-| Fase | Qué                            | Estado             |
-| ---- | ------------------------------ | ------------------ |
-| 0    | Esqueleto                      | hecha (2026-11-11) |
-| 1    | Núcleo                         | en curso (1d3)     |
-| 2    | Sistema de diseño              | pendiente          |
-| 3    | Personas, cuentas y aparatos   | pendiente          |
-| 4    | Módulo piloto: listas y compra | pendiente          |
-| 5    | Kira básica                    | pendiente          |
-| 6    | Los demás módulos, uno a uno   | pendiente          |
-| 7    | Memoria de Kira                | pendiente          |
-| 8    | Especialistas                  | pendiente          |
-| 9    | Iniciativa y domótica por voz  | pendiente          |
+| Fase | Qué                            | Estado              |
+| ---- | ------------------------------ | ------------------- |
+| 0    | Esqueleto                      | hecha (2026-11-11)  |
+| 1    | Núcleo                         | en curso (1d3, 1d4) |
+| 2    | Sistema de diseño              | pendiente           |
+| 3    | Personas, cuentas y aparatos   | pendiente           |
+| 4    | Módulo piloto: listas y compra | pendiente           |
+| 5    | Kira básica                    | pendiente           |
+| 6    | Los demás módulos, uno a uno   | pendiente           |
+| 7    | Memoria de Kira                | pendiente           |
+| 8    | Especialistas                  | pendiente           |
+| 9    | Iniciativa y domótica por voz  | pendiente           |
 
 ## 0. Esqueleto
 
@@ -25,7 +25,7 @@
 
 ## 1. Núcleo
 
-**Estado:** en curso. La 1a está hecha desde el 2026-11-12: la Pi corre `main` con la base de datos. La 1b está hecha desde el 2026-11-12: la Pi corre `main` con el registro de acciones. La 1c está hecha desde el 2026-11-12: la Pi corre `main` con cuentas, sesiones y autorización. La 1d1 está hecha desde el 2026-11-12: la Pi corre `main` con la cola, el planificador y la limpieza diaria. La 1d2 está hecha desde el 2026-11-13: la Pi corre `main` con la copia diaria en `/srv/backups/domus`, su comprobación semanal y el comando para restaurar.
+**Estado:** en curso. La 1a está hecha desde el 2026-11-12: la Pi corre `main` con la base de datos. La 1b está hecha desde el 2026-11-12: la Pi corre `main` con el registro de acciones. La 1c está hecha desde el 2026-11-12: la Pi corre `main` con cuentas, sesiones y autorización. La 1d1 está hecha desde el 2026-11-12: la Pi corre `main` con la cola, el planificador y la limpieza diaria. La 1d2 está hecha desde el 2026-11-13: la Pi corre `main` con la copia diaria en `/srv/backups/domus`, su comprobación semanal y el comando para restaurar. Desde el 2026-11-14, la Pi corre `main` con la 1d3 y la 1d4. Las comprobaciones de la 1d4 en la Pi salieron bien ese día, pero se da por hecha cuando cierre la 1d3, que espera a ver su copia del 2026-11-15 y su limpieza del 2026-11-16.
 
 **Terminada cuando** un módulo de prueba cubre todos los casos de permiso, confirmación y visibilidad. Cada subfase fija en su grilling cuándo termina ella. El tema `date-time` de `utils` (`date-fns` e `Intl`) entra en esta fase, con su primer uso.
 

@@ -46,6 +46,12 @@ ssh kira 'cd ~/domus && docker compose ps && docker compose logs --no-color assi
     for ruta in files files/download; do curl -s -o /dev/null -w "$ruta %{http_code}\n" -X POST "localhost:3000/api/$ruta"; done
     ```
 
+    El canal en directo y la clave de los avisos tampoco. Esta escribe `events 401 no-store` y `notifications/key 401 no-store`:
+
+    ```bash
+    for ruta in events notifications/key; do curl -s -o /dev/null -w "$ruta %{http_code} %header{cache-control}\n" "localhost:3000/api/$ruta"; done
+    ```
+
 - `docker compose logs --no-color api | grep database` dice `database at /data/domus.db: <N> migrations applied`: las que había pendientes en ese arranque, y `0` si no había ninguna. Si una migración falla, `api` no arranca y la base de datos queda como estaba.
 
 ## Las cuentas
@@ -257,6 +263,28 @@ docker compose exec -T api find /data/files -type f
 ```
 
 Escribió `/data/files/contents/ae/aec5af8ea8339032b725746103d6a76ab89b5e383a82ddf949133850602180ca`. Ese archivo preparado no se vincula a nada: caduca a las 24 h, y la limpieza de la noche siguiente lo borra con su contenido, así que la misma orden ya no escribe ninguno.
+
+## En directo y avisos
+
+Con sesión, `GET /api/events` abre el canal en directo (ADR 0029): un flujo de eventos (SSE) por el que `api` manda `ready` al registrarlo, `invalidate` con los registros que cambiaron y que esa sesión puede ver, `reset` tras un cambio de permisos de la cuenta y `purge` cuando la sesión termina, y después lo cierra. Manda un latido (`: heartbeat`) cada 25 s, y cada sesión tiene como mucho 6 canales a la vez: el séptimo cierra el más antiguo. `tailscale serve` no retiene los eventos, así que llegan igual por `https://kira.taildd967b.ts.net`.
+
+Los avisos salen al servicio de push del navegador de cada aparato: solo `web.push.apple.com`, `fcm.googleapis.com` y `updates.push.services.mozilla.com`, por `https` y el puerto 443. Las claves VAPID se crearon en la base el primer arranque de la 1d4, el 2026-11-14, viajan con la copia y no cambian al reiniciar ni al recrear `api`. Su sujeto es el primer origen `https` de `DOMUS_ORIGINS`, `https://kira.taildd967b.ts.net`. Las suscripciones viven en `platform_push_subscriptions`, una por aparato, y se registran con `PUT /api/notifications/subscription`. Hasta la fase 2 no hay pantallas ni service worker que se suscriban, así que en el Domus real no hay ninguna.
+
+### Comprobar el canal y los avisos
+
+Sin sesión, el canal y la clave responden `401` con `no-store`, como dice «Comprobar». Con sesión, en la terminal de «Comprobar las cuentas y la autorización» después de `entrar <correo de Paco> paco`, la clave pública responde `{"key":"B…"}` y `200`:
+
+```bash
+rpc -b "$D/paco" localhost:3000/api/notifications/key
+```
+
+Esta abre el canal 30 s por Tailscale. La Pi no resuelve su propio nombre de Tailscale, así que `--resolve` le da su dirección, y la cookie va en una cabecera porque `curl` la guardó para `localhost`:
+
+```bash
+timeout 30 curl -sN --resolve "kira.taildd967b.ts.net:443:$(tailscale ip -4)" -H "Cookie: $(awk -F'\t' 'NF>=7 {printf "%s=%s; ", $6, $7}' "$D/paco")" https://kira.taildd967b.ts.net/api/events
+```
+
+El 2026-11-14 escribió `event: ready` a los 34 ms y `: heartbeat` a los 25,0 s, y nada más: en el Domus real todavía no hay módulos con registros que cambien.
 
 ## Las copias de seguridad
 
@@ -608,6 +636,85 @@ En el ensayo del 2026-11-14, con la última copia real (`d1dd591a…`, de las 05
 - deshacer el borrado respondió `200`, la nota 2 volvió con `lista-compra.txt` en `files`, y su descarga dio el mismo hash que el original.
 
 Para salir, cierra la sesión del ensayo y desmonta el ensayo como dice «Desmontar el ensayo», con `docker image rm domus-api:ensayo`.
+
+### Ensayar el canal en directo
+
+Las invalidaciones necesitan registros que cambien, así que se comprueban en el ensayo con `domus-api:ensayo`, como en «Ensayar con archivos»: construye la imagen, restaura la última copia real y arranca el ensayo con `$E up -d`. Las copias pueden quedar apagadas. En la terminal de «Comprobar las cuentas y la autorización» (con `D`), esta función abre una sesión en el ensayo y guarda su cookie en `$D/ensayo-<nombre>`:
+
+```bash
+entrar_ensayo() { # entrar_ensayo <nombre>: pide correo y contraseña, sin eco
+  local correo pw; read -rp "Correo de $1: " correo; read -rsp "Contraseña de $1: " pw; echo
+  printf '%s\n%s\n' "$correo" "$pw" | jq -Rn '[inputs] | {email: .[0], password: .[1]}' \
+    | curl -s -o /dev/null -w "entrar en el ensayo como $1 %{http_code}\n" -c "$D/ensayo-$1" -H 'Origin: http://localhost:3001' -H 'content-type: application/json' --data-binary @- localhost:3001/api/auth/sign-in/email
+}
+```
+
+Entra dos veces como Paco y una como Rocío, con su propio correo: `entrar_ensayo paco`, `entrar_ensayo paco2` y `entrar_ensayo rocio`. Cada una escribe `200`. Estas funciones abren un canal en segundo plano, que apunta cada línea con su instante en milisegundos, y hacen las escrituras de `probe`:
+
+```bash
+O='Origin: http://localhost:3001'
+ahora() { date +%s%3N; }
+escuchar() { ( curl -sN -b "$D/ensayo-$1" localhost:3001/api/events | while IFS= read -r l; do [ -n "$l" ] && echo "$(ahora) $l"; done > "$D/canal-$1"; echo "$(ahora) (cerrado)" >> "$D/canal-$1" ) & }
+escribir() { curl -s -b "$D/ensayo-$1" -H "$O" -H 'content-type: application/json' -H "idempotency-key: directo-$2" -d "{\"json\":$4}" "localhost:3001/api/rpc/probe/$3"; echo; }
+leer() { curl -s -b "$D/ensayo-$1" -H "$O" -H 'content-type: application/json' -d "{\"json\":$3}" "localhost:3001/api/rpc/probe/$2"; echo; }
+```
+
+Abre los canales de Paco y de Rocío y haz las cuatro escrituras, dejando un par de segundos entre una y otra. `ahora` antes de cada una apunta cuándo salió. La nota del tablón es pública, y la de `addNote`, privada hasta que se cambia. En un ensayo recién restaurado de una copia real, las dos son la 1:
+
+```bash
+escuchar paco; escuchar rocio; sleep 2
+ahora; escribir paco 1 addBoardNote '{"body":"La caldera hace ruido"}'
+ahora; escribir paco 2 addNote '{"body":"Regalo para el cumpleaños"}'
+ahora; escribir paco 3 setNoteVisibility '{"id":1,"visibility":"public"}'
+leer rocio getNote '{"id":1}'
+ahora; escribir paco 4 setNoteVisibility '{"id":1,"visibility":"private"}'
+leer rocio getNote '{"id":1}'
+```
+
+Después, para leer lo que llegó, cierra los canales y enseña lo que apuntaron:
+
+```bash
+pkill -u "$USER" -f 'localhost:3001/api/events'; cat "$D/canal-paco" "$D/canal-rocio"
+```
+
+En el ensayo del 2026-11-14, sobre la copia real `d1dd591a…`, contando desde que salió cada escritura:
+
+| Escritura                  | Canal de Paco      | Canal de Rocío                                              |
+| -------------------------- | ------------------ | ----------------------------------------------------------- |
+| La nota pública del tablón | `invalidate` 22 ms | `invalidate` 22 ms                                          |
+| La nota privada            | `invalidate` 17 ms | nada                                                        |
+| Esa nota pasa a pública    | `invalidate` 21 ms | `invalidate` 20 ms, y `getNote` le devuelve la nota         |
+| Vuelve a privada           | `invalidate` 17 ms | `invalidate` 17 ms, y `getNote` le devuelve `{"json":null}` |
+
+Cada `invalidate` lleva solo `{"records":[{"module":"probe","type":"board","id":1}]}` o `"type":"note"`, nunca el texto.
+
+Para ver que revocar una sesión cierra su canal, guarda en `S` el id de la sesión `paco2` y pide un comprobante de Paco para revocarla. Pega la línea de `read` sola:
+
+```bash
+S=$(curl -s -b "$D/ensayo-paco2" -H "$O" -X POST localhost:3001/api/rpc/sessions/list | jq -r '.json[] | select(.current) | .id')
+```
+
+```bash
+read -rsp 'Contraseña de Paco: ' pw; echo
+```
+
+```bash
+P=$(printf '%s' "$pw" | jq -Rs --arg s "$S" '{json: {password: ., operation: {action: "platform.revokeSession", input: {session: $s}}}}' | curl -s -b "$D/ensayo-paco" -H "$O" -H 'content-type: application/json' --data-binary @- localhost:3001/api/rpc/proofs/request | jq -r '.json.proof'); unset pw
+escuchar paco2; escuchar paco; escuchar rocio; sleep 2
+ahora; curl -s -w ' %{http_code}\n' -b "$D/ensayo-paco" -H "$O" -H 'content-type: application/json' -H 'idempotency-key: directo-revocar' -H "step-up-proof: $P" -d "{\"json\":{\"session\":\"$S\"}}" localhost:3001/api/rpc/sessions/revoke
+sleep 2; pkill -u "$USER" -f 'localhost:3001/api/events'; cat "$D/canal-paco2" "$D/canal-paco" "$D/canal-rocio"
+```
+
+El 2026-11-14, la revocación respondió `200`. El canal de `paco2` recibió `event: purge` a los 16 ms y se cerró justo después, y los de Paco y Rocío no recibieron nada hasta que `pkill` los cerró. Después, `sessions/list` respondió `401` a `paco2` y `200` a Paco y a Rocío.
+
+Las claves VAPID no cambian al reiniciar ni al recrear `api`. Esta orden compara la huella de la clave pública antes, tras `restart` y tras `up -d --force-recreate`, y escribe tres veces la misma:
+
+```bash
+clave() { curl -s -b "$D/ensayo-paco" localhost:3001/api/notifications/key | jq -r .key | sha256sum | cut -c1-16; }
+clave; $E restart api; sleep 5; clave; $E up -d --force-recreate api; sleep 5; clave
+```
+
+El 2026-11-14 escribió `41c48ea66391adbb` las tres veces. Las sesiones siguen valiendo, porque viven en la base. Para salir, cierra las sesiones del ensayo, desmonta el ensayo como dice «Desmontar el ensayo», con `docker image rm domus-api:ensayo`, y `rm -rf "$D"`.
 
 ### Medir la copia
 

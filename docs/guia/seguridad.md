@@ -10,6 +10,8 @@ Domus no está abierto a internet. Se llega desde la red de casa o por Tailscale
 
 Llegar a la Pi no basta. Salvo para decir quién es y qué versión habla, la puerta solo atiende a quien ha entrado con su cuenta, y cada operación pasa por los permisos de esa cuenta. Cómo se entra está en [Las cuentas y las sesiones](cuentas.md), y quién puede hacer qué, en [Los permisos](permisos.md).
 
+El navegador no guarda en su caché ninguna respuesta de Domus, así que quien lo use después no encuentra ahí las notas de otro.
+
 Los datos viven en un único fichero dentro de la Pi y solo api lo abre. assistant y voice-gateway no pueden leerlo; si necesitan algo, se lo piden a api.
 
 Cada programa corre con lo mínimo. Los contenedores no tienen permisos de administrador, sus ficheros son de solo lectura y no tienen ninguna capacidad extra del sistema. Alguien que consiguiera entrar en uno tendría muy poco que tocar.
@@ -32,7 +34,7 @@ Un muro entre módulos tendría sentido si alguno viniera de fuera. Como todos s
 
 - Acceso: `kira.local:3000` en casa y `tailscale serve` hacia el puerto 3000. Los detalles están en [`docs/despliegue.md`](../despliegue.md).
 - Contenedores: `docker-compose.yml` (`read_only`, `cap_drop: ALL`, `no-new-privileges`, el volumen montado solo en api) y `docker/Dockerfile` (`USER node`).
-- Entrar: Better Auth en `packages/platform/identity`; sin sesión, toda RPC salvo `status` responde `401`.
+- Entrar: Better Auth en `packages/platform/identity`; sin sesión, toda RPC salvo `status` responde `401`. Toda respuesta de `/api/*`, también los errores, lleva `Cache-Control: no-store`.
 - Secretos: `DOMUS_AUTH_SECRET` en el `.env` de la Pi, y la contraseña de las copias en un fichero aparte que compose monta como secret ([Las copias de seguridad y restaurar](copias.md)). gitleaks en `.githooks/pre-commit` y en el trabajo «Secret scan» de `.github/workflows/validate-prs.yml`. Los secretos viven fuera del repositorio.
 - Entre módulos: las reglas de `.dependency-cruiser.cjs`. El cliente directo de un módulo está en `@domus/platform/testing`, que solo puede importar `test-utils`.
 - Decisiones: [ADR 0003](../architecture/adr/0003-procesos-y-contenedores.md), [ADR 0004](../architecture/adr/0004-una-sola-puerta.md), [ADR 0005](../architecture/adr/0005-kira-aislada.md), [ADR 0021](../architecture/adr/0021-datos-de-los-modulos-y-migraciones.md) y [ADR 0023](../architecture/adr/0023-identidad-y-autorizacion.md).

@@ -18,6 +18,8 @@ El planificador mira la hora de la casa, no la del ordenador. El día que se ade
 
 Cada ejecución queda anotada, con cuándo empezó, cuándo terminó y cómo acabó.
 
+Una acción también puede dejar un trabajo para después, como un aviso para Rocío. Ese trabajo se apunta junto con el cambio, en la misma escritura, y no despierta hasta que la escritura se guarda: si falla, no queda nada apuntado. Es la bandeja de salida. Si después se deshace la acción, sus trabajos que no habían empezado se cancelan. Un trabajo que ya no puede salir, como un aviso de una nota que ahora es privada, termina bien y deja apuntado por qué no salió. Cómo se mandan los avisos está en [En directo y avisos](en-directo-y-avisos.md).
+
 La limpieza borra de verdad lo que ya caducó: lo que entró en cada acción y su inversa pasados 30 días, lo guardado de las confirmaciones caducadas, los comprobantes que ya no sirven, y los trabajos y ejecuciones antiguos. Va por tandas pequeñas para no frenar a quien esté usando Domus. Nunca cambia lo que responde Domus: la anotación de lo que hizo cada persona se queda, y repetir una escritura antigua con su clave sigue respondiendo lo mismo que antes de limpiar.
 
 Cualquier cuenta puede ver la lista de tareas: a qué hora corren, si están pausadas y cómo fue la última vez. Solo el admin puede cambiar la hora, pausarlas, reanudarlas o lanzarlas en el momento, y para eso pide la contraseña otra vez, como cualquier operación de administrar. Esos cambios quedan en el registro de acciones. Un cambio de hora o una pausa se pueden deshacer, siempre que sean el último cambio de esa tarea.
