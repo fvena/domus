@@ -123,7 +123,7 @@ En la 1e no hay turnos de conversación, así que ninguna ruta, comando ni servi
 
 ### Mandatos (Q1, Q5, Q6, Q15, Q18)
 
-- Tabla nueva de la plataforma, en la misma migración. Por mandato guarda el SHA-256 de su id (clave), la app, la cuenta representada, el aparato, la sesión, la cuenta del aparato, cómo se acreditó la identidad, la conversación (vacía en la 1e), cuándo se emitió y cuándo caduca. Son las columnas del contexto verificado, como en la confirmación pendiente.
+- Tabla nueva de la plataforma, en su propia migración, generada después de la de las llaves. Por mandato guarda el SHA-256 de su id (clave), la app, la cuenta representada, el aparato, la sesión, la cuenta del aparato, cómo se acreditó la identidad, la conversación (vacía en la 1e), cuándo se emitió y cuándo caduca. Son las columnas del contexto verificado, como en la confirmación pendiente.
 - El id de un mandato son 32 bytes aleatorios en base64url. Solo existe en la respuesta de quien lo emite.
 - Emitir es una función de `platform/identity` que recibe la sesión de origen y la app. Toma de la sesión la cuenta, el aparato, la cuenta del aparato y `identity`, sin que quien emite pueda cambiarlos. Rechaza una app que no recibe mandatos y una sesión que no vive. En la 1e solo la expone `@domus/platform/testing`.
 - Su vida es de 15 minutos por defecto, ajustable en las opciones de la plataforma, como las ventanas de confirmación. Desde el instante exacto `now >= expiresAt` ya no vale.
