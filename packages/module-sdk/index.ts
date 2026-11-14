@@ -21,7 +21,14 @@ export type {
 	TouchedRecord,
 	WriteOutcome,
 } from "./actions";
-export { type OwnedTable, type OwnedTableInfo, ownedTableOf, type Visibility } from "./db";
+export {
+	type AreaTableInfo,
+	areaTableOf,
+	type OwnedTable,
+	type OwnedTableInfo,
+	ownedTableOf,
+	type Visibility,
+} from "./db";
 export {
 	type AreaDefinition,
 	areaIds,

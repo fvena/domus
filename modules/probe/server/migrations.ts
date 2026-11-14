@@ -31,4 +31,13 @@ export const migrations: readonly ModuleMigration[] = [
 			"\nALTER TABLE `__new_probe_notes` RENAME TO `probe_notes`;",
 		],
 	},
+	{
+		tag: "0002_yellow_zodiak",
+		position: 2,
+		hash: "e4925f475d51e2a81b5102e7f26034136d86f5358564fa2ad49f82b1d3f98b70",
+		statements: [
+			"CREATE TABLE `probe_labels` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`name` text NOT NULL\n);\n",
+			"\nCREATE TABLE `probe_scraps` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`body` text NOT NULL\n);\n",
+		],
+	},
 ];

@@ -1,10 +1,11 @@
-// The tables of probe, the test module of phase 1 (ADR 0021, ADR 0023). Every table has an owner: notes and
-// comments, with a foreign key between them, in its own area, and one table in each of its other areas.
-import { integer, moduleTables, text } from "@domus/module-sdk/db";
+// The tables of probe, the test module of phase 1 (ADR 0021, ADR 0023, ADR 0029): notes and comments, owned and
+// with a foreign key between them, in its own area, and one owned table in each of its other areas; the household's
+// labels, an area table in its own area; and scraps, a table the platform does not know.
+import { id, integer, moduleTables, text } from "@domus/module-sdk/db";
 
 import { areas } from "./areas";
 
-const { ownedTable } = moduleTables("probe", areas);
+const { areaTable, ownedTable, table } = moduleTables("probe", areas);
 
 /** probe_notes */
 export const notes = ownedTable(
@@ -45,3 +46,16 @@ export const secret = ownedTable(
 	{ type: "secret", area: "probe.secret" },
 	{ body: text().notNull() },
 );
+
+/** probe_labels: the household's, without an owner, seen whole by whoever reads probe. */
+export const labels = areaTable(
+	"labels",
+	{ type: "label", area: "probe" },
+	{ name: text().notNull() },
+);
+
+/**
+ * probe_scraps: a table without an owner that does not declare itself an area table, so its changes invalidate
+ * nothing and no notice is about them. No action writes it: the tests do, from a handler they wrap.
+ */
+export const scraps = table("scraps", { id: id(), body: text().notNull() });

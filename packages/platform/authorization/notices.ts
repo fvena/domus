@@ -3,12 +3,19 @@
 // facts from the platform, gathered then.
 import { type AccessView, grantOf, reaches } from "./index";
 
-/** A record of an owned table as a notice finds it: its area, its owner and its visibility. */
-export interface NoticeRecord {
+/** A record of an area table as a notice finds it: only its area. */
+export interface AreaNoticeRecord {
 	readonly area: string;
+}
+
+/** A record of an owned table as a notice finds it: its area, its owner and its visibility. */
+export interface OwnedNoticeRecord extends AreaNoticeRecord {
 	readonly owner: string;
 	readonly visibility: string;
 }
+
+/** A record as a notice finds it, of an owned table or of an area table. */
+export type NoticeRecord = OwnedNoticeRecord | AreaNoticeRecord;
 
 /**
  * What becomes of a notice: it goes, or why it does not. `not-member`: its recipient is not a person (the device
@@ -18,7 +25,7 @@ export type NoticeDecision = "deliver" | "not-member" | "record-gone" | "not-vis
 
 /**
  * Whether a notice about `record`, `null` once it no longer exists, goes to `to`: a person with `read` in the
- * record's area, who owns it or for whom it is public.
+ * record's area who, in an owned table, owns it or for whom it is public.
  */
 export function noticeDecision(
 	view: AccessView,
@@ -29,6 +36,7 @@ export function noticeDecision(
 	if (role !== "admin" && role !== "member") return "not-member";
 	if (record === null) return "record-gone";
 	if (!reaches(grantOf(view, to, record.area), "read")) return "not-visible";
+	if (!("owner" in record)) return "deliver";
 	return record.owner === to || record.visibility === "public" ? "deliver" : "not-visible";
 }
 

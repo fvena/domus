@@ -1,6 +1,6 @@
 // Whether a notice may go to its recipient (ADR 0029, «A quién va un aviso»): a person, and a record that still
-// exists and that the person sees now, with the permissions in force when it is delivered. Pure, over the same view
-// as `decide`.
+// exists and that the person sees now, with the permissions in force when it is delivered: for an area table's
+// record, `read` in its area is enough. Pure, over the same view as `decide`.
 import { describe, expect, it } from "vitest";
 
 import type { AccessView, AreaPolicy, Grant } from ".";
@@ -66,6 +66,22 @@ describe("a notice", () => {
 		expect(noticeDecision(view(), "luis", { ...luisPrivate, area: "gone" })).toBe(
 			"not-visible",
 		);
+	});
+});
+
+describe("a notice about an area table's record", () => {
+	const label = { area: "jot" } as const;
+
+	it("goes to any person with read in its area, who owns nothing there", () => {
+		expect(noticeDecision(view(), "luis", label)).toBe("deliver");
+		expect(noticeDecision(view(), "ana", label)).toBe("deliver");
+		expect(noticeDecision(view("read"), "luis", label)).toBe("deliver");
+	});
+
+	it("does not go to a person without read in its area, nor to one that is not a person", () => {
+		expect(noticeDecision(view("none"), "luis", label)).toBe("not-visible");
+		expect(noticeDecision(view(), "luis", { area: "gone" })).toBe("not-visible");
+		expect(noticeDecision(view(), "screen", label)).toBe("not-member");
 	});
 });
 

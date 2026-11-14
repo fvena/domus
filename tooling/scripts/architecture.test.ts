@@ -148,6 +148,7 @@ describe("module-sdk", () => {
 		expect(await names("index.ts")).toEqual([
 			"PLATFORM_ID",
 			"areaIds",
+			"areaTableOf",
 			"checkModules",
 			"defineModule",
 			"ownedTableOf",
@@ -161,6 +162,7 @@ describe("module-sdk", () => {
 		// Table declarations and query helpers; no drizzle() and no connection.
 		expect(await names("db/index.ts")).toEqual([
 			"and",
+			"areaTableOf",
 			"asc",
 			"blob",
 			"check",

@@ -8,22 +8,29 @@ export interface RecordState {
 	readonly visibility: string | null;
 }
 
-/**
- * A record a committed write changed: who it is, its area, and its first state before the write and its last
- * after it, `null` where it did not exist. The states in between never count.
- */
-export interface RecordChange {
+/** A record a committed write changed, of an area table: who it is and its area, with no owner nor visibility. */
+export interface AreaRecordChange {
 	readonly module: string;
 	readonly type: string;
 	readonly id: number;
 	readonly area: string;
+}
+
+/**
+ * A record of an owned table a committed write changed: who it is, its area, and its first state before the write
+ * and its last after it, `null` where it did not exist. The states in between never count.
+ */
+export interface OwnedRecordChange extends AreaRecordChange {
 	readonly before: RecordState | null;
 	readonly after: RecordState | null;
 }
 
+/** A record a committed write changed: of an owned table, with its states, or of an area table, without them. */
+export type RecordChange = OwnedRecordChange | AreaRecordChange;
+
 /**
- * Whether the change reaches a channel of `account`: it has `read` in the record's area now, and the record was
- * its own or public before the write, or is after it.
+ * Whether the change reaches a channel of `account`: it has `read` in the record's area now and, in an owned
+ * table, the record was its own or public before the write, or is after it.
  */
 export function invalidationReaches(
 	view: AccessView,
@@ -31,6 +38,7 @@ export function invalidationReaches(
 	change: RecordChange,
 ): boolean {
 	if (!reaches(grantOf(view, account, change.area), "read")) return false;
+	if (!("before" in change)) return true;
 	return seenBy(change.before, account) || seenBy(change.after, account);
 }
 

@@ -15,7 +15,7 @@ import {
 import { afterEach, describe, expect, it, type MockInstance, vi } from "vitest";
 
 import probe from "../server";
-import { notes as notesTable } from "../server/schema";
+import { notes as notesTable, scraps } from "../server/schema";
 
 type Probe = TestPlatform<readonly [typeof probe]>;
 
@@ -37,6 +37,14 @@ function boardNotes(...ids: number[]) {
 	return {
 		event: "invalidate",
 		data: { records: ids.map((id) => ({ module: "probe", type: "board", id })) },
+	};
+}
+
+/** An invalidation of probe's labels, an area table. */
+function labels(...ids: number[]) {
+	return {
+		event: "invalidate",
+		data: { records: ids.map((id) => ({ module: "probe", type: "label", id })) },
 	};
 }
 
@@ -412,3 +420,93 @@ describe("the live channel", () => {
 		expect(await expired.json()).toMatchObject({ code: "UNAUTHORIZED" });
 	});
 });
+
+describe("an area table on the live channel", () => {
+	it("tells every session with read in its area of a new label, and none without it", async () => {
+		await using test = await household();
+		test.prepare.account({ id: "marta", role: "member" });
+		await test.prepare.password("marta", PASSWORD);
+		test.prepare.grant("marta", "probe", "none");
+		const { ana, luis } = await bothListening(test);
+		const screen = await listening(test, "device@domus.invalid");
+		const marta = await listening(test, "marta@domus.test");
+
+		test.invoke(ana.context, "probe.addLabel", { name: "urgente" }, key());
+		beat(test);
+
+		expect(await untilBeat(ana.channel)).toEqual([labels(1)]);
+		expect(await untilBeat(luis.channel)).toEqual([labels(1)]);
+		expect(await untilBeat(screen.channel)).toEqual([labels(1)]);
+		expect(await untilBeat(marta.channel)).toEqual([]);
+	});
+
+	it("tells of the label an undo deletes, and of the one a deletion takes", async () => {
+		await using test = await household();
+		const { ana, luis } = await bothListening(test);
+		const added = test.invoke(ana.context, "probe.addLabel", { name: "urgente" }, key());
+		test.invoke(ana.context, "probe.addLabel", { name: "casa" }, key());
+		beat(test);
+		expect(await untilBeat(luis.channel)).toEqual([labels(1), labels(2)]);
+		expect(await untilBeat(ana.channel)).toEqual([labels(1), labels(2)]);
+
+		test.undo(ana.context, added.entry, key());
+		test.invoke(luis.context, "probe.deleteLabel", { id: 2 }, key());
+		beat(test);
+
+		expect(await untilBeat(luis.channel)).toEqual([labels(1), labels(2)]);
+		expect(await untilBeat(ana.channel)).toEqual([labels(1), labels(2)]);
+		expect(test.invoke(ana.context, "probe.listLabels", undefined)).toEqual([]);
+	});
+
+	it("tells nobody of a change in a table without an owner that does not declare itself an area table", async () => {
+		alsoTouches("addLabel", ({ db }) => {
+			const scrap = db
+				.insert(scraps)
+				.values({ body: "borrador" })
+				.returning({ id: scraps.id })
+				.get();
+			return [{ type: "scrap", id: scrap.id }];
+		});
+		await using test = await household();
+		const { ana, luis } = await bothListening(test);
+
+		test.invoke(ana.context, "probe.addLabel", { name: "urgente" }, key());
+		beat(test);
+
+		expect(await untilBeat(ana.channel)).toEqual([labels(1)]);
+		expect(await untilBeat(luis.channel)).toEqual([labels(1)]);
+	});
+
+	it("rolls back as internal a write that declares a label by an id that is not an integer", async () => {
+		alsoTouches("addLabel", () => [{ type: "label", id: "1" }]);
+		await using test = await household();
+		const { ana } = await bothListening(test);
+
+		expect(() =>
+			test.invoke(ana.context, "probe.addLabel", { name: "urgente" }, key()),
+		).toThrow(expect.objectContaining({ code: "INTERNAL_SERVER_ERROR" }));
+		beat(test);
+
+		expect(await untilBeat(ana.channel)).toEqual([]);
+		expect(test.invoke(ana.context, "probe.listLabels", undefined)).toEqual([]);
+	});
+});
+
+/**
+ * Wraps probe's handler `name`, before the platform registers it: inside the same write, once the handler did its
+ * work, `more` may write and adds what it returns to the touched records the handler declared.
+ */
+function alsoTouches(name: string, more: (context: HandlerContext) => readonly unknown[]): void {
+	const actions = probe.actions as unknown as Record<
+		string,
+		(context: HandlerContext) => { readonly touched: readonly unknown[] }
+	>;
+	const original = actions[name];
+	if (!original) throw new Error(`probe has no ${name}`);
+	spies.push(
+		vi.spyOn(actions, name).mockImplementation((context) => {
+			const outcome = original(context);
+			return { ...outcome, touched: [...outcome.touched, ...more(context)] };
+		}),
+	);
+}
