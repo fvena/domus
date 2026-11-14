@@ -73,3 +73,8 @@ The five default triage roles, each label equal to its name, as a `Status:` line
 ### Domain docs
 
 Single-context: `GLOSSARY.md` at the root and ADRs in `docs/architecture/adr/`. See `docs/agents/domain.md`.
+
+<!-- trail:start -->
+
+Past sessions' learnings live in `.trail/learnings/` and a code graph in `.trail/cache/`: the `trail` skill says how to use them, `.trail/README.md` what to commit.
+<!-- trail:end -->

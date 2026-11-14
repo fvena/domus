@@ -1,6 +1,6 @@
 {
 	"$schema": "./node_modules/oxlint/configuration_schema.json",
-	"ignorePatterns": ["node_modules", "dist", "tooling/scripts/fixtures"],
+	"ignorePatterns": ["node_modules", "dist", "tooling/scripts/fixtures", ".trail"],
 	"options": {
 		"typeAware": true,
 		"typeCheck": true

@@ -2,7 +2,8 @@
 	"$schema": "./node_modules/oxfmt/configuration_schema.json",
 	"ignorePatterns": [
 		"modules/*/server/migrations/",
-		"tooling/scripts/fixtures/migrations/*/meta/"
+		"tooling/scripts/fixtures/migrations/*/meta/",
+		".trail/"
 	],
 	"arrowParens": "always",
 	"printWidth": 100,
