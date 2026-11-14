@@ -22,6 +22,13 @@ export {
 } from "./platform";
 export { requireRestic } from "./restic";
 export {
+	type ChannelItem,
+	type EventReader,
+	type OpenChannel,
+	openChannel,
+	readEvents,
+} from "./sse";
+export {
 	type ChildTask,
 	contentPath,
 	fakeNode,

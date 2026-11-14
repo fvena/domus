@@ -9,6 +9,7 @@ import type Database from "better-sqlite3";
 import { getTableName } from "drizzle-orm";
 
 import type { AreaPolicy } from "../authorization";
+import type { RecordChange } from "../authorization/invalidations";
 import type { RecordArea, RowTransition } from "../authorization/writes";
 
 /** An owned table as the capture knows it: its module, its record type and its area. */
@@ -137,6 +138,46 @@ export function installCapture(
 			return { value, transitions };
 		},
 	};
+}
+
+/**
+ * What a write remembers of the records it changed (ADR 0029): per record, in the order first seen, its area, its
+ * first state before the write and its last after it. The states in between never count, so a note made public
+ * and private again in one write was never public.
+ */
+export function changesOf(transitions: readonly CapturedTransition[]): RecordChange[] {
+	const changes = new Map<string, RecordChange>();
+	for (const transition of transitions) {
+		const { table, operation } = transition;
+		const id = operation === "insert" ? transition.newId : transition.oldId;
+		if (id === null) continue;
+		const after =
+			operation === "delete"
+				? null
+				: { owner: transition.newOwner, visibility: transition.newVisibility };
+		const key = JSON.stringify([table.module, table.type, id]);
+		const first = changes.get(key);
+		changes.set(
+			key,
+			first === undefined
+				? {
+						module: table.module,
+						type: table.type,
+						id,
+						area: table.area.id,
+						before:
+							operation === "insert"
+								? null
+								: {
+										owner: transition.oldOwner,
+										visibility: transition.oldVisibility,
+									},
+						after,
+					}
+				: { ...first, after },
+		);
+	}
+	return [...changes.values()];
 }
 
 function quoted(identifier: string): string {
