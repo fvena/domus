@@ -73,6 +73,7 @@ import {
 } from "@domus/platform/testing";
 
 import { createTestBrowser, type TestBrowser } from "./browser";
+import type { FakePushService } from "./push";
 
 type AnyModule = ModuleDefinition;
 
@@ -197,6 +198,16 @@ export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	 * writes. Unset: production's 100.
 	 */
 	readonly channelQueue?: number;
+	/**
+	 * The fake push service of the notices: the hosts the platform admits and the `fetch` its deliveries use. Unset:
+	 * production's hosts, and a delivery that would send fails, so no test reaches a real service.
+	 */
+	readonly push?: FakePushService;
+	/**
+	 * The origins the platform is served from, whose first `https` one is the subject of VAPID: {@link TEST_ORIGIN}
+	 * and {@link TEST_PUSH_SUBJECT} unless given.
+	 */
+	readonly origins?: readonly string[];
 }
 
 /** The backups of a test platform. */
@@ -449,6 +460,15 @@ export const TEST_START = Date.UTC(2026, 0, 1);
 /** The origin the door of a test platform answers on. */
 export const TEST_ORIGIN = "http://domus.test";
 
+/** The `https` origin a test platform signs its VAPID tokens with, besides {@link TEST_ORIGIN}. */
+export const TEST_PUSH_SUBJECT = "https://domus.test";
+
+/** The `fetch` of a test platform without a push service: a delivery that would send fails. */
+const noPushService = (() =>
+	Promise.reject(
+		new Error("this test platform has no push service: give it the option push"),
+	)) as typeof fetch;
+
 /** The cookie of Better Auth that carries a browser's session over plain HTTP. */
 const SESSION_COOKIE = "better-auth.session_token";
 
@@ -472,6 +492,8 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 	freeSpace,
 	diskFull,
 	channelQueue,
+	push,
+	origins = [TEST_ORIGIN, TEST_PUSH_SUBJECT],
 }: TestPlatformOptions<TModules>): TestPlatform<TModules> {
 	let tempDir: string | undefined;
 	let databaseFile = file ?? ":memory:";
@@ -514,6 +536,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 				retention,
 				confirmation,
 				filesDirectory,
+				origins,
 				...(backups === undefined
 					? {}
 					: {
@@ -534,6 +557,8 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 				...(freeSpace === undefined ? {} : { freeSpace }),
 				...(diskFull === undefined ? {} : { diskFull }),
 				...(channelQueue === undefined ? {} : { channelQueue }),
+				...(push === undefined ? {} : { pushServices: push.hosts }),
+				fetch: push?.fetch ?? noPushService,
 			},
 		);
 	} catch (error) {

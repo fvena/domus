@@ -99,6 +99,13 @@
 			"when": 1794664738341,
 			"tag": "0013_lyrical_gideon",
 			"breakpoints": true
+		},
+		{
+			"idx": 14,
+			"version": "6",
+			"when": 1794666776811,
+			"tag": "0014_far_shockwave",
+			"breakpoints": true
 		}
 	]
 }

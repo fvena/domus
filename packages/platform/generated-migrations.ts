@@ -155,4 +155,13 @@ export const generatedMigrations: readonly ModuleMigration[] = [
 			"\nALTER TABLE `platform_session` ADD `device_entry` text;",
 		],
 	},
+	{
+		tag: "0014_far_shockwave",
+		position: 15,
+		hash: "ead08457369507da39529472a1b7b1ee27bf58af85ebb34d051138be883b209a",
+		statements: [
+			"CREATE TABLE `platform_deliveries` (\n\t`job` integer PRIMARY KEY NOT NULL,\n\t`notice` integer NOT NULL,\n\t`subscription` text NOT NULL,\n\t`deadline` integer NOT NULL,\n\tFOREIGN KEY (`job`) REFERENCES `platform_jobs`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`notice`) REFERENCES `platform_jobs`(`id`) ON UPDATE no action ON DELETE cascade\n);\n",
+			"\nCREATE UNIQUE INDEX `platform_deliveries_notice_subscription` ON `platform_deliveries` (`notice`,`subscription`);",
+		],
+	},
 ];

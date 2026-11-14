@@ -75,6 +75,8 @@ export interface BackgroundOptions {
 	readonly sweeps?: readonly CleanupSweep[];
 	/** Tasks a test declares besides the platform's own. Only the testing entry passes them. */
 	readonly extraTasks?: readonly ScheduledTask[];
+	/** The platform's own job kinds besides its tasks', by name, such as the notices' (ADR 0029). */
+	readonly kinds?: Readonly<Record<string, JobKind>>;
 	/** Synthetic job kinds a test declares, by name, to enqueue them itself. Only the testing entry passes them. */
 	readonly extraKinds?: Readonly<Record<string, JobKind>>;
 }
@@ -131,6 +133,7 @@ export function createBackground({
 	backups,
 	sweeps = [],
 	extraTasks = [],
+	kinds: ownKinds = {},
 	extraKinds = {},
 }: BackgroundOptions): Background {
 	// The platform's own tasks first, in their order: the cleanup and, when they are on, the backups'.
@@ -145,7 +148,7 @@ export function createBackground({
 		ids.add(id);
 	}
 	const kinds = new Map<string, JobKind>(tasks.map((task) => [task.id, task.job]));
-	for (const [kind, job] of Object.entries(extraKinds)) {
+	for (const [kind, job] of [...Object.entries(ownKinds), ...Object.entries(extraKinds)]) {
 		if (kinds.has(kind)) throw new Error(`the job kind "${kind}" is declared twice`);
 		kinds.set(kind, job);
 	}
@@ -219,8 +222,9 @@ export function createBackground({
 
 		outbox: {
 			enqueue(job) {
-				engine.enqueue({ ...job, runAt: clock() });
+				const id = engine.enqueue({ ...job, runAt: clock() });
 				wakeAfterChange();
+				return id;
 			},
 			cancel: (entry) => {
 				engine.cancelPendingOf(entry);

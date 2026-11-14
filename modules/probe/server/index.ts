@@ -43,6 +43,15 @@ function noteById(
 	return found ? withFiles(context.files, found) : null;
 }
 
+/** Leaves one notice about the note to each account of `accounts`. */
+function notifyAbout(
+	notify: ActionContext<unknown, typeof schema>["notify"],
+	accounts: readonly string[] | undefined,
+	id: number,
+): void {
+	for (const to of accounts ?? []) notify({ to, about: { type: "note", id } });
+}
+
 /** The records the account sees of a table with only a body, oldest first. */
 function entriesOf(
 	db: ModuleDatabase<typeof schema>,
@@ -97,12 +106,13 @@ export default defineModule({
 				.orderBy(asc(schema.notes.id), asc(schema.comments.id))
 				.all(),
 
-		addNote: ({ db, input, ownership }) => {
+		addNote: ({ db, input, ownership, notify }) => {
 			const added = db
 				.insert(schema.notes)
 				.values({ ...ownership(schema.notes), body: input.body })
 				.returning(note)
 				.get();
+			notifyAbout(notify, input.notify, added.id);
 			return {
 				result: added,
 				touched: [{ type: "note", id: added.id }],
@@ -110,13 +120,14 @@ export default defineModule({
 			};
 		},
 		editNote: (context) => {
-			const { db, input, errors, visible } = context;
+			const { db, input, errors, visible, notify } = context;
 			const before = findNote(context, input.id);
 			if (!before) throw errors.NOTE_NOT_FOUND();
 			db.update(schema.notes)
 				.set({ body: input.body })
 				.where(and(eq(schema.notes.id, input.id), visible(schema.notes)))
 				.run();
+			notifyAbout(notify, input.notify, before.id);
 			return {
 				result: { id: before.id, body: input.body },
 				touched: [{ type: "note", id: before.id }],

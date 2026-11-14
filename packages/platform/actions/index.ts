@@ -148,6 +148,12 @@ export interface Actions {
 	enqueueInWrite(job: WriteJob): void;
 }
 
+/**
+ * The kind of a notice's job (ADR 0029), which `ctx.notify` leaves in its write with the recipient and the record
+ * as its data, never text. Its work belongs to platform/notifications.
+ */
+export const NOTICE = "notice";
+
 /** A job a write leaves: its kind and its data. */
 export interface WriteJob {
 	readonly kind: string;
@@ -161,8 +167,8 @@ export interface OutboxJob extends WriteJob {
 
 /** Where writes leave their jobs and undos cancel them, in the caller's transaction (ADR 0029). */
 export interface Outbox {
-	/** Stores a job due now; it runs only once the transaction that holds it has ended. */
-	enqueue(job: OutboxJob): void;
+	/** Stores a job due now and returns its id; it runs only once the transaction that holds it has ended. */
+	enqueue(job: OutboxJob): number;
 	/** Cancels the jobs of `entry` still pending, with the reason `undone`; one already claimed goes on. */
 	cancel(entry: number): void;
 }
@@ -254,11 +260,21 @@ export function createActions({
 	for (const module of modules) {
 		const db = drizzle({ client: connection, schema: module.schema });
 		const ownedTables = ownedTablesOf(module, areas);
+		const recordTypes = new Set(
+			[...ownedTables.keys()].flatMap((table) => ownedTableOf(table)?.type ?? []),
+		);
 		for (const [name, contract] of Object.entries(module.contract ?? {})) {
 			const handler = module.actions?.[name];
 			if (!handler) continue;
 			const { meta, inputSchema, outputSchema, errorMap } = contract["~orpc"];
-			const parts: ModuleParts = { module: module.id, handler, db, errorMap, ownedTables };
+			const parts: ModuleParts = {
+				module: module.id,
+				handler,
+				db,
+				errorMap,
+				ownedTables,
+				recordTypes,
+			};
 			registry.set(`${module.id}.${name}`, {
 				module: module.id,
 				name,
@@ -301,13 +317,16 @@ export function createActions({
 		fingerprintOf: (operation) => guarded(() => fingerprintOf(operation)),
 		download: (call) => guarded(() => download(call)),
 		confirmDownload: (call) => guarded(() => answering.confirmDownload(call)),
-		enqueueInWrite(job) {
-			if (!leaving) throw new Error("a job is left only inside a write's handler");
-			if (job.payload === undefined || !isLosslessJson(job.payload))
-				throw new Error("the data of a job must survive JSON");
-			leaving.push(job);
-		},
+		enqueueInWrite: leave,
 	};
+
+	/** Leaves a job with its data in the write whose handler is running. */
+	function leave(job: WriteJob): void {
+		if (!leaving) throw new Error("a job is left only inside a write's handler");
+		if (job.payload === undefined || !isLosslessJson(job.payload))
+			throw new Error("the data of a job must survive JSON");
+		leaving.push(job);
+	}
 
 	function download({ context, action, input, file, proof }: DownloadCall): Download {
 		if (!isVerified(context)) throw internalError();
@@ -480,6 +499,18 @@ export function createActions({
 				ownership: (table) =>
 					newOwnership(actor.account, areaOf(table).policy.defaultVisibility),
 				files,
+				// A mistake of the module, a read's or a type of no owned table of its own, rolls the write back.
+				notify: ({ to, about }) => {
+					if (!write) throw new Error("only a write leaves a notice");
+					if (!parts.recordTypes.has(about.type))
+						throw new Error(
+							`"${about.type}" is no record type of an owned table of the module`,
+						);
+					leave({
+						kind: NOTICE,
+						payload: { to, module: parts.module, type: about.type, id: about.id },
+					});
+				},
 			});
 		} catch (error) {
 			if (error instanceof HandlerForbidden || error instanceof FilesRefusal) throw error;
@@ -964,6 +995,8 @@ interface ModuleParts {
 	readonly errorMap: ErrorMap;
 	/** The owned tables of its module, with each one's area. */
 	readonly ownedTables: ReadonlyMap<OwnedTable, RecordArea>;
+	/** The record types of those tables: what a notice may be about. */
+	readonly recordTypes: ReadonlySet<string>;
 }
 
 /** The owned tables of a module, which `checkModules` has accepted, each with its area. */

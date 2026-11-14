@@ -1,4 +1,6 @@
-// Notices (ADR 0029): the subscriptions of the devices and the VAPID keys. A subscription is not an action: it goes
+import type { ModuleDefinition } from "@domus/module-sdk";
+// Notices (ADR 0029): the subscriptions of the devices, the VAPID keys, and the job kinds of the notice and its
+// delivery (./notices.ts), which the background runs. A subscription is not an action: it goes
 // through a session route of its own, without the action log, undo or an idempotency key, because its endpoint is
 // closer to a credential of the device than to data of the house. Its session and device come from the verified
 // context, and whether the account may subscribe is decided in platform/authorization.
@@ -6,12 +8,16 @@ import { ORPCError } from "@orpc/server";
 import type Database from "better-sqlite3";
 import { z } from "zod";
 
-import type { Clock } from "../actions";
+import type { Clock, OutboxJob } from "../actions";
 import { type AccessView, maySubscribe, type VerifiedContext } from "../authorization";
+import type { JobKind } from "../background";
+import type { Interleave } from "../files";
 import { randomId } from "../identity/accounts";
 import { sessionEnabledWhere, sessionLives } from "../identity/sessions";
 import { endpointAllowed } from "./endpoint";
-import { ensurePushKeys } from "./keys";
+import { ensurePushKeys, vapidSubject } from "./keys";
+import { noticeJobs } from "./notices";
+import { recordFacts } from "./records";
 
 export { endpointAllowed, PUSH_SERVICES } from "./endpoint";
 export { vapidSubject } from "./keys";
@@ -43,6 +49,8 @@ export interface Notifications {
 	 * the earlier one stopped being enabled when the session entered.
 	 */
 	entered(session: string): void;
+	/** The job kinds of the notice and its delivery, for the background to run. */
+	readonly jobs: Readonly<Record<string, JobKind>>;
 }
 
 export interface NotificationsOptions {
@@ -51,6 +59,15 @@ export interface NotificationsOptions {
 	readonly view: AccessView;
 	/** The hosts of the push services an endpoint may be of: production's unless a test composes its own. */
 	readonly pushServices: readonly string[];
+	/** The modules, whose owned records a notice may be about. */
+	readonly modules: readonly ModuleDefinition[];
+	/** The origins the app is served from: the first `https` one is the subject of VAPID. */
+	readonly origins: readonly string[];
+	/** How a delivery reaches the push service. */
+	readonly fetch: typeof fetch;
+	/** Leaves a delivery's job in the notice's transaction and returns its id: the background's outbox. */
+	readonly enqueue: (job: OutboxJob) => number;
+	readonly interleave?: Interleave;
 }
 
 /** Creates the VAPID keys when there are none, then serves the subscriptions. */
@@ -59,8 +76,14 @@ export function createNotifications({
 	clock,
 	view,
 	pushServices,
+	modules,
+	origins,
+	fetch,
+	enqueue,
+	interleave,
 }: NotificationsOptions): Notifications {
-	const { publicKey } = ensurePushKeys(connection, clock());
+	const keys = ensurePushKeys(connection, clock());
+	const { publicKey } = keys;
 	const lives = sessionLives(connection);
 	const enabled = connection.prepare<[string], { enabled: number }>(
 		`SELECT ${sessionEnabledWhere("?")} AS enabled`,
@@ -139,5 +162,17 @@ export function createNotifications({
 		entered: (session) => {
 			removeOthers.run({ session });
 		},
+		jobs: noticeJobs({
+			connection,
+			clock,
+			view,
+			records: recordFacts(connection, modules),
+			keys,
+			subject: vapidSubject(origins),
+			pushServices,
+			fetch,
+			enqueue,
+			...(interleave === undefined ? {} : { interleave }),
+		}),
 	};
 }

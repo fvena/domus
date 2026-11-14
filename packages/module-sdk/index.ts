@@ -16,6 +16,7 @@ export type {
 	ModuleFiles,
 	ModuleSchema,
 	NewOwnership,
+	Notice,
 	RecordOf,
 	TouchedRecord,
 	WriteOutcome,

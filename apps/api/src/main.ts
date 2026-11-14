@@ -11,6 +11,8 @@ const config = readConfig();
 const platform = createPlatform({
 	databaseFile: config.databaseFile,
 	modules,
+	// The first https one signs the notices (ADR 0029).
+	origins: config.auth.origins,
 	...(config.backups === undefined ? {} : { backups: config.backups }),
 });
 console.log(`database at ${config.databaseFile}: ${platform.appliedMigrations} migrations applied`);

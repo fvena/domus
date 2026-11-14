@@ -76,6 +76,11 @@ export interface PlatformOptions {
 	 * Unset, `files` in the folder of the database; in memory there is none, and an upload fails.
 	 */
 	readonly filesDirectory?: string;
+	/**
+	 * The origins the app is served from (`DOMUS_ORIGINS`), whose first `https` one is the subject of VAPID (ADR
+	 * 0029). Without one, no notice goes out: each delivery fails with `PUSH_NOT_CONFIGURED`.
+	 */
+	readonly origins?: readonly string[];
 }
 
 /** The retention of the action log's content unless one is given: 30 days. */
@@ -137,6 +142,8 @@ export interface PlatformRuntime {
 	readonly pushServices?: readonly string[];
 	/** Only from the testing entry: the most events a live channel holds unwritten, lower than production's. */
 	readonly channelQueue?: number;
+	/** Only from the testing entry: how the deliveries reach the push service, the global `fetch` unless given. */
+	readonly fetch?: typeof fetch;
 }
 
 const IN_MEMORY = ":memory:";
@@ -175,6 +182,7 @@ export function openPlatform(
 		confirmation = {},
 		backups: backupConfig,
 		filesDirectory,
+		origins = [],
 	}: PlatformOptions,
 	{
 		clock,
@@ -189,6 +197,7 @@ export function openPlatform(
 		diskFull,
 		pushServices = PUSH_SERVICES,
 		channelQueue,
+		fetch = globalThis.fetch,
 	}: PlatformRuntime,
 ): Platform {
 	if (databaseFile !== IN_MEMORY && !isAbsolute(databaseFile)) {
@@ -245,7 +254,18 @@ export function openPlatform(
 		capture = installCapture(db, modules, areas);
 		view = accessView(db, areas);
 		// The VAPID keys are created the first time the platform opens.
-		notifications = createNotifications({ connection: db, clock, view, pushServices });
+		notifications = createNotifications({
+			connection: db,
+			clock,
+			view,
+			pushServices,
+			modules,
+			origins,
+			fetch,
+			// The background exists before any job runs, and a notice's job is what enqueues.
+			enqueue: (job) => background.outbox.enqueue(job),
+			...(interleave === undefined ? {} : { interleave }),
+		});
 		events = createEvents({
 			connection: db,
 			view,
@@ -292,6 +312,7 @@ export function openPlatform(
 							...(node === undefined ? {} : { node }),
 						}),
 					}),
+			kinds: notifications.jobs,
 			...(tasks === undefined ? {} : { extraTasks: tasks }),
 			...(jobs === undefined ? {} : { extraKinds: jobs }),
 		});

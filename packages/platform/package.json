@@ -21,6 +21,7 @@
 		"better-sqlite3": "catalog:",
 		"drizzle-orm": "catalog:",
 		"hono": "catalog:",
+		"web-push": "catalog:",
 		"zod": "catalog:"
 	},
 	"devDependencies": {
@@ -29,6 +30,7 @@
 		"@hono/node-server": "catalog:",
 		"@types/better-sqlite3": "catalog:",
 		"@types/node": "catalog:",
+		"@types/web-push": "catalog:",
 		"tsx": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:"

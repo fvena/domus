@@ -2,8 +2,10 @@
 // over IPC once it holds it, and waits; only SIGKILL or the end of the test ends it. Run through tsx, never bundled.
 import { join } from "node:path";
 
+import type { ModuleDefinition } from "@domus/module-sdk";
+
 import type { InterleavePoint } from "../files";
-import type { Platform } from "../platform";
+import type { Platform, PlatformRuntime } from "../platform";
 import type { ChildMessage, ChildTask } from "./children";
 
 /**
@@ -25,27 +27,37 @@ async function hold(task: ChildTask): Promise<void> {
 		await restoreUntil(task);
 	} else if (task.hold === "publish") {
 		await publishUntil(task);
+	} else if (task.hold === "distribute") {
+		await distributeUntil(task);
 	} else {
 		await deleteUntil(task);
 	}
 }
 
 /**
- * Opens the platform with an interleave that stops at `point` for good, and runs `work` on it: the work that
- * reaches the point waits on a promise that never settles, kept referenced. Settles once it got there; fails when
- * `work` ends or fails first.
+ * Opens the platform, with `modules` and the runtime's `extra`, with an interleave that stops at `point` for good,
+ * and runs `work` on it: the work that reaches the point waits on a promise that never settles, kept referenced.
+ * Settles once it got there; fails when `work` ends or fails first.
  */
 async function openUntil(
 	point: InterleavePoint,
 	dataDirectory: string,
 	clock: () => number,
 	work: (platform: Platform) => Promise<unknown>,
+	{
+		modules = [],
+		extra = {},
+	}: {
+		readonly modules?: readonly ModuleDefinition[];
+		readonly extra?: Partial<PlatformRuntime>;
+	} = {},
 ): Promise<void> {
 	const { openPlatform } = await import("../platform");
 	await new Promise<void>((reached, failed) => {
 		const platform = openPlatform(
-			{ databaseFile: join(dataDirectory, "domus.db"), modules: [] },
+			{ databaseFile: join(dataDirectory, "domus.db"), modules },
 			{
+				...extra,
 				clock,
 				// Room enough, whatever the machine has free: the test is about the cut.
 				freeSpace: () => Number.MAX_SAFE_INTEGER,
@@ -98,6 +110,35 @@ async function publishUntil(task: Extract<ChildTask, { hold: "publish" }>): Prom
 	);
 }
 
+/**
+ * Starts the background at the task's instant, with the task's modules, until a notice committed its deliveries and
+ * its end is not yet recorded.
+ */
+async function distributeUntil(task: Extract<ChildTask, { hold: "distribute" }>): Promise<void> {
+	const { backgroundOf } = await import("../platform");
+	const modules = await Promise.all(
+		task.modules.map(
+			async (url) => ((await import(url)) as { default: ModuleDefinition }).default,
+		),
+	);
+	await openUntil(
+		"distributed",
+		task.dataDirectory,
+		() => task.now,
+		async (platform) => {
+			platform.startBackground();
+			await backgroundOf(platform).settled();
+		},
+		{
+			modules,
+			// The cut comes before any delivery runs: one that would send is the child's error.
+			extra: {
+				fetch: (() => Promise.reject(new Error("a child sends no notice"))) as typeof fetch,
+			},
+		},
+	);
+}
+
 /** Runs the cleanup at the task's instant until it gets to its point of deleting a content. */
 async function deleteUntil(task: Extract<ChildTask, { hold: "delete" }>): Promise<void> {
 	const { connectionOf, filesOf } = await import("../platform");
@@ -110,6 +151,7 @@ async function deleteUntil(task: Extract<ChildTask, { hold: "delete" }>): Promis
 			const sweeps = filesOf(platform)?.sweeps ?? [];
 			const { job } = cleanupTask(connectionOf(platform), () => task.now, { sweeps });
 			await job.run({
+				id: 0,
 				signal: new AbortController().signal,
 				startedAt: task.now,
 				payload: undefined,

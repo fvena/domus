@@ -27,6 +27,8 @@ Writes (ADR 0023): the write capture checks every row a write changes in an owne
 
 Files (ADR 0028): a module reaches files only through `ctx.files`, on records of its own owned tables, never a path or a route; its tables keep no file id, since the reference points at its owner record. A read marks each file of its output with `fileRef()`, the only files a download may send. Attaching, detaching or reattaching marks the record touched, as changing a column does, so a write that only changes files may return `touched: []`. Deleting a record releases its references in the same action, with `detach`, so the undo of that entry `reattach`es them.
 
+Notices (ADR 0029): a write tells a person about one of its records only with `ctx.notify({ to, about: { type, id } })`, a record of its own owned tables, never with text; the notice leaves only if the write commits, its undo stops it, and whether `to` is a person who sees the record is decided when it goes out. From a read, or about any other type, the write fails as internal.
+
 After changing `server/schema.ts`, run `pnpm db:generate`: it writes `server/migrations/` and `server/migrations.ts`. Commit both; never edit an applied migration.
 
 The module list of `apps/api` is written by `pnpm modules:generate` and kept in git; a test fails when it is stale, and CI regenerates both and expects no change. No runtime loading or installing. `testOnly: true` keeps a module out of that list: tests import it and pass it to `test-utils`. Only the image of the restore rehearsal adds them, built with `DOMUS_MODULES=rehearsal` (`pnpm modules:generate --rehearsal` inside the image, never committed).

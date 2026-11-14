@@ -175,6 +175,7 @@ Una suscripción la registra la app desde la sesión que el aparato tiene habili
 - No comprueba en el momento que `to` sea un miembro ni que vea el registro: eso lo decide la entrega, con lo vigente entonces. Un `to` que es la cuenta `device`, o que no existe, deja un aviso que termina omitido.
 - Deja un trabajo `notice` del carril corto con `{ to, module, type, id }` en `payload`, nunca texto.
 - Una escritura puede dejar varios avisos. Repetirla con la misma clave devuelve el acuse y no deja otros.
+- Decidido al implementar (05): `ctx.notify` está en el contexto de todo manejador, como `ctx.files`; llamarlo desde una lectura es el mismo error del módulo que un tipo desconocido, y la acción responde con un fallo interno. El tipo de trabajo se llama `notice` (`NOTICE` de `actions`).
 
 ### El aviso y su reparto (Q5, Q18, Q19)
 
@@ -186,6 +187,11 @@ Una suscripción la registra la app desde la sesión que el aparato tiene habili
     5. crea una entrega por cada suscripción habilitada de `to`, con la restricción única sobre aviso y suscripción, saltando las que ya existen; termina con `outcome` `distributed`.
 - Si `api` cae entre esta transacción y la marca de fin, la recuperación vuelve a correr el trabajo. Repetirlo no crea entregas que ya existen. Una suscripción que apareciera entre medias recibe la suya.
 - Un tipo o una tabla desconocidos en un `payload` guardado (por ejemplo, de un módulo que ya no está) dejan el aviso como fallo definitivo, sin entregas.
+- Decidido al implementar (05):
+    - el código de ese fallo es `UNKNOWN_RECORD`; un aviso sin la entrada de su escritura es también un fallo definitivo, que no debería ocurrir;
+    - la decisión pura es `noticeDecision(view, to, record)` de `authorization/notices.ts`, sobre `{ area, owner, visibility }` o `null`, y da `deliver`, `not-member`, `record-gone` o `not-visible`; la 07 le añade la variante de la tabla de área. Los hechos del registro los lee `notifications/records.ts`;
+    - la entrega se crea con el `outbox` del motor (`enqueue` devuelve ahora el id), con la misma `entry` del aviso; su trabajo no lleva `payload`: encuentra su fila de `platform_deliveries` por su propio id, que el motor pasa ahora en `JobContext.id`;
+    - las dos claves ajenas de `platform_deliveries` a `platform_jobs` son `ON DELETE CASCADE`, para que la limpieza pueda borrar los trabajos terminados.
 
 ### La entrega y el envío (Q9, Q19)
 
@@ -210,6 +216,12 @@ Una suscripción la registra la app desde la sesión que el aparato tiene habili
 
 - `Retry-After` admite segundos y fecha HTTP. Un valor inválido se ignora y queda la espera creciente.
 - Que una entrega falle no frena a las demás del mismo aviso.
+- Decidido al implementar (05):
+    - el orden de la comprobación es: la suscripción existe (`subscription-gone`), su sesión vive con el reloj de la plataforma (`session-ended`), es la habilitada (`not-enabled`), la decisión pura sobre el registro (`not-member`, `record-gone`, `not-visible`), el endpoint sigue admitido, y hay `subject`. Terminar una sesión, o entrar otra cuenta en el aparato, borra la suscripción, así que da `subscription-gone`; `session-ended` es la caducidad con la fila aún ahí, y `not-enabled`, una entrada en el aparato que falló después de escribir su `entry`;
+    - un endpoint que ya no está en la lista es un fallo definitivo, `PUSH_ENDPOINT_NOT_ALLOWED`, sin enviar; unas claves que `web-push` no puede usar para cifrar (la ruta solo exige textos no vacíos), un fallo definitivo, `PUSH_KEYS_INVALID`;
+    - la plataforma recibe los orígenes en `PlatformOptions.origins`, que `apps/api` llena con `DOMUS_ORIGINS`; sin ningún `https`, `PUSH_NOT_CONFIGURED`;
+    - `web-push` entra en la 3.6.7, con `@types/web-push`: la 4.0.0 tenía una semana, cambia a ESM y no trae tipos;
+    - mientras la 06 no clasifica las respuestas, cualquiera que no sea 2xx es un fallo pasajero `PushServiceError HTTP_<estado>`.
 
 ### Suscripciones (Q3, Q4, Q8)
 
@@ -292,12 +304,14 @@ Mismo formato que las rutas de archivos: el estado HTTP y, como cuerpo, el JSON 
     - Opción nueva, el tope de la cola del canal, para no tener que generar cien eventos.
     - Encolar un trabajo sintético en la escritura en curso, para la bandeja de salida sin avisos (tarea 03).
     - Las suscripciones se registran por su ruta, con `browser()`, como hará la app.
+    - Decidido al implementar (05): `fakePushService()` da `hosts` (que la prueba puede cambiar: la plataforma lee la misma lista cada vez), `requests` y `answer(responder)`, 201 por defecto, que la 06 usa para el resto de respuestas; `pushClient(name)` da un endpoint en `push.domus.test`, claves reales y `read(request)`, que descifra con su propio código, no con `web-push`; `vapidClaims(request, key)` comprueba la firma ES256 y da `aud`, `sub` y `exp`. Sin la opción `push`, el `fetch` de la plataforma de pruebas falla siempre, para que ninguna prueba llegue a un servicio real. La opción `origins` da los orígenes de la plataforma: `TEST_ORIGIN` y `TEST_PUSH_SUBJECT` (`https://domus.test`) por defecto.
 - **Costura 2: puntos nuevos de `interleave`**, en la misma función y el mismo tipo `InterleavePoint` de la 1d3:
     - `distributing`: el aviso reclamado, antes de su transacción de reparto. Deshacer frente al reparto, en los dos órdenes.
     - `distributed`: el reparto confirmado, antes de que el motor marque el fin. Un rechazo prueba el reintento sin una segunda tanda.
     - `delivering`: antes de la comprobación de cada envío. La prueba quita el permiso, borra la nota, vuelve privada la nota, deshabilita la suscripción, termina o hace caducar la sesión, o entra otra cuenta en el aparato, y comprueba que no sale nada.
     - `entering`: en `session.create.before`, después de escribir el `entry` del aparato y antes de devolver el control a Better Auth, sin ninguna transacción abierta. Dos entradas en el mismo aparato en los dos órdenes, una creación que falla, el registro de la suscripción y la entrega posterior.
 - **Costura 3: `startChild` con una variante nueva de `ChildTask`**, para un solo corte: el proceso muere con el reparto confirmado y antes de marcar el fin. Al reabrir la misma base, la recuperación vuelve a correr el aviso y no duplica entregas.
+    - Decidido al implementar (05): la variante es `{ hold: "distribute", dataDirectory, now, modules }`, con cada módulo como la URL del fichero cuya exportación por defecto es su definición, porque el hijo no puede importar un módulo; arranca el segundo plano y se para en `distributed`, con un `fetch` que nunca envía.
 - **Costura 4: `restoreBackup`**, como en la 1d2: tras restaurar no queda ninguna suscripción, las entregas y avisos pendientes de la copia quedan cancelados y no salen al arrancar, y las claves VAPID son las de la copia.
 - **Costura 5: pruebas internas de `platform`** para las funciones puras: validar el endpoint (cada host, mayúsculas, sufijos y prefijos parecidos, IP, puerto, usuario, esquema), clasificar cada respuesta del servicio, leer `Retry-After` (segundos, fecha, inválido, más allá del plazo), quedarse con el primer «antes» y el último «después», y las dos decisiones de `authorization`: a quién llega una invalidación y si se puede entregar un aviso.
 - **Con `probe` sobre la costura 1:**
