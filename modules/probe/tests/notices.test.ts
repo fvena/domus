@@ -631,6 +631,18 @@ describe("a delivery checked right before it sends", () => {
 			({ phone }) => phone.signOut(),
 		],
 		[
+			"the device unsubscribed",
+			"subscription-gone",
+			async ({ phone }) => {
+				const response = await phone.fetch(
+					new Request(new URL("/api/notifications/subscription", TEST_ORIGIN), {
+						method: "DELETE",
+					}),
+				);
+				expect(response.status).toBe(204);
+			},
+		],
+		[
 			"the session expired",
 			"session-ended",
 			({ test, phone }) => {
