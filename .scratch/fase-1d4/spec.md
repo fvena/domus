@@ -152,6 +152,7 @@ Una suscripción la registra la app desde la sesión que el aparato tiene habili
     - `outcome`: el resultado de un trabajo terminado bien que no es solo «hecho», como un aviso omitido y su motivo; nulo si no hace falta.
 - Cada tipo de trabajo con datos declara su esquema. El motor valida `payload` con él al reclamar; un `payload` que no lo cumple es un fallo definitivo con su código.
 - Un trabajo de la bandeja se inserta en la transacción de la escritura, después de su entrada del registro, así que lleva su `entry`. Despierta el motor solo después de confirmar, con el mismo mecanismo que ya usan los cambios de tareas.
+- Para probar la bandeja antes de que existan los avisos, `@domus/platform/testing` ofrece encolar un trabajo sintético en la transacción de la escritura en curso, desde un manejador de `probe` envuelto por la prueba. Ningún módulo ni `module-sdk` lo alcanza.
 - Deshacer una entrada cancela, en su misma transacción, los trabajos `pending` con esa `entry`, avisos y entregas incluidos. El estado pasa a `cancelled` con la razón `undone`. Reclamar y cancelar comprueban los dos `state = 'pending'`, así que solo gana uno.
 - Un error pasajero puede llevar el instante mínimo de su próximo intento. El motor programa el reintento en el mayor de ese instante y su espera creciente, sin cambiar el número máximo de intentos.
 
@@ -269,6 +270,7 @@ Mismo formato que las rutas de archivos: el estado HTTP y, como cuerpo, el JSON 
     - Opción nueva, `push`: un **servicio de push falso** con su lista de hosts admitidos y un `fetch` inyectado que anota cada petición y responde lo que la prueba pida: 201, 404, 410, 400, 413, 401, 403, 3xx, 429 y 503 con y sin `Retry-After`, 5xx, error de red, o una petición que no termina. Esta última respeta `AbortSignal`: queda pendiente hasta la cancelación y entonces rechaza. La prueba comprueba que llegó la señal, que la petición terminó y que el carril quedó libre.
     - La prueba genera **claves reales para cada suscripción**, descifra lo que llega y comprueba que solo lleva el destino. Comprueba también la firma VAPID con la clave pública de `GET /api/notifications/key` y las cabeceras `TTL` y `Urgency`.
     - Opción nueva, el tope de la cola del canal, para no tener que generar cien eventos.
+    - Encolar un trabajo sintético en la escritura en curso, para la bandeja de salida sin avisos (tarea 03).
     - Las suscripciones se registran por su ruta, con `browser()`, como hará la app.
 - **Costura 2: puntos nuevos de `interleave`**, en la misma función y el mismo tipo `InterleavePoint` de la 1d3:
     - `distributing`: el aviso reclamado, antes de su transacción de reparto. Deshacer frente al reparto, en los dos órdenes.
@@ -312,3 +314,20 @@ Mismo formato que las rutas de archivos: el estado HTTP y, como cuerpo, el JSON 
 - El ADR 0029, sus enlaces de vuelta, el README de arquitectura, el glosario y el plan ya están al día en la rama del grilling. Esta spec añade al glosario **Tabla de área**.
 - Algunas decisiones de detalle se toman en esta spec y no en el grilling: `areaTable` y su nombre; la columna `outcome` y sus valores; `platform_deliveries`, `platform_push_subscriptions` y `platform_push_keys`; el par `entry` y `deviceEntry` para la sesión habilitada; el tope de 100 eventos; las rutas y sus errores; el `subject` de VAPID desde `DOMUS_ORIGINS`; el plazo de 24 h como horizonte de `Retry-After`; y las acciones nuevas de `probe`. Si la implementación muestra que alguna no encaja, se corrige aquí antes de seguir.
 - La 1d3 sigue en curso hasta comprobar la copia del 2026-11-15 y la limpieza del 2026-11-16 en la Pi. La 1d4 puede empezar a construirse antes, pero no se cierra antes que ella.
+
+## Tareas
+
+| Tarea                                                         | Qué                                                      | Bloqueada por            |
+| ------------------------------------------------------------- | -------------------------------------------------------- | ------------------------ |
+| [01](issues/01-ajustes-previos.md)                            | Ajustes previos: la sesión caducada no vive y `no-store` | —                        |
+| [02](issues/02-el-canal-en-directo.md)                        | El canal en directo con las tablas con dueño             | 01                       |
+| [03](issues/03-la-bandeja-de-salida.md)                       | La bandeja de salida                                     | —                        |
+| [04](issues/04-suscripciones.md)                              | Suscripciones y la sesión habilitada del aparato         | 01                       |
+| [05](issues/05-repartir-y-enviar-avisos.md)                   | `ctx.notify`, repartir y enviar por Web Push             | 03, 04                   |
+| [06](issues/06-fallos-del-servicio-de-push.md)                | Fallos del servicio de push                              | 05                       |
+| [07](issues/07-tablas-de-area.md)                             | Tablas de área                                           | 02, 05                   |
+| [08](issues/08-fin-de-sesion-cambio-de-acceso-y-restaurar.md) | Fin de sesión, cambio de acceso y restaurar              | 02, 05                   |
+| [09](issues/09-el-aviso-de-prueba.md)                         | El aviso de prueba                                       | 05                       |
+| [10](issues/10-la-pi-y-el-cierre.md)                          | La Pi y el cierre de la 1d4                              | todas y el cierre de 1d3 |
+
+La 03, la 04 y la 05 generan migraciones de la plataforma: si van en ramas a la vez, la que llega después a `main` regenera la suya encima.
