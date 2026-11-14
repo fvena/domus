@@ -1,6 +1,6 @@
 # 07. Tablas de área
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 02, 05
 
 Spec: [`../spec.md`](../spec.md), secciones «Tabla de área», «Lo que la escritura recuerda» (los registros declarados de una tabla de área), «El reparto de invalidaciones» y «`probe`» (`labels`). ADR 0029; «Tabla de área» en el glosario.
@@ -16,9 +16,9 @@ Una lista común de la casa, sin dueño por registro, que ve quien tiene permiso
 
 ## Criterios de aceptación
 
-- [ ] `addLabel` llega como invalidación a las dos personas con `read` en `probe` y a ninguna sesión sin él.
-- [ ] Deshacer `addLabel` invalida la etiqueta borrada, y `deleteLabel` la que borra.
-- [ ] Un cambio en una `table` sin declarar no invalida nada, y un `about` de ella revierte la escritura.
-- [ ] `addLabel` con `notify` entrega el aviso a la otra persona hasta el servicio falso. Si la etiqueta se borra antes de repartir, el aviso queda `record-gone`; si el destinatario pierde `read` en el área, `not-visible`.
-- [ ] Dos tablas de un módulo con el mismo tipo hacen fallar `start`.
-- [ ] `pnpm check` pasa.
+- [x] `addLabel` llega como invalidación a las dos personas con `read` en `probe` y a ninguna sesión sin él.
+- [x] Deshacer `addLabel` invalida la etiqueta borrada, y `deleteLabel` la que borra.
+- [x] Un cambio en una `table` sin declarar no invalida nada, y un `about` de ella revierte la escritura.
+- [x] `addLabel` con `notify` entrega el aviso a la otra persona hasta el servicio falso. Si la etiqueta se borra antes de repartir, el aviso queda `record-gone`; si el destinatario pierde `read` en el área, `not-visible`.
+- [x] Dos tablas de un módulo con el mismo tipo hacen fallar `start`.
+- [x] `pnpm check` pasa.

@@ -7,7 +7,7 @@ import { getTableConfig, SQLiteTable } from "drizzle-orm/sqlite-core";
 import type { ModuleActions, ModuleSchema } from "./actions";
 import type { AreaDefinition } from "./areas";
 import type { ActionMeta, ModuleContract } from "./contracts";
-import { ownedTableOf } from "./db";
+import { areaTableOf, ownedTableOf } from "./db";
 
 export type { AreaDefinition } from "./areas";
 
@@ -83,7 +83,7 @@ export function checkModules(modules: readonly ModuleDefinition[]): void {
 		checkActions(module, actionNames);
 		checkAreas(module);
 		checkPermissions(module, areas);
-		checkOwnedTables(module);
+		checkTables(module);
 		if (seen.has(module.id)) throw new Error(`module "${module.id}": two modules have this id`);
 		seen.add(module.id);
 
@@ -139,16 +139,21 @@ function checkAreas(module: ModuleDefinition): void {
 }
 
 /**
- * Each owned table keys on its integer `id` alone, sits in an area of its module built with the policy the
- * module declares for it, and names its records with a type no other owned table of the module uses.
+ * Each owned table and each area table keys on its integer `id` alone, sits in an area of its module, and names
+ * its records with a type no other of those tables of the module uses. An owned table is built with the policy
+ * the module declares for its area; an area table is never in an `alwaysPrivate` one, since its records have no
+ * owner to be private to.
  */
-function checkOwnedTables(module: ModuleDefinition): void {
+function checkTables(module: ModuleDefinition): void {
 	const areas = new Set(areaIds(module));
 	const types = new Set<string>();
 	for (const value of Object.values(module.schema)) {
 		const owned = ownedTableOf(value);
-		if (!owned || !is(value, SQLiteTable)) continue;
+		const shared = areaTableOf(value);
+		const declared = owned ?? shared;
+		if (!declared || !is(value, SQLiteTable)) continue;
 		const config = getTableConfig(value);
+		const kind = owned ? "owned table" : "area table";
 		const key = config.columns.find((column) => column.name === "id");
 		if (
 			config.primaryKeys.length > 0 ||
@@ -157,22 +162,26 @@ function checkOwnedTables(module: ModuleDefinition): void {
 			config.columns.some((column) => column !== key && column.primary)
 		)
 			throw new Error(
-				`module "${module.id}": owned table "${config.name}" must have the integer "id" as its only key`,
+				`module "${module.id}": ${kind} "${config.name}" must have the integer "id" as its only key`,
 			);
-		if (!areas.has(owned.area))
+		if (!areas.has(declared.area))
 			throw new Error(
-				`module "${module.id}": owned table "${config.name}" is in area "${owned.area}", which the module does not declare`,
+				`module "${module.id}": ${kind} "${config.name}" is in area "${declared.area}", which the module does not declare`,
 			);
-		const alwaysPrivate = module.areas?.[owned.area]?.alwaysPrivate === true;
-		if (alwaysPrivate !== owned.alwaysPrivate)
+		const alwaysPrivate = module.areas?.[declared.area]?.alwaysPrivate === true;
+		if (owned && alwaysPrivate !== owned.alwaysPrivate)
 			throw new Error(
 				`module "${module.id}": owned table "${config.name}" was built for area "${owned.area}" ${owned.alwaysPrivate ? "always private" : "not always private"}, but the module declares it otherwise`,
 			);
-		if (types.has(owned.type))
+		if (shared && alwaysPrivate)
 			throw new Error(
-				`module "${module.id}": two owned tables have the record type "${owned.type}"`,
+				`module "${module.id}": area table "${config.name}" is in area "${shared.area}", which is always private`,
 			);
-		types.add(owned.type);
+		if (types.has(declared.type))
+			throw new Error(
+				`module "${module.id}": two tables have the record type "${declared.type}"`,
+			);
+		types.add(declared.type);
 	}
 }
 

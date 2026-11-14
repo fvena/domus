@@ -299,7 +299,7 @@ function alsoNotifies(action: "addNote" | "countNotes", about: { type: string; i
 	);
 }
 
-describe("a stored notice about a type that no owned table declares", () => {
+describe("a stored notice about a type that no owned or area table declares", () => {
 	it("fails for good with UNKNOWN_RECORD, without deliveries, as one of a module that is gone would", async () => {
 		const actions = probe.actions as Record<string, (context: never) => unknown>;
 		const original = actions.addNote;
@@ -338,7 +338,7 @@ describe("a stored notice about a type that no owned table declares", () => {
 });
 
 describe("leaving a notice", () => {
-	it("about a type that no owned table of the module has rolls the write back as internal", async () => {
+	it("about a type that no owned or area table of the module has rolls the write back as internal", async () => {
 		alsoNotifies("addNote", { type: "shopping", id: 1 });
 		const { test, rocio } = await household();
 		await using _ = test;
@@ -761,5 +761,120 @@ describe("a delivery that cannot be signed or encrypted", () => {
 			}),
 		]);
 		expect(push.requests).toEqual([]);
+	});
+});
+
+/** Rocío's label of the household, which notifies `to`: its id. */
+function label(test: Probe, rocio: VerifiedContext, to: readonly string[]): number {
+	const added = test.invoke(
+		rocio,
+		"probe.addLabel",
+		{ name: "urgente", notify: [...to] },
+		{ idempotencyKey: "label" },
+	);
+	if (!("result" in added)) throw new Error("expected the write's result");
+	return added.result.id;
+}
+
+describe("a notice about a label, a record of an area table", () => {
+	it("reaches the other person, who owns nothing there, with only its destination", async () => {
+		const { test, push, rocio } = await household();
+		await using _ = test;
+		const pacoPhone = await subscribed(await signedIn(test, "paco"), "paco-phone");
+
+		const id = label(test, rocio, ["paco"]);
+		await test.background.runDue();
+
+		const [notice] = jobsOf(test, "notice");
+		expect(notice).toEqual(expect.objectContaining({ state: "done", outcome: "distributed" }));
+		expect(jobsOf(test, "delivery")).toEqual([
+			expect.objectContaining({ state: "done", outcome: "sent" }),
+		]);
+		expect(reached(push)).toEqual([pacoPhone.endpoint]);
+		expect(pacoPhone.read(push.requests[0]!)).toEqual({
+			module: "probe",
+			type: "label",
+			id,
+			notice: notice?.id,
+		});
+	});
+
+	it("deleted before it is shared out ends record-gone, without deliveries", async () => {
+		const { test, push, rocio, paco } = await household();
+		await using _ = test;
+		await subscribed(await signedIn(test, "paco"), "paco-phone");
+
+		const id = label(test, rocio, ["paco"]);
+		test.invoke(paco, "probe.deleteLabel", { id }, { idempotencyKey: "delete" });
+		await test.background.runDue();
+
+		expect(jobsOf(test, "notice")).toEqual([
+			expect.objectContaining({ state: "done", outcome: "record-gone" }),
+		]);
+		expect(jobsOf(test, "delivery")).toEqual([]);
+		expect(push.requests).toEqual([]);
+	});
+
+	it("to a person who lost read in its area ends not-visible, without deliveries", async () => {
+		const { test, push, rocio } = await household();
+		await using _ = test;
+		await subscribed(await signedIn(test, "paco"), "paco-phone");
+
+		label(test, rocio, ["paco"]);
+		test.prepare.grant("paco", "probe", "none");
+		await test.background.runDue();
+
+		expect(jobsOf(test, "notice")).toEqual([
+			expect.objectContaining({ state: "done", outcome: "not-visible" }),
+		]);
+		expect(jobsOf(test, "delivery")).toEqual([]);
+		expect(push.requests).toEqual([]);
+	});
+
+	it.each<[string, string, (test: Probe, paco: VerifiedContext, id: number) => unknown]>([
+		[
+			"the label was deleted",
+			"record-gone",
+			(test, paco, id) =>
+				test.invoke(paco, "probe.deleteLabel", { id }, { idempotencyKey: "delete" }),
+		],
+		[
+			"the recipient lost read in its area",
+			"not-visible",
+			(test) => test.prepare.grant("paco", "probe", "none"),
+		],
+	])(
+		"whose delivery is checked once %s sends nothing, and ends %s",
+		async (_, outcome, change) => {
+			const hold = holdAt("delivering");
+			const { test, push, rocio, paco } = await household({ interleave: hold.interleave });
+			await using _platform = test;
+			await subscribed(await signedIn(test, "paco"), "paco-phone");
+
+			const id = label(test, rocio, ["paco"]);
+			await hold.reached;
+			change(test, paco, id);
+			hold.release();
+			await test.background.settled();
+
+			expect(jobsOf(test, "delivery")).toEqual([
+				expect.objectContaining({ state: "done", outcome, error: null }),
+			]);
+			expect(push.requests).toEqual([]);
+		},
+	);
+});
+
+describe("leaving a notice about a table the platform does not know", () => {
+	it("rolls the write back as internal, though the table exists in the module", async () => {
+		alsoNotifies("addNote", { type: "scrap", id: 1 });
+		const { test, rocio } = await household();
+		await using _ = test;
+
+		expect(() =>
+			test.invoke(rocio, "probe.addNote", { body: "pan" }, { idempotencyKey: "add" }),
+		).toThrow(expect.objectContaining({ code: "INTERNAL_SERVER_ERROR" }));
+		expect(test.invoke(rocio, "probe.countNotes")).toBe(0);
+		expect(test.background.jobs()).toEqual([]);
 	});
 });

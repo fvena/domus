@@ -114,10 +114,11 @@ export interface ActionContext<
 	/** The files of its module's owned records (ADR 0028), without a path on disk. */
 	readonly files: ModuleFiles;
 	/**
-	 * Leaves a notice to the account `to` about a record of one of its module's owned tables (ADR 0029), in the
-	 * transaction of the write: it exists only if the write commits, and its undo stops it while it has not gone.
-	 * Whether `to` is a person who sees the record is decided when it goes out, with what holds then. Only a write
-	 * leaves one; from a read, or about a type no owned table of its module has, the write fails as internal.
+	 * Leaves a notice to the account `to` about a record of one of its module's owned or area tables (ADR 0029), in
+	 * the transaction of the write: it exists only if the write commits, and its undo stops it while it has not
+	 * gone. Whether `to` is a person who sees the record is decided when it goes out, with what holds then. Only a
+	 * write leaves one; from a read, or about a type no owned or area table of its module has, the write fails as
+	 * internal.
 	 */
 	readonly notify: (notice: Notice) => void;
 }

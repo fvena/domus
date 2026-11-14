@@ -21,6 +21,7 @@ import { isDeepStrictEqual } from "node:util";
 import {
 	type ActionHandler,
 	type Actor,
+	areaTableOf,
 	type Inverse,
 	type ModuleDatabase,
 	type ModuleDefinition,
@@ -49,7 +50,7 @@ import {
 	type VerifiedContext,
 	visibleTo,
 } from "../authorization";
-import type { RecordChange } from "../authorization/invalidations";
+import type { AreaRecordChange, RecordChange } from "../authorization/invalidations";
 import { checkTransition, editableTo, type RecordArea } from "../authorization/writes";
 import { markedFiles } from "../files/marked";
 import { FilesRefusal, type References, type WriteRun } from "../files/references";
@@ -257,12 +258,17 @@ export function createActions({
 	const registry = new Map<string, RegisteredAction>();
 	/** The jobs the write whose handler is running leaves, while one runs. */
 	let leaving: WriteJob[] | undefined;
+	/** Per module, the area of each record type of its area tables. */
+	const areaTables = new Map<string, ReadonlyMap<string, string>>();
 	for (const module of modules) {
 		const db = drizzle({ client: connection, schema: module.schema });
 		const ownedTables = ownedTablesOf(module, areas);
-		const recordTypes = new Set(
-			[...ownedTables.keys()].flatMap((table) => ownedTableOf(table)?.type ?? []),
-		);
+		const shared = areaTablesOf(module);
+		areaTables.set(module.id, shared);
+		const recordTypes = new Set([
+			...[...ownedTables.keys()].flatMap((table) => ownedTableOf(table)?.type ?? []),
+			...shared.keys(),
+		]);
 		for (const [name, contract] of Object.entries(module.contract ?? {})) {
 			const handler = module.actions?.[name];
 			if (!handler) continue;
@@ -499,12 +505,12 @@ export function createActions({
 				ownership: (table) =>
 					newOwnership(actor.account, areaOf(table).policy.defaultVisibility),
 				files,
-				// A mistake of the module, a read's or a type of no owned table of its own, rolls the write back.
+				// A mistake of the module, a read's or a type of no owned or area table of its own, rolls the write back.
 				notify: ({ to, about }) => {
 					if (!write) throw new Error("only a write leaves a notice");
 					if (!parts.recordTypes.has(about.type))
 						throw new Error(
-							`"${about.type}" is no record type of an owned table of the module`,
+							`"${about.type}" is no record type of an owned or area table of the module`,
 						);
 					leave({
 						kind: NOTICE,
@@ -875,6 +881,7 @@ export function createActions({
 		// The records `ctx.files` changed count as touched without the handler declaring them.
 		const outcome = checkOutcome(found, value, run.touched);
 		checkTransitions(found, actor.account, transitions, outcome.touched);
+		const declared = areaChangesOf(found.module, outcome.touched);
 		const entry = actionLog.record({
 			module: found.module,
 			action: found.name,
@@ -892,8 +899,9 @@ export function createActions({
 		// the same transaction.
 		references.linkReleased(run.released, entry);
 		for (const job of jobs) outbox.enqueue({ ...job, entry });
-		// Taken from the capture before it is emptied; an undo runs this same path.
-		invalidations.remember(changesOf(transitions));
+		// Taken from the capture before it is emptied, with the area tables' records it declared; an undo runs this
+		// same path.
+		invalidations.remember([...changesOf(transitions), ...declared]);
 		capture.clear();
 		return { result: outcome.result, entry };
 	}
@@ -921,6 +929,22 @@ export function createActions({
 			)
 				throw internalError();
 		}
+	}
+
+	/**
+	 * The records of its module's area tables a write declares among its touched ones, each once, in the order
+	 * declared (ADR 0029). Their tables key on an integer `id`: any other id of their type is the handler's mistake.
+	 */
+	function areaChangesOf(module: string, touched: readonly TouchedRecord[]): AreaRecordChange[] {
+		const tables = areaTables.get(module);
+		const changes = new Map<string, AreaRecordChange>();
+		for (const { type, id } of touched) {
+			const area = tables?.get(type);
+			if (area === undefined) continue;
+			if (typeof id !== "number" || !Number.isSafeInteger(id)) throw internalError();
+			changes.set(JSON.stringify([type, id]), { module, type, id, area });
+		}
+		return [...changes.values()];
 	}
 
 	/**
@@ -995,7 +1019,7 @@ interface ModuleParts {
 	readonly errorMap: ErrorMap;
 	/** The owned tables of its module, with each one's area. */
 	readonly ownedTables: ReadonlyMap<OwnedTable, RecordArea>;
-	/** The record types of those tables: what a notice may be about. */
+	/** The record types of those tables and of its area tables: what a notice may be about. */
 	readonly recordTypes: ReadonlySet<string>;
 }
 
@@ -1011,6 +1035,16 @@ function ownedTablesOf(
 		if (info && policy) owned.set(value as OwnedTable, { id: info.area, policy });
 	}
 	return owned;
+}
+
+/** The area tables of a module, which `checkModules` has accepted: the area of each one's record type. */
+function areaTablesOf(module: ModuleDefinition): ReadonlyMap<string, string> {
+	const shared = new Map<string, string>();
+	for (const value of Object.values(module.schema)) {
+		const info = areaTableOf(value);
+		if (info) shared.set(info.type, info.area);
+	}
+	return shared;
 }
 
 /**

@@ -107,6 +107,10 @@ Una suscripción la registra la app desde la sesión que el aparato tiene habili
 - La `table` de siempre sigue existiendo y queda desconocida para la plataforma: no invalida y no admite avisos.
 - El tipo de registro es único dentro de un módulo entre sus tablas con dueño y de área; `start` rechaza un tipo repetido.
 - Término nuevo del glosario: **Tabla de área**.
+- Decidido al implementar (07):
+    - `start` rechaza también una tabla de área en un área `alwaysPrivate`: sus registros no tienen dueño para quien ser privados, así que la verían todos los que tienen `read` en ella;
+    - un registro tocado de un tipo de tabla de área tiene que llevar un `id` entero, un número, como su clave: otro `id` (también el texto `"1"`) es un error del manejador, y la escritura se revierte con un fallo interno;
+    - `module-sdk` ofrece `areaTableOf`, como `ownedTableOf`, para que la plataforma lea lo que declara una tabla de área; el error de un tipo repetido es `two tables have the record type "<tipo>"`, entre tablas con dueño y de área.
 
 ### El reparto de invalidaciones (Q1, Q12, Q15)
 
@@ -277,6 +281,7 @@ Mismo formato que las rutas de archivos: el estado HTTP y, como cuerpo, el JSON 
 - Acciones nuevas: `listLabels` (lectura), `addLabel({ name, notify? })` (deshacible, con inversa `deleteLabel`) y `deleteLabel({ id })` (irreversible).
 - `addNote`, `editNote` y `addLabel` aceptan `notify`, una lista opcional de cuentas; dejan un aviso por cada una sobre el registro que escriben.
 - Las áreas de salud y secretas no envían avisos en `probe`.
+- Decidido al implementar (07): `probe` gana también `scraps`, una `table` sin dueño que no se declara de área y sin acciones; las pruebas la escriben desde un manejador envuelto para comprobar que no invalida ni admite avisos. `deleteLabel`, irreversible, no pide confirmación, como `deleteBoardNote`.
 
 ### La comprobación en la Pi (Q10)
 
