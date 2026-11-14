@@ -103,7 +103,8 @@ jobs:
             # The restic of the api image (Debian trixie, 0.18.0), from its official release and checked against its
             # published checksum: the runner's Ubuntu has one older than the exit codes the backups read. Not in a
             # container, so the tests run as an ordinary user, as on a laptop: as root, a folder without permissions
-            # would not stop them.
+            # would not stop them. gitleaks, for the test of .gitleaks.toml, comes from the image the hook pins, through
+            # the runner's Docker.
             - name: Install restic
               env:
                   RESTIC_VERSION: 0.18.0

@@ -1,0 +1,15 @@
+# gitleaks configuration, read by the pre-commit hook and by CI from the root of the repository. The repository is
+# public: on top of gitleaks' default rules, it stops a Domus API key (ADR 0030) before it is committed.
+# Proved by tooling/scripts/gitleaks.test.ts against the real gitleaks.
+
+[extend]
+useDefault = true
+
+# `domus_<id>.<secret>`: an 11-character id and a 43-character secret, both base64url without padding. Not part of
+# a longer base64url run, so another prefix or a longer secret is not a key.
+[[rules]]
+id = "domus-api-key"
+description = "Domus API key"
+regex = '''(?:^|[^A-Za-z0-9_-])(domus_[A-Za-z0-9_-]{11}\.[A-Za-z0-9_-]{43})(?:[^A-Za-z0-9_-]|$)'''
+secretGroup = 1
+keywords = ["domus_"]
