@@ -1,10 +1,14 @@
-// Keeps checking whether another program can be used: connecting (it does not answer), ready, or
-// incompatible (it answers, but in a version this program cannot speak). Callers act only when ready.
+// Keeps checking whether another program can be used: connecting (it does not answer), ready,
+// incompatible (it answers, but in a version this program cannot speak) or rejected (it answers, but
+// does not accept this program). Callers act only when ready.
 
-export type ConnectionState = "connecting" | "ready" | "incompatible";
+export type ConnectionState = "connecting" | "ready" | "incompatible" | "rejected";
 
-/** What a check found: the other side answered in a version this program speaks, or in another. */
-export type CheckResult = "ready" | "incompatible";
+/**
+ * What a check found: the other side answered in a version this program speaks, in another, or
+ * refused to accept this program.
+ */
+export type CheckResult = "ready" | "incompatible" | "rejected";
 
 export interface WatchOptions {
 	/**
@@ -26,7 +30,7 @@ export interface ConnectionWatch {
 
 /** Waits after each failed attempt; the last one repeats. */
 const RETRY_DELAYS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
-/** Wait before checking again once it answered, ready or incompatible. */
+/** Wait before checking again once it answered: ready, incompatible or rejected. */
 const RECHECK_MS = 30_000;
 /** A check that has not answered by then counts as unreachable. */
 const CHECK_TIMEOUT_MS = 10_000;

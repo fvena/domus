@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { type ConnectionState, watchConnection } from ".";
 
 /** Runs a watch over a scripted list of answers ("down" throws) and records every wait. */
-async function script(answers: Array<"ready" | "incompatible" | "down">) {
+async function script(answers: Array<"ready" | "incompatible" | "rejected" | "down">) {
 	const waits: number[] = [];
 	const states: ConnectionState[] = [];
 	let i = 0;
@@ -53,6 +53,25 @@ describe("watchConnection", () => {
 	it("becomes ready once the other side speaks the same version", async () => {
 		const { states } = await script(["incompatible", "ready"]);
 		expect(states).toEqual(["incompatible", "ready"]);
+	});
+
+	it("stays rejected and checks again every 30 seconds", async () => {
+		const { waits, states, final } = await script(["rejected", "rejected", "rejected"]);
+		expect(final).toBe("rejected");
+		expect(states).toEqual(["rejected"]);
+		expect(waits).toEqual([30_000, 30_000, 30_000]);
+	});
+
+	it("becomes ready in the same watch once the same check is accepted", async () => {
+		const { waits, states, final } = await script(["rejected", "rejected", "ready"]);
+		expect(states).toEqual(["rejected", "ready"]);
+		expect(waits).toEqual([30_000, 30_000, 30_000]);
+		expect(final).toBe("ready");
+	});
+
+	it("leaves ready when the other side stops accepting this program", async () => {
+		const { states } = await script(["ready", "rejected", "incompatible", "down"]);
+		expect(states).toEqual(["ready", "rejected", "incompatible", "connecting"]);
 	});
 
 	it("leaves ready when the other side changes version or goes away", async () => {

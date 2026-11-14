@@ -158,6 +158,15 @@ jobs:
                   chmod 600 "$file"
                   sudo chown 1000:1000 "$file"
                   echo "DOMUS_BACKUP_PASSWORD=$file" >> "$GITHUB_ENV"
+            # The key of Kira is a compose secret too. Empty, assistant starts healthy and stays rejected: CI has
+            # no api key to give it.
+            - name: An empty key of Kira
+              run: |
+                  file="$RUNNER_TEMP/kira-key"
+                  : > "$file"
+                  chmod 600 "$file"
+                  sudo chown 1000:1000 "$file"
+                  echo "DOMUS_KIRA_KEY=$file" >> "$GITHUB_ENV"
             - name: Start the three containers
               run: docker compose up --detach --build --wait --wait-timeout 240
             # The restore command as the Pi runs it: its bundle, the mounted secret and reading it. Listing takes no

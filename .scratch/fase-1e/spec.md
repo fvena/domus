@@ -172,6 +172,12 @@ En la 1e no hay turnos de conversación, así que ninguna ruta, comando ni servi
 - La configuración de `assistant` lee `DOMUS_API_KEY_FILE`, por defecto `/run/secrets/kira-key`. Lee el fichero al arrancar. Si falta, está vacío o no se puede leer, arranca sin llave, y la comprobación lo deja en rechazado con un mensaje que lo dice. El log nunca imprime la llave.
 - Compose monta en `assistant` el secreto `kira-key` desde el fichero del host que dice `DOMUS_KIRA_KEY`, que es obligatorio como `DOMUS_BACKUP_PASSWORD`. En la Pi es `/home/fvena/.config/domus/kira-key`. La CI de contenedores usa un fichero vacío.
 - En desarrollo, `.env.local.example` apunta `DOMUS_API_KEY_FILE` a `data/kira-key` y dice cómo crearla con `pnpm keys create kira > data/kira-key`.
+- Detalles que fijó la tarea 06:
+    - `assistant` tiene un solo cliente, `apiClient(contrato, acceso, mandato?)` de `src/api.ts`: pone la llave en `Authorization: Bearer` y, si se le da, el mandato en `domus-mandate`. `checkApi` lo usa, y lo usarán las llamadas de la 5a. `api-client` no cambia.
+    - El fichero de la llave se lee sin los espacios ni el salto de línea de los extremos, porque `keys create kira > fichero` deja uno al final. Un fichero que es una carpeta cuenta como uno que no se puede leer.
+    - En `pnpm dev`, `apps/assistant/src/dev.ts` resuelve un `DOMUS_API_KEY_FILE` relativo desde la raíz del repositorio, donde lo escribe `pnpm keys create kira > data/kira-key`, como `dev-env` de `api` hace con `data`. En Docker se usa el valor por defecto.
+    - El log de rechazado nombra el fichero y dice si no había llave o si la api no acepta la que hay, y que hay que arrancar `assistant` otra vez (en Docker, recrear el contenedor). Nunca repite la llave.
+    - La CI de contenedores crea el fichero vacío con permisos 600 y dueño 1000, como el de la contraseña de las copias.
 
 ### Limpieza (Q5, Q18)
 
@@ -237,6 +243,7 @@ En el Domus real, sin `probe`, ejecutada por ssh, porque aquí nadie teclea una 
     - Las pruebas con respuestas programadas ganan `rejected`: se queda y vuelve a comprobar cada 30 s, y pasa de `rejected` a `ready` cuando cambia la respuesta, sin reiniciar la comprobación.
     - El `checkApi` de `assistant` contra la puerta en proceso: sin llave, con una llave mala, con la de otra app y con la suya. Nunca da `ready` cuando `status` responde bien sin acreditar a `kira`.
     - La configuración de `assistant`: fichero ausente, vacío y con llave.
+    - El criterio del ADR 0020 vive en `tooling/scripts/assistant-acts.test.ts`: el `apiClient` de `assistant` contra la plataforma de pruebas con `probe`. Las pruebas de `assistant` no pueden importar un módulo (`assistant-and-voice-gateway-only-talk-to-api`) y un módulo no puede importar una app (`nothing-imports-an-app`); `tooling` ya compone módulos reales y las reglas no cambian.
 - **Costura 4: la regla de gitleaks con el ejecutable real.** Una prueba de `tooling/scripts` escribe en una carpeta temporal, fuera del repositorio, una llave de muestra válida y una cadena parecida que no lo es. Ejecuta `gitleaks dir` con la configuración del repositorio, comprueba que caza solo la primera y borra la carpeta. Usa el `gitleaks` del PATH o la imagen de Docker fijada del hook. Sin ninguno de los dos, falla con un mensaje que dice cómo instalarlo, como hace restic.
 - **Costura 5: funciones puras de `platform`.** Leer la cabecera de la llave (cada forma mala, `Bearer` con otro esquema, espacios, longitudes), leer el mandato, y la lista de operaciones de la plataforma que admiten un mandato, incluida una desconocida, que no lo admite. La frontera se prueba además por la puerta, en la costura 1.
 - **Con `probe` sobre la costura 1:**
