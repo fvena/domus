@@ -57,6 +57,7 @@
     - la autorización vía Kira: la delegación rebaja y no amplía, un área sin fila, una pendiente confirmada por `app` que conserva su delegación, una acción `manage` que no se completa, deshacer con la delegación retirada, y la clave de idempotencia por cuenta y `via`;
     - las superficies cerradas: cada operación de la plataforma fuera de la lista, `confirmations/confirm`, subir y descargar archivos, el canal en directo y las suscripciones;
     - el comando: stdout solo con la llave, una app desconocida, y `list` sin el secreto;
+    - restaurar, que revoca todas las llaves;
     - el cliente: el mismo `clientFor` de `assistant` ejecuta una acción con llave y mandato y da `UNAUTHORIZED` sin llave, y la comprobación queda en rechazado sin llave, con una llave mala o con la de otra app, y en listo con la suya ([ADR 0020](architecture/adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md));
     - la regla de gitleaks, que caza una llave de muestra.
 

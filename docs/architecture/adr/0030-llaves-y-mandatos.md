@@ -19,7 +19,7 @@ Las llaves no caducan. Puede haber varias vivas por app, para rotar sin cortar e
 3. sustituir el fichero y recrear `assistant`, porque un reinicio no ve un fichero nuevo;
 4. revocar la vieja solo cuando la nueva funciona, y si no funciona, volver a la vieja.
 
-Una llave comprometida se revoca en el momento.
+Una llave comprometida se revoca en el momento. Restaurar revoca todas las llaves, por la misma razón por la que cierra todas las sesiones (ADR 0026): una llave revocada después de la copia volvería a valer. Tras restaurar se crea una nueva para Kira.
 
 **Cómo viajan.** La llave va en `Authorization: Bearer` y el mandato en `domus-mandate`. Una petición que trae a la vez una cookie de sesión y una llave se rechaza, en vez de elegir entre las dos; las demás cookies no cuentan. Una credencial mala nunca baja a anónima. Las respuestas son estas:
 
