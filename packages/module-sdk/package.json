@@ -14,13 +14,13 @@
 	},
 	"dependencies": {
 		"@orpc/contract": "catalog:",
-		"drizzle-orm": "catalog:"
+		"drizzle-orm": "catalog:",
+		"zod": "catalog:"
 	},
 	"devDependencies": {
 		"@domus/tsconfig": "workspace:*",
 		"@types/node": "catalog:",
 		"typescript": "catalog:",
-		"vitest": "catalog:",
-		"zod": "catalog:"
+		"vitest": "catalog:"
 	}
 }

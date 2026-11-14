@@ -10,7 +10,10 @@ type ConflictReason =
 	| "window-closed"
 	| "confirmation-expired"
 	| "confirmation-consumed"
-	| "task-busy";
+	| "task-busy"
+	| "prepared-file-expired"
+	| "prepared-file-consumed"
+	| "confirm-by-download";
 
 /** A conflict, with its reason in `data.reason`. */
 export function conflict(reason: ConflictReason) {

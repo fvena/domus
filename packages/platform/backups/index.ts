@@ -2,11 +2,12 @@
 // an actor. The `backup` task takes a snapshot of the database in a child process into a fixed staging folder of the
 // data folder, checks it in another, saves it with restic into an encrypted repository and marks it saved, then
 // applies the retention and marks its result. A failed attempt is marked too. A cancelled job ends the child that
-// runs, and the staging folder is emptied at the start and at the end of every run. The weekly `backup-check` reads
-// the whole repository and marks its result. The marks feed the watcher of `/health`. module-sdk offers none of
-// this, and a dependency rule keeps modules out.
-import { readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+// runs, and the staging folder is emptied at the start and at the end of every run. The file contents the snapshot
+// needs go with it in the same restic snapshot, as hard links in the staging folder (ADR 0028). The weekly
+// `backup-check` reads the whole repository and marks its result. The marks feed the watcher of `/health`.
+// module-sdk offers none of this, and a dependency rule keeps modules out.
+import { linkSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 
 import type Database from "better-sqlite3";
 
@@ -19,6 +20,7 @@ import {
 	type TaskSchedule,
 	type Timer,
 } from "../background";
+import { createFileStore, type FileStore } from "../files/store";
 import { type BackupMarks, createMarkStore } from "./marks";
 import {
 	type BackupConfig,
@@ -30,8 +32,8 @@ import {
 	resticExited,
 	ResticLockedError,
 } from "./restic";
-import { passesQuickCheck, takeSnapshot } from "./snapshot";
-import { emptyFolder, SNAPSHOT_FILE } from "./staging";
+import { checkSnapshot, takeSnapshot } from "./snapshot";
+import { emptyFolder, SNAPSHOT_FILE, STAGED_FILES } from "./staging";
 
 export type { BackupConfig } from "./restic";
 export type { BackupMarks } from "./marks";
@@ -48,6 +50,8 @@ const [BACKUP_SCHEDULE, BACKUP_CHECK_SCHEDULE] = BACKUP_SCHEDULES;
 
 /** The staging folder of the backups, inside the data folder. */
 const STAGING = "backup-staging";
+/** The list of the paths restic saves, relative to the staging folder; itself not among them. */
+const PATHS = "paths";
 /** How long after its capture the last saved backup stays fresh for the watcher. */
 const STALE_AFTER = 48 * 60 * 60 * 1000;
 /**
@@ -77,6 +81,8 @@ export interface BackupsOptions {
 	readonly config: BackupConfig;
 	/** The live database's file: the snapshot's child opens it, and the staging folder lives beside it. */
 	readonly databaseFile: string;
+	/** The `files` folder of the store of file contents, on the same volume as the staging folder. */
+	readonly filesDirectory: string;
 	/** The restic executable: `restic` from the `PATH` unless the testing entry gives another. */
 	readonly executable?: string;
 	/** The Node executable of the child processes: this process's own unless the testing entry gives another. */
@@ -90,9 +96,11 @@ export function createBackups({
 	timer,
 	config,
 	databaseFile,
+	filesDirectory,
 	executable = "restic",
 	node = process.execPath,
 }: BackupsOptions): BackupsWatch {
+	const store = createFileStore(filesDirectory);
 	const marks = createMarkStore(connection);
 	const clockAndTimer = { clock, timer };
 	const restic = createRestic(executable, config, clockAndTimer);
@@ -112,8 +120,16 @@ export function createBackups({
 						// The copy holds the data of its start: noting its end would make it younger than it is.
 						const capturedAt = clock();
 						await takeSnapshot(databaseFile, file, signal, clockAndTimer, node);
-						if (!(await passesQuickCheck(file, signal, clockAndTimer, node)))
+						const contents = await checkSnapshot(
+							file,
+							capturedAt,
+							signal,
+							clockAndTimer,
+							node,
+						);
+						if (contents === undefined)
 							throw new PermanentJobError("the snapshot failed quick_check");
+						stageContents(store, staging, contents);
 						await unlock(restic, signal);
 						const snapshot = await save(restic, config, staging, capturedAt, signal);
 						marks.saved(capturedAt, snapshot);
@@ -188,9 +204,32 @@ async function unlock(restic: Restic, signal: AbortSignal): Promise<boolean> {
 }
 
 /**
- * Saves the staging folder's snapshot with restic, its time the capture instant, and returns the snapshot's id. A
- * repository that does not exist is created only when its folder exists and is empty: a missing folder, or one with
- * anything in it, is never initialized.
+ * Links each content of `contents` from the store into the staging folder, under {@link STAGED_FILES} as in the
+ * store, and writes the list of what restic saves: the snapshot and those links. A link takes no room of data. A
+ * content missing from the store fails the backup at once: a snapshot without it would be no good backup.
+ */
+function stageContents(store: FileStore, staging: string, contents: readonly string[]): void {
+	const staged = createFileStore(join(staging, STAGED_FILES));
+	const paths = [SNAPSHOT_FILE];
+	for (const hash of contents) {
+		const link = staged.contentPath(hash);
+		mkdirSync(dirname(link), { recursive: true });
+		try {
+			linkSync(store.contentPath(hash), link);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT")
+				throw new PermanentJobError("a file content the backup needs is missing");
+			throw error;
+		}
+		paths.push(relative(staging, link));
+	}
+	writeFileSync(join(staging, PATHS), paths.join("\n"));
+}
+
+/**
+ * Saves the staging folder's snapshot and the contents' links with restic, its time the capture instant, and
+ * returns the snapshot's id. A repository that does not exist is created only when its folder exists and is empty:
+ * a missing folder, or one with anything in it, is never initialized.
  */
 async function save(
 	restic: Restic,
@@ -206,7 +245,8 @@ async function save(
 		HOST,
 		"--time",
 		resticTime(capturedAt),
-		SNAPSHOT_FILE,
+		"--files-from-verbatim",
+		PATHS,
 	];
 	let backup = await restic.run(args, signal, staging);
 	if (backup.code === REPOSITORY_MISSING && isEmptyFolder(config.repository)) {

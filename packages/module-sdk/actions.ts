@@ -12,7 +12,13 @@ import type {
 import type { SQL } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 
-import type { ActionContract, ModuleContract, ReadActionMeta, WriteActionMeta } from "./contracts";
+import type {
+	ActionContract,
+	FileRef,
+	ModuleContract,
+	ReadActionMeta,
+	WriteActionMeta,
+} from "./contracts";
 import type { OwnedTable, Visibility } from "./db";
 
 /** What a module's exports may hold: its tables, made with `moduleTables`, and anything else Drizzle reads. */
@@ -105,6 +111,43 @@ export interface ActionContext<
 	 * and the default visibility of the table's area. Spread into the values of an insert.
 	 */
 	readonly ownership: (table: OwnedTable) => NewOwnership;
+	/** The files of its module's owned records (ADR 0028), without a path on disk. */
+	readonly files: ModuleFiles;
+}
+
+/** A record of one of its module's owned tables, by its table and its id. */
+export interface RecordOf {
+	readonly table: OwnedTable;
+	readonly id: number;
+}
+
+/**
+ * The files of a module's owned records (ADR 0028). Attaching, detaching and attaching again need the record to
+ * exist and be editable by the represented account, as an edit does: one it does not see answers "not found"
+ * and one it only sees, "forbidden". Each one counts as touching the record, with the same type and id as a change
+ * of a column, without the handler declaring it, and happens in the transaction of the write: a failure later in
+ * the write undoes it too. Only a write may change files.
+ */
+export interface ModuleFiles {
+	/** The live files of a record, oldest first: none when the represented account does not see it. */
+	of(table: OwnedTable, id: number): readonly FileRef[];
+	/**
+	 * Hangs a prepared file of this session from the record, using it up. "Not found" for one that does not exist
+	 * or is of another session; a conflict for one expired (`prepared-file-expired`) or already used
+	 * (`prepared-file-consumed`).
+	 */
+	attach(prepared: string, record: RecordOf): FileRef;
+	/**
+	 * Takes a live file off the record: an undoable write leaves it released, linked to its own entry in the
+	 * action log, for its undo to attach again; an irreversible one deletes it. "Not found" for a file the record
+	 * does not have.
+	 */
+	detach(file: string, record: RecordOf): FileRef;
+	/**
+	 * Reattaches a file the entry being undone released from this record: only inside the undo of that entry,
+	 * else "not found".
+	 */
+	reattach(file: string, record: RecordOf): FileRef;
 }
 
 /** What a new owned record takes: its owner and its visibility. */

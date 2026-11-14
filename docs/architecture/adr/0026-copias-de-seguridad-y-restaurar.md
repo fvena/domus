@@ -21,3 +21,4 @@ Precisa el ADR 0025: cómo se hace una copia, cómo sabe el vigilante si las cop
 Fecha: 2026-11-12. Preguntas del grilling: Q1–Q15 de la fase 1d2.
 
 Precisado por el ADR 0027: la instantánea la saca un proceso hijo con su propia conexión, su cerrojo compartido y `VACUUM INTO`, no `db.backup()` dentro de `api`; el instante de captura es el de antes de empezar la copia.
+Precisado por el ADR 0028: la copia sube, en la misma instantánea de restic, los contenidos que la instantánea de la base necesita, y falla si falta uno; restaurar instala todos esos contenidos desde la copia comprobada antes de publicar la marca e intercambiar la base, y nunca borra un contenido vivo.

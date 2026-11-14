@@ -249,6 +249,17 @@ module.exports = {
 			to: { path: "^packages/platform/(backups/|lock\\.ts$)", reachable: true },
 		},
 		{
+			name: "files-stay-in-platform",
+			comment:
+				"The store of file contents, publishing, its cleanup and the file routes belong to platform (ADR 0028): module-sdk exposes only ctx.files and no module reaches them, through any chain of imports. Tests may, through test-utils.",
+			severity: "error",
+			from: {
+				path: "^(modules|packages/module-sdk)/",
+				pathNot: ["\\.test\\.ts$", "^modules/[^/]+/tests/"],
+			},
+			to: { path: "^packages/platform/files/", reachable: true },
+		},
+		{
 			name: "only-test-utils-reaches-platform-testing",
 			comment:
 				"@domus/platform/testing hands out a module's raw Drizzle client, outside authorization: only test-utils takes it, for dbFor (ADR 0021).",

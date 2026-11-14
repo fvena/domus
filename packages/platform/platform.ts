@@ -12,7 +12,12 @@ import { type Capture, installCapture } from "./actions/capture";
 import { type ConfirmationTimes, createConfirmations } from "./actions/confirmations";
 import { createProofs, type Proofs } from "./actions/proofs";
 import { type ActionLog, createActionLog } from "./audit";
-import { type AreaPolicy, type Authorizer, createAuthorizer } from "./authorization";
+import {
+	type AccessView,
+	type AreaPolicy,
+	type Authorizer,
+	createAuthorizer,
+} from "./authorization";
 import {
 	type Background,
 	type BackgroundStart,
@@ -25,6 +30,14 @@ import {
 import { taskOperations } from "./background/operations";
 import { type BackupConfig, createBackups } from "./backups";
 import { refuseWhileRestorePending } from "./backups/restore";
+import {
+	createFiles,
+	createReferences,
+	type Files,
+	type FreeSpace,
+	type Interleave,
+} from "./files";
+import { filesFolderOf } from "./files/store";
 import { accessView, registeredAreas } from "./identity/access";
 import { ensureDeviceAccount } from "./identity/accounts";
 import { platformOperations } from "./identity/operations";
@@ -55,6 +68,11 @@ export interface PlatformOptions {
 	 * not declared. Only with a database on a file: their staging folder lives next to it.
 	 */
 	readonly backups?: BackupConfig;
+	/**
+	 * The `files` folder of the store of file contents and the uploads in progress (ADR 0028): an absolute path.
+	 * Unset, `files` in the folder of the database; in memory there is none, and an upload fails.
+	 */
+	readonly filesDirectory?: string;
 }
 
 /** The retention of the action log's content unless one is given: 30 days. */
@@ -103,6 +121,12 @@ export interface PlatformRuntime {
 	readonly restic?: string;
 	/** The Node executable of the backups' child processes: this process's own unless a test gives another. */
 	readonly node?: string;
+	/** Only from the testing entry: where the platform tells a test it got to a point and waits until it lets go. */
+	readonly interleave?: Interleave;
+	/** The free space of the uploads' volume: what `statfs` tells unless a test gives another. */
+	readonly freeSpace?: FreeSpace;
+	/** Only from the testing entry: whether the next write of an upload's temporary file fails with `ENOSPC`. */
+	readonly diskFull?: () => boolean;
 }
 
 const IN_MEMORY = ":memory:";
@@ -120,6 +144,7 @@ const internals = new WeakMap<
 		readonly authorizer: Authorizer;
 		readonly proofs: Proofs;
 		readonly background: Background;
+		readonly files: Files | undefined;
 	}
 >();
 
@@ -136,8 +161,20 @@ export function openPlatform(
 		retention = DEFAULT_RETENTION,
 		confirmation = {},
 		backups: backupConfig,
+		filesDirectory,
 	}: PlatformOptions,
-	{ clock, authorizer, timer = realTimer(clock), tasks, jobs, restic, node }: PlatformRuntime,
+	{
+		clock,
+		authorizer,
+		timer = realTimer(clock),
+		tasks,
+		jobs,
+		restic,
+		node,
+		interleave,
+		freeSpace,
+		diskFull,
+	}: PlatformRuntime,
 ): Platform {
 	if (databaseFile !== IN_MEMORY && !isAbsolute(databaseFile)) {
 		throw new Error(
@@ -151,6 +188,8 @@ export function openPlatform(
 			if (!isAbsolute(path))
 				throw new Error(`backups.${name} must be an absolute path, got "${path}"`);
 	}
+	if (filesDirectory !== undefined && !isAbsolute(filesDirectory))
+		throw new Error(`filesDirectory must be an absolute path, got "${filesDirectory}"`);
 	if (!Number.isSafeInteger(retention) || retention <= 0) {
 		throw new Error(
 			`retention must be a positive whole number of milliseconds, got ${String(retention)}`,
@@ -170,6 +209,8 @@ export function openPlatform(
 	const db = openFile(databaseFile, lock);
 	let appliedMigrations: number;
 	let capture: Capture;
+	let view: AccessView;
+	let files: Files | undefined;
 	let background: Background;
 	try {
 		if (databaseFile !== IN_MEMORY) {
@@ -185,11 +226,30 @@ export function openPlatform(
 		ensureDeviceAccount(db, areas, clock());
 		// After the migrations, which its triggers would stop from dropping a column, and before any action.
 		capture = installCapture(db, modules, areas);
+		view = accessView(db, areas);
+		const filesFolder =
+			databaseFile === IN_MEMORY
+				? filesDirectory
+				: filesFolderOf(databaseFile, filesDirectory);
+		files =
+			filesFolder === undefined
+				? undefined
+				: createFiles({
+						connection: db,
+						clock,
+						timer,
+						view,
+						directory: filesFolder,
+						...(interleave === undefined ? {} : { interleave }),
+						...(freeSpace === undefined ? {} : { freeSpace }),
+						...(diskFull === undefined ? {} : { diskFull }),
+					});
 		// The backups load their marks now; the background checks its tasks and kinds.
 		background = createBackground({
 			connection: db,
 			clock,
 			timer,
+			...(files === undefined ? {} : { sweeps: files.sweeps }),
 			...(backupConfig === undefined
 				? {}
 				: {
@@ -199,6 +259,8 @@ export function openPlatform(
 							timer,
 							config: backupConfig,
 							databaseFile,
+							// On a file there is always one: the option's or the data folder's.
+							filesDirectory: filesFolderOf(databaseFile, filesDirectory),
 							...(restic === undefined ? {} : { executable: restic }),
 							...(node === undefined ? {} : { node }),
 						}),
@@ -212,6 +274,7 @@ export function openPlatform(
 		throw error;
 	}
 
+	const actionLog = createActionLog(db);
 	const platform: Platform = {
 		appliedMigrations,
 		startBackground: () => background.start(),
@@ -221,12 +284,11 @@ export function openPlatform(
 				throw new Error(
 					"stop the background before closing the platform: a job may still use it",
 				);
+			files?.close();
 			if (db.open) db.close();
 			lock?.release();
 		},
 	};
-	const actionLog = createActionLog(db);
-	const view = accessView(db, areas);
 	const decider = authorizer ?? createAuthorizer(view);
 	const proofs = createProofs(db);
 	const actions = createActions({
@@ -242,6 +304,8 @@ export function openPlatform(
 		confirmations: createConfirmations(db, confirmationTimes),
 		proofs,
 		operations: [...platformOperations(db, areas), ...taskOperations(background)],
+		references: createReferences(db, view),
+		...(files === undefined ? {} : { openContent: (hash: string) => files.open(hash) }),
 	});
 	internals.set(platform, {
 		db,
@@ -253,6 +317,7 @@ export function openPlatform(
 		authorizer: decider,
 		proofs,
 		background,
+		files,
 	});
 	return platform;
 }
@@ -317,4 +382,9 @@ export function backgroundOf(platform: Platform): Background {
 /** The platform clock. Inside platform only. */
 export function clockOf(platform: Platform): Clock {
 	return internalsOf(platform).clock;
+}
+
+/** The files of a platform, when it has a folder for them. Inside platform only: the door serves their routes. */
+export function filesOf(platform: Platform): Files | undefined {
+	return internalsOf(platform).files;
 }

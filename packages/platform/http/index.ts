@@ -15,9 +15,11 @@ import { RPCHandler } from "@orpc/server/fetch";
 import { Hono } from "hono";
 
 import { READ_DELEGATION, READ_LOG } from "../actions";
+import { internalError } from "../actions/failures";
 import { sealContext, type VerifiedContext } from "../authorization";
 import { LIST_TASKS } from "../background/operations";
 import { PROTOCOL, platformContract } from "../contracts";
+import { contentDisposition, errorResponse } from "../files";
 import { AUTH_PREFIX, type AuthOptions, createAuth } from "../identity/auth";
 import { replacePassword, SessionGoneError, verifiedPasswordHash } from "../identity/passwords";
 import { requestProof, WrongPasswordError } from "../identity/proofs";
@@ -27,6 +29,7 @@ import {
 	backgroundOf,
 	clockOf,
 	connectionOf,
+	filesOf,
 	type Platform,
 	proofIssuerOf,
 } from "../platform";
@@ -35,6 +38,12 @@ export interface HttpHandler {
 	/** A plain function, safe to pass around as `fetch`. */
 	readonly fetch: (request: Request) => Promise<Response>;
 }
+
+/** Where a file is uploaded (ADR 0028): a route of Hono, not of oRPC, to control its receipt. */
+const FILES_PATH = "/api/files";
+
+/** Where a file is downloaded through the read that returns it (ADR 0028). */
+const DOWNLOAD_PATH = "/api/files/download";
 
 /** Where RPC procedures live; @domus/api-client calls the same path. */
 const RPC_PREFIX = "/api/rpc";
@@ -70,6 +79,9 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	const connection = connectionOf(platform);
 	const identity = createAuth(connection, auth);
 	const actions = actionsOf(platform);
+	const files = filesOf(platform);
+	// What an earlier process left half uploaded goes before the door admits a request (ADR 0028).
+	files?.clearIncoming();
 
 	/**
 	 * Runs the platform's write `platform.<name>` on the path of the actions with a session, its key and its proof:
@@ -292,6 +304,75 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	});
 
 	/**
+	 * A route of files (ADR 0028), only with a session: what `answer` gives, or the error of the spec's table as the
+	 * JSON of ORPCError without the RPC envelope; either way with the cookies that reading the session set.
+	 */
+	const fileRoute =
+		(answer: (verified: VerifiedContext, request: Request) => Promise<Response>) =>
+		async (c: { readonly req: { readonly raw: Request } }): Promise<Response> => {
+			const responseHeaders = new Headers();
+			let response: Response;
+			try {
+				const verified = await contextOf(c.req.raw, responseHeaders);
+				if (!verified?.session) throw new ORPCError("UNAUTHORIZED");
+				response = await answer(verified, c.req.raw);
+			} catch (error) {
+				response = errorResponse(error);
+			}
+			for (const cookie of responseHeaders.getSetCookie())
+				response.headers.append("set-cookie", cookie);
+			return response;
+		};
+
+	// Uploading a file: who may upload, authorization decides. The answer is the prepared file.
+	app.post(
+		FILES_PATH,
+		fileRoute(async (verified, request) => {
+			if (!files) throw internalError();
+			return Response.json(await files.upload(verified, request));
+		}),
+	);
+
+	// Downloading a file: a read of a module on the path of the actions, which must return the file at a position
+	// marked with `fileRef()`. The input never goes in the URL. The bytes go after its transaction, never cached.
+	// A download whose read asks for confirmation waits, and is confirmed here alone, with `{ confirmation }`.
+	app.post(
+		DOWNLOAD_PATH,
+		fileRoute(async (verified, request) => {
+			const body = downloadRequest(await request.json().catch(() => undefined));
+			const proof = request.headers.get(PROOF_HEADER) ?? undefined;
+			const download =
+				"confirmation" in body
+					? actions.confirmDownload({
+							context: verified,
+							confirmation: body.confirmation,
+							...(proof === undefined ? {} : { proof }),
+						})
+					: actions.download({
+							context: verified,
+							...body,
+							...(proof === undefined ? {} : { proof }),
+						});
+			// Only a test waits here: the file open, the transaction ended, no byte sent.
+			try {
+				await files?.opened();
+			} catch (error) {
+				download.content.close();
+				throw error;
+			}
+			return new Response(download.content.stream(), {
+				headers: {
+					"cache-control": "no-store",
+					"x-content-type-options": "nosniff",
+					"content-type": download.type,
+					"content-length": String(download.size),
+					"content-disposition": contentDisposition(download.name),
+				},
+			});
+		}),
+	);
+
+	/**
 	 * The verified context of a request, from its session alone. Over HTTP, in phase 1c, the account is the
 	 * session's and asks itself: no via, the app channel, proven by password, no conversation.
 	 */
@@ -312,4 +393,23 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	}
 
 	return { fetch: async (request) => app.fetch(request) };
+}
+
+/**
+ * The body of a download: `{ action, input, file }`, or `{ confirmation }` to confirm a pending one, else a bad
+ * request.
+ */
+function downloadRequest(
+	body: unknown,
+):
+	| { readonly action: string; readonly input: unknown; readonly file: string }
+	| { readonly confirmation: string } {
+	if (typeof body !== "object" || body === null || Array.isArray(body))
+		throw new ORPCError("BAD_REQUEST");
+	const { confirmation } = body as Record<string, unknown>;
+	if (Object.keys(body).length === 1 && typeof confirmation === "string") return { confirmation };
+	const { action, input, file, ...rest } = body as Record<string, unknown>;
+	if (typeof action !== "string" || typeof file !== "string" || Object.keys(rest).length > 0)
+		throw new ORPCError("BAD_REQUEST");
+	return { action, input, file };
 }

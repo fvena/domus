@@ -5,6 +5,9 @@ import { mkdirSync, rmSync } from "node:fs";
 /** The copy's name, in a staging folder and in each restic snapshot, at its root. */
 export const SNAPSHOT_FILE = "domus.db";
 
+/** The folder of the file contents in a staging folder and in each snapshot, laid out as the store lays them. */
+export const STAGED_FILES = "files";
+
 /** Removes the folder with whatever it holds and creates it again, empty. */
 export function emptyFolder(folder: string): void {
 	rmSync(folder, { recursive: true, force: true });

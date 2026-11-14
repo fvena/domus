@@ -41,6 +41,7 @@ import {
 import type { BackupConfig, BackupMarks } from "../backups";
 import { createMarkStore } from "../backups/marks";
 import { listSnapshots, type SnapshotSummary } from "../backups/restore";
+import type { Interleave } from "../files";
 import {
 	ensureDeviceAccount,
 	insertAccount,
@@ -97,6 +98,9 @@ export type {
 export { PermanentJobError } from "../background";
 export { STOP_MARGIN } from "../background/engine";
 export type { BackupMarks } from "../backups";
+export type { Interleave, InterleavePoint } from "../files";
+/** Where the store of a `files` folder keeps a content, by its hash: for tests that lay one out or remove it. */
+export { contentPath } from "../files/store";
 /**
  * `runRestore` restores with the runtime the test gives: its clock, the restic executable and, only here, the points
  * where the test cuts the exchange.
@@ -136,6 +140,15 @@ export interface TestBackgroundRuntime {
 	readonly restic?: string;
 	/** The Node executable of the backups' child processes, such as a fake one: this process's own unless given. */
 	readonly node?: string;
+	/**
+	 * Where the platform tells the test it got to a point, such as a publication between its file and its rows, and
+	 * waits until the promise the test returns settles. Only here.
+	 */
+	readonly interleave?: Interleave;
+	/** The free bytes of the uploads' volume, as the test wants them: what `statfs` tells unless given. */
+	readonly freeSpace?: () => number;
+	/** Whether the next write of an upload's temporary file fails with `ENOSPC`. Only here. */
+	readonly diskFull?: () => boolean;
 }
 
 /**
@@ -145,7 +158,16 @@ export interface TestBackgroundRuntime {
 export function createPlatformWithClock(
 	options: PlatformOptions,
 	clock: Clock,
-	{ timer, tasks, jobs, restic, node }: TestBackgroundRuntime = {},
+	{
+		timer,
+		tasks,
+		jobs,
+		restic,
+		node,
+		interleave,
+		freeSpace,
+		diskFull,
+	}: TestBackgroundRuntime = {},
 ): Platform {
 	return openPlatform(options, {
 		clock,
@@ -154,6 +176,9 @@ export function createPlatformWithClock(
 		...(jobs === undefined ? {} : { jobs }),
 		...(restic === undefined ? {} : { restic }),
 		...(node === undefined ? {} : { node }),
+		...(interleave === undefined ? {} : { interleave }),
+		...(freeSpace === undefined ? {} : { freeSpace }),
+		...(diskFull === undefined ? {} : { diskFull }),
 	});
 }
 
@@ -353,6 +378,21 @@ export function prepareSession(
 		)
 		.run(session, account, onDevice, randomId(), now + 7 * 24 * 60 * 60 * 1000, now, now);
 	return { session, device: onDevice };
+}
+
+/**
+ * The session whose token a session cookie carries, with its account and device: what the door reads from a
+ * request, for a test that uses a signed-in browser's session in an invocation. `undefined` when there is none.
+ */
+export function sessionOfToken(
+	platform: Platform,
+	token: string,
+): { readonly session: string; readonly account: string; readonly device: string } | undefined {
+	return connectionOf(platform)
+		.prepare<[string], { session: string; account: string; device: string }>(
+			"SELECT id AS session, user_id AS account, device_id AS device FROM platform_session WHERE token = ?",
+		)
+		.get(token);
 }
 
 /** True while a session with this id exists. */

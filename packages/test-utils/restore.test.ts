@@ -878,6 +878,8 @@ describe("restoring over a database in trouble", { timeout: RESTIC_TIMEOUT }, ()
 		});
 
 		expect(seen).toEqual([
+			// No file content to install: the ledger has none.
+			["contents-installed", "absent"],
 			["marker-written", "absent"],
 			["marker-published", "absent"],
 			["auxiliaries-removed", "absent"],

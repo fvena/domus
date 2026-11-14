@@ -13,8 +13,10 @@ export type {
 	Inverse,
 	ModuleActions,
 	ModuleDatabase,
+	ModuleFiles,
 	ModuleSchema,
 	NewOwnership,
+	RecordOf,
 	TouchedRecord,
 	WriteOutcome,
 } from "./actions";

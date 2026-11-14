@@ -22,13 +22,23 @@ export function sessionLookup(connection: Database.Database): SessionLookup {
 	return (session) => statement.get(session);
 }
 
-/** Whether `session` exists and is the account's. */
-export function sessionExists(
-	connection: Database.Database,
-	account: string,
-	session: string,
-): boolean {
-	return sessionLookup(connection)(session)?.account === account;
+/**
+ * The SQL condition that a session still lives: one with the id of the expression `session` exists and is the
+ * account's of the expression `account`. The one form of that rule, for statements and for {@link sessionLives}.
+ */
+export function sessionLivesWhere(session: string, account: string): string {
+	return `EXISTS (SELECT 1 FROM platform_session WHERE id = ${session} AND user_id = ${account})`;
+}
+
+/** Whether a session still lives: it exists and is the account's. */
+export type SessionLives = (account: string, session: string) => boolean;
+
+/** The check that a session still lives, prepared on `connection`. */
+export function sessionLives(connection: Database.Database): SessionLives {
+	const statement = connection.prepare<[string, string], { lives: number }>(
+		`SELECT ${sessionLivesWhere("?", "?")} AS lives`,
+	);
+	return (account, session) => statement.get(session, account)?.lives === 1;
 }
 
 /** One of an account's sessions, as its owner sees it: never its token, and its device by an opaque id. */

@@ -1,8 +1,10 @@
 // How a module declares its actions in `contracts/` (ADR 0022, ADR 0023). Pure: oRPC contracts and nothing else,
 // so the browser, assistant and voice-gateway can import a module's contracts. It adds to oRPC only Domus's
 // conventions, as metadata: whether the action reads or writes, for a write whether it can be undone, and the
-// permission it asks for. Input, output and errors are oRPC's, with zod.
+// permission it asks for. Input, output and errors are oRPC's, with zod. `fileRef()` marks where a read's output
+// holds a file, the only place a download may take one from (ADR 0028).
 import { type AnySchema, type ContractProcedure, type ErrorMap, oc } from "@orpc/contract";
+import { z } from "zod";
 
 /** What an account may do in an area. Each level includes the ones before it. */
 export type PermissionLevel = "read" | "write" | "manage";
@@ -85,4 +87,33 @@ function permissionOf<TLevel extends PermissionLevel>({
 		level,
 		...(alwaysConfirm === true ? { alwaysConfirm } : {}),
 	};
+}
+
+/** The key of the mark `fileRef()` leaves in the metadata of Zod's global registry. */
+const FILE_REF_MARK = "domusFileRef";
+
+/**
+ * A file of a record in an action's output (ADR 0028): its reference's opaque id, never the content's hash, the
+ * name its uploader gave it, the type detected from its bytes and its size in bytes. Marked in its metadata, so
+ * the platform finds every position of a read's output that holds one, inside arrays, optional and nullable
+ * values too: a download serves only a file the read returned there.
+ */
+export function fileRef() {
+	return z
+		.object({
+			id: z.string().min(1),
+			name: z.string().min(1),
+			type: z.string().min(1),
+			size: z.number().int().nonnegative(),
+		})
+		.meta({ [FILE_REF_MARK]: true });
+}
+
+/** A file of a record, as `fileRef()` describes it. */
+export type FileRef = z.output<ReturnType<typeof fileRef>>;
+
+/** True for a schema `fileRef()` made, or a clone of one that keeps its metadata. */
+export function isFileRef(schema: unknown): boolean {
+	if (!(schema instanceof z.ZodType)) return false;
+	return z.globalRegistry.get(schema)?.[FILE_REF_MARK] === true;
 }

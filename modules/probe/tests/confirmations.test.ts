@@ -217,7 +217,7 @@ describe("confirming", () => {
 		test.confirm(ana, pending);
 
 		expect(() => test.confirm(ana, pending)).toThrow(conflict("confirmation-consumed"));
-		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "regar" }]);
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "regar", files: [] }]);
 		expect(test.log()).toHaveLength(1);
 		// The same request again is the write already done: its acknowledgement.
 		expect(
@@ -232,7 +232,7 @@ describe("confirming", () => {
 		test.invoke(ana, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" });
 		const pending = pendingFrom(() => test.invoke(kira, "probe.listNotes"));
 
-		expect(test.confirm(kira, pending)).toEqual([{ id: 1, body: "regar" }]);
+		expect(test.confirm(kira, pending)).toEqual([{ id: 1, body: "regar", files: [] }]);
 		expect(() => test.confirm(kira, pending)).toThrow(conflict("confirmation-consumed"));
 		// A new read asks again.
 		expect(pendingFrom(() => test.invoke(kira, "probe.listNotes"))).not.toBe(pending);
@@ -266,7 +266,7 @@ describe("confirming", () => {
 
 		expect(pruning).not.toBe(watering);
 		expect(test.confirm(ana, watering)).toEqual({ result: { id: 1, body: "regar" }, entry: 1 });
-		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "regar" }]);
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "regar", files: [] }]);
 	});
 
 	it("undoes through a confirmation when the inverse asks for one", async () => {

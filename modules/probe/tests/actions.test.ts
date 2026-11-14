@@ -16,8 +16,8 @@ describe("probe reads", () => {
 			.run();
 
 		expect(test.invoke(test.member("ana"), "probe.listNotes")).toEqual([
-			{ id: 1, body: "comprar pan" },
-			{ id: 2, body: "regar" },
+			{ id: 1, body: "comprar pan", files: [] },
+			{ id: 2, body: "regar", files: [] },
 		]);
 	});
 
@@ -32,7 +32,11 @@ describe("probe reads", () => {
 			.run();
 		const ana = test.member("ana");
 
-		expect(test.invoke(ana, "probe.getNote", { id: 2 })).toEqual({ id: 2, body: "regar" });
+		expect(test.invoke(ana, "probe.getNote", { id: 2 })).toEqual({
+			id: 2,
+			body: "regar",
+			files: [],
+		});
 		expect(test.invoke(ana, "probe.getNote", { id: 3 })).toBeNull();
 	});
 
@@ -63,7 +67,9 @@ describe("probe permissions, with the real authorization", () => {
 		expect(
 			test.invoke(ana, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "k1" }),
 		).toEqual({ result: { id: 1, body: "comprar pan" }, entry: 1 });
-		expect(test.invoke(ana, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([
+			{ id: 1, body: "comprar pan", files: [] },
+		]);
 	});
 
 	it("lets an admin read and write", async () => {
@@ -71,7 +77,7 @@ describe("probe permissions, with the real authorization", () => {
 		const paco = test.context(test.prepare.account({ id: "paco", role: "admin" }));
 
 		test.invoke(paco, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" });
-		expect(test.invoke(paco, "probe.listNotes")).toEqual([{ id: 1, body: "regar" }]);
+		expect(test.invoke(paco, "probe.listNotes")).toEqual([{ id: 1, body: "regar", files: [] }]);
 	});
 
 	it("lets the device account read, but not write: read is its default", async () => {
@@ -82,7 +88,9 @@ describe("probe permissions, with the real authorization", () => {
 			.run();
 		const kitchen = test.context(test.deviceAccount, { identity: "device" });
 
-		expect(test.invoke(kitchen, "probe.listNotes")).toEqual([{ id: 1, body: "comprar pan" }]);
+		expect(test.invoke(kitchen, "probe.listNotes")).toEqual([
+			{ id: 1, body: "comprar pan", files: [] },
+		]);
 		expect(() =>
 			test.invoke(kitchen, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" }),
 		).toThrow(forbidden);

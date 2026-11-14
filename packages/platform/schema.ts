@@ -403,3 +403,92 @@ export const backupMarks = sqliteTable(
 		check("platform_backup_marks_check_result", sql`${table.checkResult} IN ('ok', 'failed')`),
 	],
 );
+
+// Files (ADR 0028): the contents in the store, the prepared files of an upload and the references that hang a
+// content from a module's record. platform/files reads and writes them with prepared statements.
+
+/** The six types a content may have, by the type it is served with (ADR 0028, «Qué promete el tipo»). */
+export const FILE_TYPES = [
+	"image/jpeg",
+	"image/png",
+	"image/webp",
+	"image/heic",
+	"application/pdf",
+	"text/plain",
+] as const;
+
+/**
+ * A file content: the bytes in the store, by their SHA-256, never rewritten, with their size, the type detected
+ * from them and their state. `present` is available; `claimed` is being deleted by the cleanup, whose file may be
+ * gone already.
+ */
+export const fileContents = sqliteTable(
+	"platform_file_contents",
+	{
+		hash: text().primaryKey(),
+		size: integer().notNull(),
+		type: text({ enum: FILE_TYPES }).notNull(),
+		state: text({ enum: ["present", "claimed"] }).notNull(),
+		createdAt: integer("created_at").notNull(),
+	},
+	(table) => [
+		check(
+			"platform_file_contents_type",
+			sql`${table.type} IN ('image/jpeg', 'image/png', 'image/webp', 'image/heic', 'application/pdf', 'text/plain')`,
+		),
+		check("platform_file_contents_state", sql`${table.state} IN ('present', 'claimed')`),
+	],
+);
+
+/**
+ * A prepared file: what an upload gives back, by an opaque id that is not the hash. It is of the session and the
+ * account that uploaded it, usable once and until it expires. Its session has no foreign key: a session that ends
+ * leaves it useless at once, and the cleanup removes it.
+ */
+export const preparedFiles = sqliteTable(
+	"platform_prepared_files",
+	{
+		id: text().primaryKey(),
+		content: text()
+			.notNull()
+			.references(() => fileContents.hash),
+		name: text().notNull(),
+		session: text().notNull(),
+		account: text().notNull(),
+		expiresAt: integer("expires_at").notNull(),
+		consumed: integer({ mode: "boolean" }).notNull().default(false),
+	},
+	(table) => [
+		index("platform_prepared_files_session").on(table.session),
+		index("platform_prepared_files_content").on(table.content),
+	],
+);
+
+/**
+ * A file reference: a content hung from a record of a module (its module, table and id), with the name its uploader
+ * gave it, by an opaque id that is not the hash. A released one keeps the entry of the action log that released it,
+ * whose undo may reattach it; a live one has none.
+ */
+export const fileReferences = sqliteTable(
+	"platform_file_references",
+	{
+		id: text().primaryKey(),
+		content: text()
+			.notNull()
+			.references(() => fileContents.hash),
+		name: text().notNull(),
+		module: text().notNull(),
+		recordTable: text("record_table").notNull(),
+		recordId: integer("record_id").notNull(),
+		releasedBy: integer("released_by").references(() => actionLog.entry),
+	},
+	(table) => [
+		index("platform_file_references_record").on(
+			table.module,
+			table.recordTable,
+			table.recordId,
+		),
+		index("platform_file_references_content").on(table.content),
+		index("platform_file_references_released_by").on(table.releasedBy),
+	],
+);

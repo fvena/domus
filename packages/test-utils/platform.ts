@@ -37,6 +37,7 @@ import {
 	readPendingConfirmations,
 	rejectPending,
 	requestProofOf,
+	sessionOfToken,
 	syntheticContext,
 	type Acknowledgement,
 	type Annotation,
@@ -58,6 +59,7 @@ import {
 	type VerifiedContext,
 	type WriteOutcome,
 	type BackupMarks,
+	type InterleavePoint,
 	listSnapshotsOf,
 	readBackupMarks,
 	runRestore,
@@ -165,6 +167,26 @@ export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	 * `file`. Unset: the backups are off.
 	 */
 	readonly backups?: TestBackups;
+	/**
+	 * The `files` folder of the store of file contents, also with the database in memory. Unset: a temporary
+	 * folder, removed on close once the uploads in progress are cancelled. A path: that folder, absolute, kept on
+	 * close, for tests that open the same data again.
+	 */
+	readonly files?: string;
+	/**
+	 * Where the platform tells the test it got to a point, and waits until the promise the test returns settles:
+	 * `published`, a publication with its file in place and its rows not yet written; `claimed`, the cleanup with a
+	 * content marked claimed and its file not yet removed; `opened`, a download with its file open and no byte sent.
+	 * A rejected promise fails the work there. Only for tests.
+	 */
+	readonly interleave?: (point: InterleavePoint) => Promise<void> | void;
+	/**
+	 * The free bytes of the volume of the uploads, as the test wants them at each upload. Unset: what `statfs`
+	 * tells of the folder of contents.
+	 */
+	readonly freeSpace?: () => number;
+	/** Whether the next write of an upload's temporary file fails with `ENOSPC`, asked at each write. Only for tests. */
+	readonly diskFull?: () => boolean;
 }
 
 /** The backups of a test platform. */
@@ -273,6 +295,8 @@ export interface TestPlatform<
 	readonly door: HttpHandler;
 	/** `":memory:"` or the path of the file in use. */
 	readonly databaseFile: string;
+	/** The `files` folder of the store: `contents/` by hash and `incoming/`, the uploads in progress. */
+	readonly filesDirectory: string;
 	/** A new browser, without cookies, on {@link door}. */
 	browser(): TestBrowser;
 	/**
@@ -294,6 +318,11 @@ export interface TestPlatform<
 	 * session, the account itself as the device's, the app channel, proven by password, no conversation.
 	 */
 	context(account: string, options?: ContextOptions): VerifiedContext;
+	/**
+	 * The verified context the door builds for a request of `browser`, signed in: its session's account, device and
+	 * session, the app channel, proven by password. For invoking actions that need the session that uploaded a file.
+	 */
+	contextOf(browser: TestBrowser): VerifiedContext;
 	/** Creates the member `id` the first time, and returns a synthetic context for it as {@link context}. */
 	member(id: string, options?: ContextOptions): VerifiedContext;
 	/**
@@ -390,6 +419,9 @@ export const TEST_START = Date.UTC(2026, 0, 1);
 /** The origin the door of a test platform answers on. */
 export const TEST_ORIGIN = "http://domus.test";
 
+/** The cookie of Better Auth that carries a browser's session over plain HTTP. */
+const SESSION_COOKIE = "better-auth.session_token";
+
 /** The secret that signs the sessions of a test platform: only for tests. */
 const TEST_AUTH_SECRET = "test-only-secret-that-signs-test-sessions";
 
@@ -405,6 +437,10 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 	tasks,
 	jobs,
 	backups,
+	files,
+	interleave,
+	freeSpace,
+	diskFull,
 }: TestPlatformOptions<TModules>): TestPlatform<TModules> {
 	let tempDir: string | undefined;
 	let databaseFile = file ?? ":memory:";
@@ -412,6 +448,17 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		tempDir = mkdtempSync(join(tmpdir(), "domus-test-"));
 		databaseFile = join(tempDir, "domus.db");
 	}
+	// The harness's own folder of contents goes with the platform; a test's own stays.
+	let filesTempDir: string | undefined;
+	let filesDirectory: string;
+	if (files === undefined) {
+		filesTempDir = mkdtempSync(join(tmpdir(), "domus-files-"));
+		filesDirectory = join(filesTempDir, "files");
+	} else filesDirectory = files;
+	const removeTemporary = () => {
+		if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+		if (filesTempDir) rmSync(filesTempDir, { recursive: true, force: true });
+	};
 
 	let now = TEST_START;
 	const timer = controlledTimer(() => now);
@@ -435,6 +482,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 				modules,
 				retention,
 				confirmation,
+				filesDirectory,
 				...(backups === undefined
 					? {}
 					: {
@@ -451,16 +499,20 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 				...(jobs === undefined ? {} : { jobs }),
 				...(backups?.restic === undefined ? {} : { restic: backups.restic }),
 				...(backups?.node === undefined ? {} : { node: backups.node }),
+				...(interleave === undefined ? {} : { interleave }),
+				...(freeSpace === undefined ? {} : { freeSpace }),
+				...(diskFull === undefined ? {} : { diskFull }),
 			},
 		);
 	} catch (error) {
-		if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+		removeTemporary();
 		throw error;
 	}
 
+	// Closing the platform cancels the uploads in progress and closes their descriptors before the folders go.
 	const close = () => {
 		platform.close();
-		if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+		removeTemporary();
 	};
 
 	const prepare: TestPreparation = {
@@ -529,6 +581,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		platform,
 		door,
 		databaseFile,
+		filesDirectory,
 		browser: () => createTestBrowser(door, TEST_ORIGIN),
 		clock,
 		background,
@@ -536,6 +589,22 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		deviceAccount: deviceAccountOf(platform),
 		dbFor: (module) => moduleDatabase(platform, module),
 		context,
+		contextOf: (browser) => {
+			// Better Auth's cookie holds the session's token and its signature, after the first dot.
+			const cookie = browser.cookie(SESSION_COOKIE);
+			const token =
+				cookie === undefined ? undefined : decodeURIComponent(cookie).split(".")[0];
+			const found = token === undefined ? undefined : sessionOfToken(platform, token);
+			if (!found) throw new Error("the browser is not signed in");
+			return syntheticContext({
+				account: found.account,
+				device: found.device,
+				session: found.session,
+				deviceAccount: found.account,
+				channel: "app",
+				identity: "password",
+			});
+		},
 		member: (id, options) => {
 			if (!hasAccount(platform, id)) prepare.account({ id, role: "member" });
 			return context(id, options);
@@ -601,6 +670,11 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 export interface TestRestoreOptions<TModules extends readonly AnyModule[]> {
 	/** The live database's path, the one a test platform opens before and after. */
 	readonly file: string;
+	/**
+	 * The `files` folder of the store the restored contents go into: `files` beside `file` unless given, as the
+	 * platform has it. A test platform opened without `files` uses another folder, so pass it to both.
+	 */
+	readonly files?: string;
 	/** The modules of the code that restores: their migrations are checked and applied to the copy. */
 	readonly modules: TModules;
 	readonly backups: TestBackups;
@@ -618,6 +692,7 @@ export interface TestRestoreOptions<TModules extends readonly AnyModule[]> {
  */
 export function restoreBackup<const TModules extends readonly AnyModule[]>({
 	file,
+	files,
 	modules,
 	backups,
 	snapshot,
@@ -627,6 +702,7 @@ export function restoreBackup<const TModules extends readonly AnyModule[]>({
 	return runRestore(
 		{
 			databaseFile: file,
+			...(files === undefined ? {} : { filesDirectory: files }),
 			modules,
 			backups: { repository: backups.repository, passwordFile: backups.passwordFile },
 			...(snapshot === undefined ? {} : { snapshot }),

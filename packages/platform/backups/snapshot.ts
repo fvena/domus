@@ -1,11 +1,15 @@
 // The snapshot of a backup (ADR 0027, which narrows ADR 0026): a child Node process with its own connection takes
 // the database's shared lock, as `api` and `accounts` do, and `VACUUM INTO` copies the live database in one read
 // transaction, out of `api`'s one thread. A cancelled job ends the child as any other. `quick_check` runs in another
-// child, which opens the snapshot read only: in `api` it would hold its one thread for the whole walk.
+// child, which opens the snapshot read only: in `api` it would hold its one thread for the whole walk. The same child
+// lists the file contents the snapshot needs at its capture instant (ADR 0028), read from the snapshot and never
+// from the live database, which goes on changing.
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
 import { PermanentJobError } from "../background";
+import { NEEDED_CONTENTS } from "../files/needed";
+import { CONTENT_HASH } from "../files/store";
 import { LOCK_FILE, TAKE_SHARED_LOCK } from "../lock";
 import { type ClockAndTimer, runChild } from "./child";
 
@@ -32,16 +36,22 @@ process.stdout.write(${JSON.stringify(COPIED)});
 `;
 
 /**
- * The child's program: it opens the file read only, prints the first line of `quick_check` and exits. Any failure,
- * opening a file that is no database included, ends it with another code.
+ * The check's program: it opens the file read only and prints the first line of `quick_check`. When that says
+ * `ok`, each following line is the hash of a content the snapshot needs at the capture instant it gets. Any
+ * failure, opening a file that is no database included, ends it with another code.
  */
 const QUICK_CHECK = `
-const [sqlite, file] = process.argv.slice(1);
+const [sqlite, file, capturedAt] = process.argv.slice(1);
 const Database = require(sqlite);
 const db = new Database(file, { readonly: true, fileMustExist: true });
-const result = db.pragma("quick_check", { simple: true });
+const result = String(db.pragma("quick_check", { simple: true }));
+const lines = [result];
+if (result === "ok") {
+	const needed = db.prepare(${JSON.stringify(NEEDED_CONTENTS)}).pluck();
+	for (const hash of needed.iterate(Number(capturedAt))) lines.push(hash);
+}
 db.close();
-process.stdout.write(String(result));
+process.stdout.write(lines.join("\\n"));
 `;
 
 /**
@@ -67,18 +77,27 @@ export async function takeSnapshot(
 		throw new PermanentJobError("the snapshot could not be taken");
 }
 
-/** True when `quick_check` of the snapshot at `file` says `ok`, checked in a child process. */
-export async function passesQuickCheck(
+/**
+ * Checks the snapshot at `file` with `quick_check` in a child process and, when it passes, gives the hashes of the
+ * file contents it needs at `capturedAt`; undefined when it does not pass.
+ */
+export async function checkSnapshot(
 	file: string,
+	capturedAt: number,
 	signal: AbortSignal,
 	clockAndTimer: ClockAndTimer,
 	node = process.execPath,
-): Promise<boolean> {
+): Promise<readonly string[] | undefined> {
 	const { code, stdout } = await runChild(
 		node,
-		["-e", QUICK_CHECK, SQLITE, file],
+		["-e", QUICK_CHECK, SQLITE, file, String(capturedAt)],
 		{ env: {}, signal },
 		clockAndTimer,
 	);
-	return code === 0 && stdout === "ok";
+	const [result, ...contents] = stdout.split("\n");
+	if (code !== 0 || result !== "ok") return undefined;
+	// A hash is a path in the store: anything else read from the snapshot never names one.
+	if (!contents.every((hash) => CONTENT_HASH.test(hash)))
+		throw new PermanentJobError("the snapshot names a file content that is no hash");
+	return contents;
 }

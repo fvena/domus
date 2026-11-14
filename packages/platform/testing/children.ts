@@ -5,8 +5,11 @@ import { fork } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import type { ModuleMigration } from "@domus/module-sdk";
+
 import type { BackupConfig } from "../backups";
 import type { RestorePoint } from "../backups/restore";
+import type { InterleavePoint } from "../files";
 
 /** What a child holds over a data folder, the one that has or will have `domus.db` and `domus.lock`. */
 export type ChildTask =
@@ -15,9 +18,9 @@ export type ChildTask =
 	/** The exclusive lock of the database, as restoring takes it. */
 	| { readonly hold: "exclusive"; readonly dataDirectory: string }
 	/**
-	 * A restore of the latest snapshot, without modules, stopped at a cut point of its exchange: the child tells the
-	 * test once it got there, and holds the exclusive lock until the test kills it. A restore that ends or fails
-	 * before reaching the point is the child's error.
+	 * A restore of the latest snapshot, stopped at a cut point of its exchange: the child tells the test once it got
+	 * there, and holds the exclusive lock until the test kills it. A restore that ends or fails before reaching the
+	 * point is the child's error. The store of file contents is `files` in the data folder.
 	 */
 	| {
 			readonly hold: "restore";
@@ -25,8 +28,42 @@ export type ChildTask =
 			readonly backups: BackupConfig;
 			/** The restic executable: `restic` from the `PATH` unless given. */
 			readonly restic?: string;
+			/**
+			 * The migrations of the modules the copy holds, in their order, for a child that cannot import a module:
+			 * without them, a copy with any module's migration is refused.
+			 */
+			readonly modules?: readonly ChildModule[];
 			readonly at: RestorePoint;
+	  }
+	/**
+	 * An upload of `content` for a session of `account`, without modules, stopped once its file is in place and
+	 * before its rows: the child tells the test once it got there.
+	 */
+	| {
+			readonly hold: "publish";
+			readonly dataDirectory: string;
+			readonly account: string;
+			readonly session: string;
+			/** The bytes of the upload, in base64. */
+			readonly content: string;
+	  }
+	/**
+	 * A cleanup at the instant `now`, without modules, stopped at a point of deleting a content: `claimed`, its row
+	 * marked and its file in place, or `removed`, its file gone and its row still claimed. A cleanup that ends or
+	 * fails before reaching the point is the child's error.
+	 */
+	| {
+			readonly hold: "delete";
+			readonly dataDirectory: string;
+			readonly now: number;
+			readonly at: Extract<InterleavePoint, "claimed" | "removed">;
 	  };
+
+/** A module as a child restores with it: its id and its migrations, which travel as JSON. */
+export interface ChildModule {
+	readonly id: string;
+	readonly migrations: readonly ModuleMigration[];
+}
 
 /** What a child tells the test: that it holds its task, or why it could not. */
 export type ChildMessage = { readonly ready: true } | { readonly error: string };

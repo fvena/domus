@@ -2,6 +2,8 @@
 // over IPC once it holds it, and waits; only SIGKILL or the end of the test ends it. Run through tsx, never bundled.
 import { join } from "node:path";
 
+import type { InterleavePoint } from "../files";
+import type { Platform } from "../platform";
 import type { ChildMessage, ChildTask } from "./children";
 
 /**
@@ -19,9 +21,89 @@ async function hold(task: ChildTask): Promise<void> {
 	} else if (task.hold === "exclusive") {
 		const { takeExclusiveLock } = await import("../lock");
 		held.push(takeExclusiveLock(task.dataDirectory));
-	} else {
+	} else if (task.hold === "restore") {
 		await restoreUntil(task);
+	} else if (task.hold === "publish") {
+		await publishUntil(task);
+	} else {
+		await deleteUntil(task);
 	}
+}
+
+/**
+ * Opens the platform with an interleave that stops at `point` for good, and runs `work` on it: the work that
+ * reaches the point waits on a promise that never settles, kept referenced. Settles once it got there; fails when
+ * `work` ends or fails first.
+ */
+async function openUntil(
+	point: InterleavePoint,
+	dataDirectory: string,
+	clock: () => number,
+	work: (platform: Platform) => Promise<unknown>,
+): Promise<void> {
+	const { openPlatform } = await import("../platform");
+	await new Promise<void>((reached, failed) => {
+		const platform = openPlatform(
+			{ databaseFile: join(dataDirectory, "domus.db"), modules: [] },
+			{
+				clock,
+				// Room enough, whatever the machine has free: the test is about the cut.
+				freeSpace: () => Number.MAX_SAFE_INTEGER,
+				interleave: (at) => {
+					if (at !== point) return undefined;
+					const forever = new Promise<void>(() => {});
+					held.push(forever);
+					reached();
+					return forever;
+				},
+			},
+		);
+		held.push(platform);
+		work(platform).then(() => failed(new Error(`it ended without reaching ${point}`)), failed);
+	});
+}
+
+/** Uploads the task's content for its session until its file is in place, before its rows. */
+async function publishUntil(task: Extract<ChildTask, { hold: "publish" }>): Promise<void> {
+	const { filesOf } = await import("../platform");
+	const { sealContext } = await import("../authorization/context");
+	const content = Buffer.from(task.content, "base64");
+	await openUntil("published", task.dataDirectory, Date.now, async (platform) => {
+		const files = filesOf(platform);
+		if (files === undefined) throw new Error("the platform has no store of files");
+		const context = sealContext({
+			account: task.account,
+			device: "child-device",
+			session: task.session,
+			deviceAccount: task.account,
+			channel: "app",
+			identity: "password",
+		});
+		await files.upload(
+			context,
+			new Request("http://domus.child/api/files", {
+				method: "POST",
+				body: content,
+				headers: { "content-length": String(content.length), "x-file-name": "foto.jpg" },
+			}),
+		);
+	});
+}
+
+/** Runs the cleanup at the task's instant until it gets to its point of deleting a content. */
+async function deleteUntil(task: Extract<ChildTask, { hold: "delete" }>): Promise<void> {
+	const { connectionOf, filesOf } = await import("../platform");
+	const { cleanupTask } = await import("../background/cleanup");
+	await openUntil(
+		task.at,
+		task.dataDirectory,
+		() => task.now,
+		async (platform) => {
+			const sweeps = filesOf(platform)?.sweeps ?? [];
+			const { job } = cleanupTask(connectionOf(platform), () => task.now, { sweeps });
+			await job.run({ signal: new AbortController().signal, startedAt: task.now });
+		},
+	);
 }
 
 /**
@@ -30,11 +112,16 @@ async function hold(task: ChildTask): Promise<void> {
  */
 async function restoreUntil(task: Extract<ChildTask, { hold: "restore" }>): Promise<void> {
 	const { runRestore } = await import("../backups/restore");
+	const { defineModule } = await import("@domus/module-sdk");
+	// Only what restoring reads of a module: its id and its migrations.
+	const modules = (task.modules ?? []).map(({ id, migrations }) =>
+		defineModule({ id, schema: {}, migrations }),
+	);
 	await new Promise<void>((reached, failed) => {
 		runRestore(
 			{
 				databaseFile: join(task.dataDirectory, "domus.db"),
-				modules: [],
+				modules,
 				backups: task.backups,
 			},
 			{
