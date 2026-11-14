@@ -31,7 +31,7 @@ La llave de una app conectada, de punta a punta, antes de que la puerta la use. 
 
 ## Comments
 
-- Hecho en `SHA`.
+- Hecho en `3ac9169`.
 - El núcleo está en `platform/identity/keys.ts` (la lista `CONNECTED_APPS`, `parseKey`, `createKey`, `listKeys`, `revokeKey` y `checkKey`) y en `identity/keys-command.ts` (`parseKeysArguments`, `runKeys`, `KEYS_USAGE`). `runKeys` es síncrono; su terminal tiene `print` (stdout), `inform` y `fail` (stderr).
 - `createKey` y `checkKey` reciben la lista de apps como argumento: la 02 puede pasarles la lista con las apps de prueba (`test.prepare.key(app)` y la opción `apps`) sin tocar la de producción. `runKeys` usa siempre `CONNECTED_APPS`.
 - `checkKey` devuelve `{ ok: true, id, app }` o `{ ok: false, reason }`, con `reason` entre `malformed`, `unknown`, `wrong-secret`, `revoked` y `unknown-app`, solo para el log de quien opera. No anota el último uso: lo hace la 02. La columna es `last_used_at`; la prueba de `list` la rellena por SQL como preparación hasta entonces.
