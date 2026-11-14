@@ -8,7 +8,7 @@ import { type ModuleDefinition, recordTablesOf, type Visibility } from "@domus/m
 import type Database from "better-sqlite3";
 
 import type { AreaPolicy } from "../authorization";
-import type { RecordChange } from "../authorization/invalidations";
+import type { OwnedRecordChange, RecordChange } from "../authorization/invalidations";
 import type { RecordArea, RowTransition } from "../authorization/writes";
 
 /** An owned table as the capture knows it: its module, its record type and its area. */
@@ -138,9 +138,13 @@ export function installCapture(
 /**
  * What a write remembers of the records it changed (ADR 0029): per record, in the order first seen, its area, its
  * first state before the write and its last after it. The states in between never count, so a note made public
- * and private again in one write was never public.
+ * and private again in one write was never public. `files` are the records whose files the write changed (ADR
+ * 0028), with their state then: each one the capture did not see follows, once, as it was.
  */
-export function changesOf(transitions: readonly CapturedTransition[]): RecordChange[] {
+export function changesOf(
+	transitions: readonly CapturedTransition[],
+	files: readonly OwnedRecordChange[] = [],
+): RecordChange[] {
 	const changes = new Map<string, RecordChange>();
 	for (const transition of transitions) {
 		const { table, operation } = transition;
@@ -171,6 +175,10 @@ export function changesOf(transitions: readonly CapturedTransition[]): RecordCha
 					}
 				: { ...first, after },
 		);
+	}
+	for (const change of files) {
+		const key = JSON.stringify([change.module, change.type, change.id]);
+		if (!changes.has(key)) changes.set(key, change);
 	}
 	return [...changes.values()];
 }

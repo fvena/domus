@@ -878,6 +878,7 @@ export function createActions({
 			undoable: found.undoable,
 			undoes: logged.undoes,
 			touched: [],
+			changed: [],
 			released: new Set(),
 		};
 		const jobs: WriteJob[] = [];
@@ -910,9 +911,9 @@ export function createActions({
 		// the same transaction.
 		references.linkReleased(run.released, entry);
 		for (const job of jobs) outbox.enqueue({ ...job, entry });
-		// Taken from the capture before it is emptied, with the area tables' records it declared; an undo runs this
-		// same path.
-		invalidations.remember([...changesOf(transitions), ...declared]);
+		// Taken from the capture before it is emptied, with the records whose files alone changed and the area tables'
+		// records it declared; an undo runs this same path.
+		invalidations.remember([...changesOf(transitions, run.changed), ...declared]);
 		capture.clear();
 		return { result: outcome.result, entry };
 	}
