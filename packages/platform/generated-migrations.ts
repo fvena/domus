@@ -141,4 +141,18 @@ export const generatedMigrations: readonly ModuleMigration[] = [
 			"\nCREATE INDEX `platform_jobs_entry` ON `platform_jobs` (`entry`);",
 		],
 	},
+	{
+		tag: "0013_lyrical_gideon",
+		position: 14,
+		hash: "2a8a726f15e517a0c4e48bbc4e29d3acdce235cc003a84705742e7342ceaa24c",
+		statements: [
+			'CREATE TABLE `platform_push_keys` (\n\t`id` integer PRIMARY KEY NOT NULL,\n\t`public_key` text NOT NULL,\n\t`private_key` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\tCONSTRAINT "platform_push_keys_one_row" CHECK("platform_push_keys"."id" = 1)\n);\n',
+			"\nCREATE TABLE `platform_push_subscriptions` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`device` text NOT NULL,\n\t`session` text NOT NULL,\n\t`endpoint` text NOT NULL,\n\t`p256dh` text NOT NULL,\n\t`auth` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\tFOREIGN KEY (`device`) REFERENCES `platform_devices`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`session`) REFERENCES `platform_session`(`id`) ON UPDATE no action ON DELETE cascade\n);\n",
+			"\nCREATE UNIQUE INDEX `platform_push_subscriptions_device_unique` ON `platform_push_subscriptions` (`device`);",
+			"\nCREATE UNIQUE INDEX `platform_push_subscriptions_endpoint_unique` ON `platform_push_subscriptions` (`endpoint`);",
+			"\nCREATE INDEX `platform_push_subscriptions_session` ON `platform_push_subscriptions` (`session`);",
+			"\nALTER TABLE `platform_devices` ADD `entry` text;",
+			"\nALTER TABLE `platform_session` ADD `device_entry` text;",
+		],
+	},
 ];

@@ -103,11 +103,16 @@ export const user = sqliteTable("platform_user", {
 	updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
 });
 
-/** A device: a browser installed or, later, a satellite. It outlives its sessions and can change account. */
+/**
+ * A device: a browser installed or, later, a satellite. It outlives its sessions and can change account. `entry` is
+ * a random value written anew each time a session enters it, before that session is created (ADR 0029): the session
+ * whose `deviceEntry` equals it is the one the device has enabled for notices, and none when none does.
+ */
 export const devices = sqliteTable("platform_devices", {
 	id: text().primaryKey(),
 	createdAt: integer("created_at").notNull(),
 	name: text(),
+	entry: text(),
 });
 
 /** A session of an account from a device. Which device is kept here, on the server, never read from a cookie. */
@@ -121,6 +126,8 @@ export const session = sqliteTable(
 		deviceId: text("device_id")
 			.notNull()
 			.references(() => devices.id),
+		/** The `entry` its device got when this session entered it: equal to the device's while it is enabled. */
+		deviceEntry: text("device_entry"),
 		token: text().notNull().unique(),
 		expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
 		ipAddress: text("ip_address"),
@@ -498,4 +505,46 @@ export const fileReferences = sqliteTable(
 		index("platform_file_references_content").on(table.content),
 		index("platform_file_references_released_by").on(table.releasedBy),
 	],
+);
+
+// Notices (ADR 0029): the subscriptions of the devices and the VAPID keys. platform/notifications reads and writes
+// them with prepared statements.
+
+/**
+ * A subscription to notices: the push endpoint of a device's browser and its keys, registered from a session.
+ * A device has at most one and an endpoint belongs to one only; both hang from their device and session, so ending
+ * the session, however it ends, deletes its subscription.
+ */
+export const pushSubscriptions = sqliteTable(
+	"platform_push_subscriptions",
+	{
+		id: text().primaryKey(),
+		device: text()
+			.notNull()
+			.unique()
+			.references(() => devices.id, { onDelete: "cascade" }),
+		session: text()
+			.notNull()
+			.references(() => session.id, { onDelete: "cascade" }),
+		endpoint: text().notNull().unique(),
+		p256dh: text().notNull(),
+		auth: text().notNull(),
+		createdAt: integer("created_at").notNull(),
+	},
+	(table) => [index("platform_push_subscriptions_session").on(table.session)],
+);
+
+/**
+ * The one pair of VAPID keys (`id` is always 1), each in base64url, generated the first time the platform opens.
+ * Kept in the database, so it travels with the backup.
+ */
+export const pushKeys = sqliteTable(
+	"platform_push_keys",
+	{
+		id: integer().primaryKey(),
+		publicKey: text("public_key").notNull(),
+		privateKey: text("private_key").notNull(),
+		createdAt: integer("created_at").notNull(),
+	},
+	(table) => [check("platform_push_keys_one_row", sql`${table.id} = 1`)],
 );

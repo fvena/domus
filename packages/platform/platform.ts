@@ -47,6 +47,7 @@ import { sessionLives } from "./identity/sessions";
 import { type DatabaseLock, takeSharedLock } from "./lock";
 import { migrations } from "./migrations";
 import { migrate } from "./migrator";
+import { createNotifications, type Notifications, PUSH_SERVICES } from "./notifications";
 
 export interface PlatformOptions {
 	/** An absolute path to the SQLite file, or `":memory:"` for tests. */
@@ -129,6 +130,11 @@ export interface PlatformRuntime {
 	readonly freeSpace?: FreeSpace;
 	/** Only from the testing entry: whether the next write of an upload's temporary file fails with `ENOSPC`. */
 	readonly diskFull?: () => boolean;
+	/**
+	 * The hosts of the push services a subscription's endpoint may be of: {@link PUSH_SERVICES} unless a test
+	 * composes its own.
+	 */
+	readonly pushServices?: readonly string[];
 	/** Only from the testing entry: the most events a live channel holds unwritten, lower than production's. */
 	readonly channelQueue?: number;
 }
@@ -149,6 +155,8 @@ const internals = new WeakMap<
 		readonly proofs: Proofs;
 		readonly background: Background;
 		readonly files: Files | undefined;
+		readonly notifications: Notifications;
+		readonly interleave: Interleave | undefined;
 		readonly events: Events;
 	}
 >();
@@ -179,6 +187,7 @@ export function openPlatform(
 		interleave,
 		freeSpace,
 		diskFull,
+		pushServices = PUSH_SERVICES,
 		channelQueue,
 	}: PlatformRuntime,
 ): Platform {
@@ -218,6 +227,7 @@ export function openPlatform(
 	let view: AccessView;
 	let files: Files | undefined;
 	let background: Background;
+	let notifications: Notifications;
 	let events: Events;
 	try {
 		if (databaseFile !== IN_MEMORY) {
@@ -234,6 +244,8 @@ export function openPlatform(
 		// After the migrations, which its triggers would stop from dropping a column, and before any action.
 		capture = installCapture(db, modules, areas);
 		view = accessView(db, areas);
+		// The VAPID keys are created the first time the platform opens.
+		notifications = createNotifications({ connection: db, clock, view, pushServices });
 		events = createEvents({
 			connection: db,
 			view,
@@ -336,6 +348,8 @@ export function openPlatform(
 		proofs,
 		background,
 		files,
+		notifications,
+		interleave,
 		events,
 	});
 	return platform;
@@ -406,6 +420,19 @@ export function clockOf(platform: Platform): Clock {
 /** The files of a platform, when it has a folder for them. Inside platform only: the door serves their routes. */
 export function filesOf(platform: Platform): Files | undefined {
 	return internalsOf(platform).files;
+}
+
+/** The subscriptions and keys of a platform's notices. Inside platform only: the door serves their routes. */
+export function notificationsOf(platform: Platform): Notifications {
+	return internalsOf(platform).notifications;
+}
+
+/**
+ * Where the platform tells a test it got to a point, when the testing entry gave one. Inside platform only: the door
+ * hands it to signing in, for `entering`.
+ */
+export function interleaveOf(platform: Platform): Interleave | undefined {
+	return internalsOf(platform).interleave;
 }
 
 /** The live channels of a platform. Inside platform only: the door serves `GET /api/events`. */

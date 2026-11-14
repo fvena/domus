@@ -160,8 +160,9 @@ describe("uploading a file", () => {
 			reached = resolve;
 		});
 		await using test = await household({
-			// The first publication stops with its file in place and its rows not yet written.
+			// The first publication stops with its file in place and its rows not yet written; signing in goes on.
 			interleave: (point) => {
+				if (point === "entering") return undefined;
 				expect(point).toBe("published");
 				held += 1;
 				if (held > 1) return undefined;
@@ -218,7 +219,8 @@ describe("uploading a file", () => {
 			release = resolve;
 		});
 		await using test = await household({
-			interleave: () => {
+			interleave: (point) => {
+				if (point !== "published") return undefined;
 				reached();
 				return releasing;
 			},

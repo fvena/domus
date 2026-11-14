@@ -21,6 +21,7 @@ import {
 	hasAccount,
 	hasSession,
 	sessionExpiresAt,
+	type SubscriptionRow,
 	invokeAction,
 	type IssuedProof,
 	type LogEntry,
@@ -36,6 +37,7 @@ import {
 	readDelegationOf,
 	readLog,
 	readPendingConfirmations,
+	readSubscriptions,
 	rejectPending,
 	requestProofOf,
 	sessionOfToken,
@@ -178,8 +180,9 @@ export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	/**
 	 * Where the platform tells the test it got to a point, and waits until the promise the test returns settles:
 	 * `published`, a publication with its file in place and its rows not yet written; `claimed`, the cleanup with a
-	 * content marked claimed and its file not yet removed; `opened`, a download with its file open and no byte sent.
-	 * A rejected promise fails the work there. Only for tests.
+	 * content marked claimed and its file not yet removed; `opened`, a download with its file open and no byte sent;
+	 * `entering`, a sign-in that wrote its device's new entry and has not created its session yet. A rejected
+	 * promise, or a throw, fails the work there. Only for tests.
 	 */
 	readonly interleave?: (point: InterleavePoint) => Promise<void> | void;
 	/**
@@ -411,6 +414,12 @@ export interface TestPlatform<
 	 * in has its expiry from the real time, as Better Auth sets it: the test moves the platform clock to it.
 	 */
 	sessionExpiresAt(session: string): number | undefined;
+	/**
+	 * A read-only snapshot of every subscription to notices, oldest first, each with its device, session and account
+	 * and whether it is enabled: its session lives on the platform clock and is the one its device has enabled. That
+	 * exception is only for tests; the app subscribes through the door.
+	 */
+	subscriptions(): readonly SubscriptionRow[];
 	/**
 	 * Reads the action log through the platform's real operation: the annotations of the represented account's
 	 * own entries, in order, never their input or inverse. Via Kira it needs the platform's read delegated: a
@@ -670,6 +679,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 			operate(context, "revokeDevice", { session }, options),
 		hasSession: (session) => hasSession(platform, session),
 		sessionExpiresAt: (session) => sessionExpiresAt(platform, session),
+		subscriptions: () => readSubscriptions(platform),
 		readLog: (context) =>
 			invokeAction(platform, {
 				context,

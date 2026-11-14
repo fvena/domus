@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readJobs } from "./background";
+import { sessionEnabledWhere } from "./identity/sessions";
 import { migrations as platformMigrations } from "./migrations";
 import { migrate } from "./migrator";
 import { connectionOf, createPlatform, type Platform } from "./platform";
@@ -245,6 +246,34 @@ describe("migrations at start", () => {
 				outcome: null,
 			},
 		]);
+		after.close();
+	});
+
+	it("brings the subscriptions and the VAPID keys to a database of phase 1d3, its sessions kept and none enabled", () => {
+		const phase1d3 = platformMigrations.filter(({ position }) => position <= 11);
+		const before = new Database(databaseFile);
+		migrate(before, [{ module: "platform", migrations: phase1d3 }]);
+		before.exec(`
+			INSERT INTO platform_user (id, name, email, created_at, updated_at) VALUES ('ana', 'Ana', 'ana@domus.test', 0, 0);
+			INSERT INTO platform_devices (id, created_at) VALUES ('phone', 0);
+			INSERT INTO platform_session (id, user_id, device_id, token, expires_at, created_at, updated_at)
+				VALUES ('s1', 'ana', 'phone', 't1', 9999999999999, 0, 0);
+		`);
+		before.close();
+
+		const after = createPlatform({ databaseFile, modules: [] });
+		const connection = connectionOf(after);
+		expect(
+			connection
+				.prepare(
+					`SELECT s.id, ${sessionEnabledWhere("s.id")} AS enabled FROM platform_session s`,
+				)
+				.all(),
+		).toEqual([{ id: "s1", enabled: 0 }]);
+		expect(connection.prepare("SELECT count(*) FROM platform_push_keys").pluck().get()).toBe(1);
+		expect(
+			connection.prepare("SELECT count(*) FROM platform_push_subscriptions").pluck().get(),
+		).toBe(0);
 		after.close();
 	});
 

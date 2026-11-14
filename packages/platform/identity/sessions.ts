@@ -33,6 +33,17 @@ export function sessionLivesWhere(session: string, account: string, now: string)
 		WHERE id = ${session} AND user_id = ${account} AND expires_at > ${now})`;
 }
 
+/**
+ * The SQL condition that the session of the expression `session` is the one its device has enabled for notices
+ * (ADR 0029): its `deviceEntry` equals its device's `entry`. Every session entering a device writes a new `entry`
+ * before it is created, so at most one session of a device matches, an earlier one never again, and none when the
+ * creation failed after writing it. It says nothing of whether the session lives: {@link sessionLivesWhere} does.
+ */
+export function sessionEnabledWhere(session: string): string {
+	return `EXISTS (SELECT 1 FROM platform_session s JOIN platform_devices d ON d.id = s.device_id
+		WHERE s.id = ${session} AND s.device_entry = d.entry)`;
+}
+
 /** Whether a session still lives at the instant `now`: it exists, is the account's and has not expired. */
 export type SessionLives = (account: string, session: string, now: number) => boolean;
 

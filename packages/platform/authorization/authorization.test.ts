@@ -10,6 +10,7 @@ import {
 	type Delegated,
 	type Grant,
 	isAllowed,
+	maySubscribe,
 	mayUpload,
 	type PermissionLevel,
 	type Role,
@@ -498,5 +499,22 @@ describe("who may upload a file", () => {
 		expect([uploads("ana"), uploads("paco"), uploads("kitchen")]).toEqual([true, true, false]);
 		expect(uploads("ana", "kira")).toBe(false);
 		expect(uploads("nobody")).toBe(false);
+	});
+});
+
+describe("who may subscribe to notices", () => {
+	const view = viewOf({ ana: "member", paco: "admin", kitchen: "device" });
+
+	it("is a person by itself, never the device account, Kira on a person's behalf nor an account without a role", () => {
+		const subscribes = (account: string, via?: string) =>
+			maySubscribe(view, request(account, "notes", "read", via).context);
+
+		expect([subscribes("ana"), subscribes("paco"), subscribes("kitchen")]).toEqual([
+			true,
+			true,
+			false,
+		]);
+		expect(subscribes("ana", "kira")).toBe(false);
+		expect(subscribes("nobody")).toBe(false);
 	});
 });

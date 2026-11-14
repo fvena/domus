@@ -1,7 +1,9 @@
 // Signing in with Better Auth (ADR 0023): email and password only, open sign-up off, no session cached in the
 // cookie, over the platform's one connection through the Drizzle adapter. Each session is born on a device:
 // the device cookie names it when it is known, and a new device is created otherwise. Which device a session
-// belongs to is kept on the server; the cookie is not a credential.
+// belongs to is kept on the server; the cookie is not a credential. Each session entering a device writes a new
+// `entry` on it before it is created, and the same value as its own `deviceEntry`: the session the device has
+// enabled for notices is the one that matches (ADR 0029).
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import type Database from "better-sqlite3";
@@ -36,6 +38,17 @@ export interface SessionRecord {
 	readonly device: string;
 }
 
+/** What signing in tells the rest of the platform about a session entering a device. */
+export interface EntryHooks {
+	/**
+	 * Once the device's new `entry` is written, with no transaction open, and before the session is created: where a
+	 * test waits.
+	 */
+	readonly entering?: () => Promise<void> | void;
+	/** After the session was created, by its id. */
+	readonly entered?: (session: string) => void;
+}
+
 export interface Auth {
 	/** Better Auth's own handler, for the routes the door lets through. */
 	handler(request: Request): Promise<Response>;
@@ -48,7 +61,11 @@ export interface Auth {
 
 const MIN_SECRET_LENGTH = 32;
 
-export function createAuth(connection: Database.Database, { secret, origins }: AuthOptions): Auth {
+export function createAuth(
+	connection: Database.Database,
+	{ secret, origins }: AuthOptions,
+	{ entering, entered }: EntryHooks = {},
+): Auth {
 	if (secret.length < MIN_SECRET_LENGTH)
 		throw new Error(`the auth secret must have at least ${MIN_SECRET_LENGTH} characters`);
 	const [fallback] = origins;
@@ -59,6 +76,9 @@ export function createAuth(connection: Database.Database, { secret, origins }: A
 	);
 	const insertDevice = connection.prepare<[string, number]>(
 		"INSERT INTO platform_devices (id, created_at) VALUES (?, ?)",
+	);
+	const writeEntry = connection.prepare<[string, string]>(
+		"UPDATE platform_devices SET entry = ? WHERE id = ?",
 	);
 
 	const tables = {
@@ -90,6 +110,7 @@ export function createAuth(connection: Database.Database, { secret, origins }: A
 			cookieCache: { enabled: false },
 			additionalFields: {
 				deviceId: { type: "string", required: true, input: false, returned: true },
+				deviceEntry: { type: "string", required: true, input: false, returned: false },
 			},
 		},
 		telemetry: { enabled: false },
@@ -111,7 +132,15 @@ export function createAuth(connection: Database.Database, { secret, origins }: A
 							maxAge: DEVICE_COOKIE_MAX_AGE,
 							secure: new URL(context.request?.url ?? fallback).protocol === "https:",
 						});
-						return { data: { ...data, deviceId: device } };
+						// Written before the session exists and never given back: from here no earlier session of the
+						// device is enabled, and if the creation fails, none is.
+						const entry = randomId();
+						writeEntry.run(entry, device);
+						await entering?.();
+						return { data: { ...data, deviceId: device, deviceEntry: entry } };
+					},
+					after: async (created) => {
+						entered?.(created.id);
 					},
 				},
 			},
