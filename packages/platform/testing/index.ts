@@ -404,6 +404,15 @@ export function hasSession(platform: Platform, session: string): boolean {
 	);
 }
 
+/** The instant the session with this id expires, as its row says; `undefined` when there is none. */
+export function sessionExpiresAt(platform: Platform, session: string): number | undefined {
+	return connectionOf(platform)
+		.prepare<[string], { expiresAt: number }>(
+			"SELECT expires_at AS expiresAt FROM platform_session WHERE id = ?",
+		)
+		.get(session)?.expiresAt;
+}
+
 /** The id of the one device account, which the platform created at start. */
 export function deviceAccountOf(platform: Platform): string {
 	return ensureDeviceAccount(connectionOf(platform), areasOf(platform), clockOf(platform)());

@@ -203,7 +203,8 @@ export function createFiles({
 				).finally(disarm);
 				if (upload.stopped !== undefined) throw upload.stopped;
 				if (chunk.done) break;
-				if (!lives(owner.account, owner.session)) throw new ORPCError("UNAUTHORIZED");
+				if (!lives(owner.account, owner.session, clock()))
+					throw new ORPCError("UNAUTHORIZED");
 				size += chunk.value.length;
 				// Not a byte past the declared size reaches the disk: the reservation holds no more.
 				if (size > declared) throw fileError("BODY_MISMATCH");
@@ -253,9 +254,9 @@ export function createFiles({
 			}
 			await interleave?.("published");
 			return connection.transaction(() => {
-				if (!lives(owner.account, owner.session)) throw new ORPCError("UNAUTHORIZED");
-				if (!mayUpload(view, owner.context)) throw new ORPCError("FORBIDDEN");
 				const now = clock();
+				if (!lives(owner.account, owner.session, now)) throw new ORPCError("UNAUTHORIZED");
+				if (!mayUpload(view, owner.context)) throw new ORPCError("FORBIDDEN");
 				const current = contentState.get(hash)?.state;
 				if (current === "claimed") throw fileError("CONTENT_BUSY");
 				if (current === undefined) insertContent.run(hash, size, type, now);

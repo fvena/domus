@@ -39,6 +39,9 @@ export interface HttpHandler {
 	readonly fetch: (request: Request) => Promise<Response>;
 }
 
+/** Where the API lives: every answer under it is marked `no-store`. */
+const API_PREFIX = "/api";
+
 /** Where a file is uploaded (ADR 0028): a route of Hono, not of oRPC, to control its receipt. */
 const FILES_PATH = "/api/files";
 
@@ -270,6 +273,13 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 		},
 	});
 	const app = new Hono();
+
+	// No answer of the API is kept in a cache, of the browser or of anything in between: neither a good one nor an
+	// error, Better Auth's included.
+	app.use(`${API_PREFIX}/*`, async (c, next) => {
+		await next();
+		c.res.headers.set("cache-control", "no-store");
+	});
 
 	// 200 while the process answers, which is what Docker's health check watches; the background's field is the
 	// watcher's, public and without personal data (ADR 0025).

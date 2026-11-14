@@ -108,6 +108,16 @@ function lastRun(test: Probe) {
 	return test.background.runs().slice(-1)[0];
 }
 
+/** The local `HH:MM` in Madrid of an instant, as a task's time is chosen. */
+function localTime(instant: number): string {
+	return new Intl.DateTimeFormat("en-GB", {
+		timeZone: "Europe/Madrid",
+		hour: "2-digit",
+		minute: "2-digit",
+		hourCycle: "h23",
+	}).format(instant);
+}
+
 /** Runs the cleanup of night `day`, and expects it to end well. */
 async function cleanOn(test: Probe, day: number): Promise<void> {
 	test.clock.set(nightOf(day));
@@ -219,6 +229,24 @@ describe("the cleanup of the store", () => {
 
 		await cleanOn(test, 1);
 
+		expect(stored(test)).toEqual([]);
+	});
+
+	it("deletes the content of a prepared file whose session expired, before the file's own expiry", async () => {
+		await using test = await household();
+		const phone = await signedIn(test);
+		const expiresAt = test.sessionExpiresAt(test.contextOf(phone).session ?? "") ?? 0;
+		// Quietly to a minute before it, and the cleanup's next run just past it, a day before the file's own expiry.
+		test.clock.set(expiresAt - 60_000, { wake: false });
+		await prepare(phone);
+		expect(stored(test)).toEqual([sha256(JPEG)]);
+		test.background.setTime("cleanup", localTime(expiresAt + 60_000));
+
+		test.clock.set(expiresAt + 60_000);
+		await test.background.settled();
+
+		expect(lastRun(test)).toEqual(expect.objectContaining({ task: "cleanup", result: "ok" }));
+		expect(test.hasSession(test.contextOf(phone).session ?? "")).toBe(true);
 		expect(stored(test)).toEqual([]);
 	});
 

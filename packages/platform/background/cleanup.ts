@@ -95,9 +95,9 @@ const STEPS: readonly StatementStep[] = [
 	// A prepared file serves only its live session, unconsumed and before its expiry; past that it protects nothing.
 	{
 		sql: `DELETE FROM platform_prepared_files WHERE id IN (
-			SELECT id FROM platform_prepared_files AS prepared
-			WHERE expires_at <= ? OR consumed = 1
-				OR NOT ${sessionLivesWhere("prepared.session", "prepared.account")}
+			SELECT prepared.id FROM (SELECT ? AS now) AS at, platform_prepared_files AS prepared
+			WHERE prepared.expires_at <= at.now OR prepared.consumed = 1
+				OR NOT ${sessionLivesWhere("prepared.session", "prepared.account", "at.now")}
 			LIMIT ?)`,
 	},
 	// A released reference protects its content only while the entry that released it can still be undone.

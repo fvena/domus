@@ -36,12 +36,13 @@ export type ChildTask =
 			readonly at: RestorePoint;
 	  }
 	/**
-	 * An upload of `content` for a session of `account`, without modules, stopped once its file is in place and
-	 * before its rows: the child tells the test once it got there.
+	 * An upload of `content` for a session of `account` at the instant `now`, without modules, stopped once its file
+	 * is in place and before its rows: the child tells the test once it got there. The session must live at `now`.
 	 */
 	| {
 			readonly hold: "publish";
 			readonly dataDirectory: string;
+			readonly now: number;
 			readonly account: string;
 			readonly session: string;
 			/** The bytes of the upload, in base64. */

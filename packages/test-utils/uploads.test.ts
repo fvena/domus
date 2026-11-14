@@ -193,6 +193,21 @@ describe("uploading a file", () => {
 		expect(incoming(test.filesDirectory)).toEqual([]);
 	});
 
+	it("prepares a file until its session expires on the platform's clock, and answers UNAUTHORIZED after", async () => {
+		await using test = await household();
+		const browser = await signedIn(test, "ana@domus.test");
+		const expiresAt = test.sessionExpiresAt(test.contextOf(browser).session ?? "") ?? 0;
+
+		test.clock.set(expiresAt - 1);
+		expect((await upload(browser, JPEG)).status).toBe(200);
+
+		test.clock.set(expiresAt);
+		const response = await upload(browser, Uint8Array.of(...JPEG, 1));
+		expect(response.status).toBe(401);
+		expect(await response.json()).toMatchObject({ code: "UNAUTHORIZED" });
+		expect(incoming(test.filesDirectory)).toEqual([]);
+	});
+
 	it("answers UNAUTHORIZED to a session that ended before the rows, and prepares nothing", async () => {
 		let reached!: () => void;
 		const reaching = new Promise<void>((resolve) => {

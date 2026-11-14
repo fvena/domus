@@ -63,31 +63,39 @@ async function openUntil(
 	});
 }
 
-/** Uploads the task's content for its session until its file is in place, before its rows. */
+/** Uploads the task's content for its session at the task's instant until its file is in place, before its rows. */
 async function publishUntil(task: Extract<ChildTask, { hold: "publish" }>): Promise<void> {
 	const { filesOf } = await import("../platform");
 	const { sealContext } = await import("../authorization/context");
 	const content = Buffer.from(task.content, "base64");
-	await openUntil("published", task.dataDirectory, Date.now, async (platform) => {
-		const files = filesOf(platform);
-		if (files === undefined) throw new Error("the platform has no store of files");
-		const context = sealContext({
-			account: task.account,
-			device: "child-device",
-			session: task.session,
-			deviceAccount: task.account,
-			channel: "app",
-			identity: "password",
-		});
-		await files.upload(
-			context,
-			new Request("http://domus.child/api/files", {
-				method: "POST",
-				body: content,
-				headers: { "content-length": String(content.length), "x-file-name": "foto.jpg" },
-			}),
-		);
-	});
+	await openUntil(
+		"published",
+		task.dataDirectory,
+		() => task.now,
+		async (platform) => {
+			const files = filesOf(platform);
+			if (files === undefined) throw new Error("the platform has no store of files");
+			const context = sealContext({
+				account: task.account,
+				device: "child-device",
+				session: task.session,
+				deviceAccount: task.account,
+				channel: "app",
+				identity: "password",
+			});
+			await files.upload(
+				context,
+				new Request("http://domus.child/api/files", {
+					method: "POST",
+					body: content,
+					headers: {
+						"content-length": String(content.length),
+						"x-file-name": "foto.jpg",
+					},
+				}),
+			);
+		},
+	);
 }
 
 /** Runs the cleanup at the task's instant until it gets to its point of deleting a content. */

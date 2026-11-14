@@ -343,6 +343,30 @@ describe("attaching and downloading a file", () => {
 		).toThrow(expect.objectContaining({ code: "NOT_FOUND" }));
 	});
 
+	it("attaches a prepared file until its session expires, and not after though the session's row is still there", async () => {
+		await using test = await household();
+		const phone = await signedIn(test, "ana");
+		const ana = test.contextOf(phone);
+		const expiresAt = test.sessionExpiresAt(ana.session ?? "") ?? 0;
+		test.clock.set(expiresAt - 60_000);
+		const before = await prepare(phone);
+		const after = await prepare(phone, Uint8Array.of(...JPEG, 1));
+
+		test.clock.set(expiresAt - 1);
+		attach(test, ana, 1, before);
+
+		test.clock.set(expiresAt);
+		expect(test.hasSession(ana.session ?? "")).toBe(true);
+		expect(() =>
+			test.invoke(
+				ana,
+				"probe.attachFile",
+				{ noteId: 1, prepared: after },
+				{ idempotencyKey: "a1" },
+			),
+		).toThrow(expect.objectContaining({ code: "NOT_FOUND" }));
+	});
+
 	it("rolls an attachment back with a write that fails after it, and the prepared file serves again", async () => {
 		failOnceAfter("attachFile");
 		await using test = await household();

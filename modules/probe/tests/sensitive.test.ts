@@ -365,6 +365,36 @@ describe("revoking", () => {
 	});
 });
 
+describe("proofs and the session's expiry", () => {
+	it("keeps a proof good until its session expires, and ends it then though the session's row is still there", async () => {
+		await using test = await household();
+		const laptop = test.prepare.session("paco");
+		const paco = test.context("paco", laptop);
+		const expiresAt = test.sessionExpiresAt(laptop.session) ?? 0;
+		const toNone = { account: "ana", area: "probe", level: "none" } as const;
+		const toRead = { account: "luis", area: "probe", level: "read" } as const;
+		test.clock.set(expiresAt - 60_000);
+		const before = await proofOf(test, paco, "setPermission", toNone);
+		const after = await proofOf(test, paco, "setPermission", toRead);
+
+		test.clock.set(expiresAt - 1);
+		expect(
+			test.setPermission(paco, toNone, { idempotencyKey: "p1", proof: before }),
+		).toMatchObject({
+			entry: 1,
+		});
+
+		test.clock.set(expiresAt);
+		expect(test.hasSession(laptop.session)).toBe(true);
+		expect(() =>
+			test.setPermission(paco, toRead, { idempotencyKey: "p2", proof: after }),
+		).toThrow(stepUp);
+		await expect(
+			test.requestProof(paco, PASSWORD, { action: "platform.setPermission", input: toRead }),
+		).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+	});
+});
+
 describe("proofs and the password", () => {
 	it("ends a used proof too, so a repeat with it asks for a new one after the password changes", async () => {
 		await using test = await household();

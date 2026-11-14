@@ -23,22 +23,25 @@ export function sessionLookup(connection: Database.Database): SessionLookup {
 }
 
 /**
- * The SQL condition that a session still lives: one with the id of the expression `session` exists and is the
- * account's of the expression `account`. The one form of that rule, for statements and for {@link sessionLives}.
+ * The SQL condition that a session still lives: one with the id of the expression `session` exists, is the
+ * account's of the expression `account` and has not expired by the instant of the expression `now`, the platform
+ * clock's. A session past its expiry has ended though its row is still there. The one form of that rule, for
+ * statements and for {@link sessionLives}.
  */
-export function sessionLivesWhere(session: string, account: string): string {
-	return `EXISTS (SELECT 1 FROM platform_session WHERE id = ${session} AND user_id = ${account})`;
+export function sessionLivesWhere(session: string, account: string, now: string): string {
+	return `EXISTS (SELECT 1 FROM platform_session
+		WHERE id = ${session} AND user_id = ${account} AND expires_at > ${now})`;
 }
 
-/** Whether a session still lives: it exists and is the account's. */
-export type SessionLives = (account: string, session: string) => boolean;
+/** Whether a session still lives at the instant `now`: it exists, is the account's and has not expired. */
+export type SessionLives = (account: string, session: string, now: number) => boolean;
 
 /** The check that a session still lives, prepared on `connection`. */
 export function sessionLives(connection: Database.Database): SessionLives {
-	const statement = connection.prepare<[string, string], { lives: number }>(
-		`SELECT ${sessionLivesWhere("?", "?")} AS lives`,
+	const statement = connection.prepare<[string, string, number], { lives: number }>(
+		`SELECT ${sessionLivesWhere("?", "?", "?")} AS lives`,
 	);
-	return (account, session) => statement.get(session, account)?.lives === 1;
+	return (account, session, now) => statement.get(session, account, now)?.lives === 1;
 }
 
 /** One of an account's sessions, as its owner sees it: never its token, and its device by an opaque id. */

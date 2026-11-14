@@ -173,14 +173,14 @@ export function createReferences(connection: Database.Database, view: AccessView
 				attach: (prepared, record) => {
 					const { tableName, touch } = changeFilesOf(record);
 					const found = preparedFile.get(prepared);
-					// A prepared file is the session's that uploaded it, and only while that session exists; nothing
+					// A prepared file is the session's that uploaded it, and only while that session lives; nothing
 					// is attached from a content the cleanup is deleting.
 					if (
 						!found ||
 						found.present === 0 ||
 						session === undefined ||
 						found.session !== session ||
-						!lives(account, session)
+						!lives(account, session, now)
 					)
 						throw new FilesRefusal("NOT_FOUND");
 					if (found.consumed !== 0) throw refusalOf(conflict("prepared-file-consumed"));
