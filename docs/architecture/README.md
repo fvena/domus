@@ -28,7 +28,7 @@ Ver [ADR 0001](adr/0001-domus-con-kira-dentro.md) y [ADR 0002](adr/0002-vue-spa-
 
 - `api` autentica todos los canales (app, Telegram, voz, apps conectadas) y pasa las conversaciones a `assistant` (P2, P33). Un turno nunca corre dentro de una petición HTTP.
 - La puerta es la parte `http` de `platform`; `apps/api` solo la monta. `assistant` y `voice-gateway` hablan con ella por un `fetch` inyectado, y al arrancar comprueban la versión del protocolo: conectando, listo o incompatible ([ADR 0020](adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md)).
-- Kira habla con Domus por la API, como cualquier cliente, y nunca abre el núcleo por dentro (P7). Tiene una sola llave, y en cada petición dice de parte de quién habla (P8).
+- Kira habla con Domus por la API, como cualquier cliente, y nunca abre el núcleo por dentro (P7). Tiene una sola llave, y en cada petición dice de parte de quién habla (P8). La llave dice qué app es. De parte de quién lo dice un mandato que emite la puerta a partir de una interacción que ella autenticó, que muere con su sesión y no da permisos. Un «sí» por `contexto` lo reconoce la puerta, nunca Kira ([ADR 0030](adr/0030-llaves-y-mandatos.md)).
 - **Contrato de conversación:** entra texto con adjuntos y quién habla; sale un flujo de eventos cancelable (trozo, tarjeta, acción a la espera de «sí», fin), con salidas `hablada`, `texto` y `estructurada`.
 
 **Kira aislada por construcción** ([ADR 0005](adr/0005-kira-aislada.md), P51): su contenedor no monta el volumen de datos, la sesión de Claude Code arranca sin herramientas propias (terminal y ficheros) y solo tiene su llave para la API.
@@ -160,3 +160,4 @@ El plan por fases, con lo que incluye cada una, cuándo se da por terminada y su
 | [0027](adr/0027-la-instantanea-en-un-proceso-hijo.md)                   | La instantánea en un proceso hijo                   |
 | [0028](adr/0028-archivos.md)                                            | Archivos                                            |
 | [0029](adr/0029-eventos-en-directo-y-avisos.md)                         | Eventos en directo y avisos                         |
+| [0030](adr/0030-llaves-y-mandatos.md)                                   | Llaves y mandatos                                   |

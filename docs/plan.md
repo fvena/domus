@@ -40,7 +40,34 @@
 
     Las copias viven por ahora en el mismo NVMe que los datos: protegen de borrados y errores, no de perder el disco o la Pi. La casa acepta ese riesgo para el uso real, también con salud y documentos, hasta que haya un NAS, que se añadirá como destino.
 
-- **1e. Llaves de API.** La de Kira y las de otras apps, con «de parte de». Entre sus criterios de aceptación: el mismo cliente funciona con llave y da error sin ella ([ADR 0020](architecture/adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md)).
+- **1e. Llaves de API.** Decidida en su grilling ([ADR 0030](architecture/adr/0030-llaves-y-mandatos.md)). Construye el mecanismo de app conectada, con Kira como única app. Las llaves de `voice-gateway` y de otras apps llegan con su primer consumidor. Incluye:
+    - la lista fija de apps;
+    - las llaves `domus_<id>.<secreto>`, con su hash en la base y el comando `keys` en `api` (crear, listar y revocar, varias vivas para rotar, el último uso), y la llave como secreto de Docker en `assistant`;
+    - `Authorization: Bearer`, el rechazo de cookie de sesión más llave, y ninguna credencial mala que baje a anónima, tampoco en `status`, que con una llave válida dice su app;
+    - los mandatos, guardados en la base, para una sola app, con el canal `contexto`, 15 min de vida y válidos solo mientras vive su sesión, sin ninguna vía de producción que los emita hasta la 5a;
+    - `via` a partir de la llave;
+    - la lista de operaciones de la plataforma que aceptan un mandato (`log/read` y `log/undo`), con `confirmations/confirm` cerrado a ellos;
+    - el estado rechazado en `@domus/utils/connection`;
+    - los mandatos caducados en `cleanup`;
+    - una regla de gitleaks para las llaves.
+
+    No incluye emitir mandatos, reconocer el «sí» por `contexto`, ni que Kira use archivos o el canal en directo, que son de la 5a. **Terminada cuando** además las pruebas cubren:
+    - la llave: ausente, mal formada, desconocida, revocada, con un id válido y el secreto equivocado, junto a una cookie de sesión y junto a otras cookies, y mala en `status`;
+    - el mandato: el camino positivo con una acción de `probe`, ausente, caducado en el instante exacto, de otra app, y ya usado y luego con su sesión terminada de cada una de las cinco formas y por caducar, tras restaurar y tras reiniciar;
+    - la autorización vía Kira: la delegación rebaja y no amplía, un área sin fila, una pendiente confirmada por `app` que conserva su delegación, una acción `manage` que no se completa, deshacer con la delegación retirada, y la clave de idempotencia por cuenta y `via`;
+    - las superficies cerradas: cada operación de la plataforma fuera de la lista, `confirmations/confirm`, subir y descargar archivos, el canal en directo y las suscripciones;
+    - el comando: stdout solo con la llave, una app desconocida, y `list` sin el secreto;
+    - el cliente: el mismo `clientFor` de `assistant` ejecuta una acción con llave y mandato y da `UNAUTHORIZED` sin llave, y la comprobación queda en rechazado sin llave, con una llave mala o con la de otra app, y en listo con la suya ([ADR 0020](architecture/adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md));
+    - la regla de gitleaks, que caza una llave de muestra.
+
+    En la Pi, en el Domus real:
+    - se crea la llave de Kira, con su carpeta en `700`;
+    - `assistant` queda en rechazado sin el secreto y en listo con él;
+    - `status` con una llave inventada da 401;
+    - una rotación entera funciona, y la llave vieja da 401 tras revocarla;
+    - una segunda rotación, con un fallo simulado, vuelve a la llave anterior y a listo;
+    - `keys list` muestra el último uso y la llave revocada;
+    - la llave sigue igual tras reiniciar y tras recrear `api`.
 
 Lo que Kira necesitará del núcleo, para el grilling de cada subfase:
 
@@ -75,9 +102,9 @@ Lo que Kira necesitará del núcleo, para el grilling de cada subfase:
 
 **Estado:** pendiente.
 
-- **5a. Puerta de la conversación:** entra texto con adjuntos (fotos, PDF, correos) y quién habla; sale la respuesta por trozos, y se puede cortar a medias ([ADR 0004](architecture/adr/0004-una-sola-puerta.md), [ADR 0012](architecture/adr/0012-lo-compartido-llega-a-kira.md)). Chat en la app y Telegram. La conversación sigue de un aparato a otro sin que uno compartido lea nada privado. Antes de la primera operación que dependa de la api, el seguimiento de la conexión de `assistant` entrega el cliente, y sus llamadas fallan al momento si no está listo ([ADR 0020](architecture/adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md)). Su grilling decide si Kira pide los turnos a la api, para que `assistant` no acepte conexiones.
+- **5a. Puerta de la conversación:** entra texto con adjuntos (fotos, PDF, correos) y quién habla; sale la respuesta por trozos, y se puede cortar a medias ([ADR 0004](architecture/adr/0004-una-sola-puerta.md), [ADR 0012](architecture/adr/0012-lo-compartido-llega-a-kira.md)). Chat en la app y Telegram. La conversación sigue de un aparato a otro sin que uno compartido lea nada privado. Antes de la primera operación que dependa de la api, el seguimiento de la conexión de `assistant` entrega el cliente, y sus llamadas fallan al momento si no está listo ([ADR 0020](architecture/adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md)). Su grilling decide si Kira pide los turnos a la api, para que `assistant` no acepte conexiones. La puerta emite los mandatos a partir de las interacciones que autentica, con la regla de vida de cada origen sin sesión, y reconoce el «sí» por `contexto` en el turno siguiente, con su lista cerrada de afirmaciones ([ADR 0030](architecture/adr/0030-llaves-y-mandatos.md)). También decide cómo accede Kira a los adjuntos de sus conversaciones, sin abrir por ello a los mandatos las rutas generales de archivos.
 - **5b. Runtime** con dos motores (la suscripción de Claude y modelos por API), ventanilla única de tools, confirmaciones, skills, consumo por turno (tokens, coste equivalente, latencia por fases y resultado) y escenarios. Lo que Kira deja en segundo plano es un trabajo pedido, que se vuelve a autorizar rehaciendo el contexto verificado de quien lo pidió ([ADR 0025](architecture/adr/0025-segundo-plano.md)). Kira guarda con el turno la clave de idempotencia de cada llamada a una tool, para que un reintento repita la misma operación aunque se reconstruya la llamada ([ADR 0022](architecture/adr/0022-acciones.md)). Una sola configuración de IA en ajustes ([ADR 0011](architecture/adr/0011-una-configuracion-de-ia.md)). Cambiar de motor conserva la personalidad y los recuerdos. Sin internet, lo local sigue funcionando y lo demás falla de forma controlada. Lo que tarda más de unos 15 s va en segundo plano y avisa al acabar. Las muletillas son pertinentes a la petición, nunca adelantan un resultado, no se repiten seguidas, no se dicen si la respuesta llega antes de unos 1,5 s y en texto no hay.
-- **5c. Voz:** satélites, STT/TTS, reconocer quién habla y huellas; con poca confianza, Kira pregunta «¿Paco o Rocío?». Su grilling decide si la misma voz llega al móvil y al navegador en esta fase o justo después.
+- **5c. Voz:** satélites, STT/TTS, reconocer quién habla y huellas; con poca confianza, Kira pregunta «¿Paco o Rocío?». `voice-gateway` recibe aquí su llave, y el umbral de reconocimiento vive en él ([ADR 0030](architecture/adr/0030-llaves-y-mandatos.md)). Su grilling decide si la misma voz llega al móvil y al navegador en esta fase o justo después.
 
 La fase empieza cerrando lo que quedó abierto del diseño de Kira con lo que ya fija Domus: la forma del agent (uno con skills o un equipo), el vocabulario, los evals, los parámetros, las trazas, el clasificador local y los modelos locales. También decide el afinado de voz y cómo llega la sesión de Claude al contenedor `assistant` sin montar datos ([ADR 0003](architecture/adr/0003-procesos-y-contenedores.md)).
 
