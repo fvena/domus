@@ -30,6 +30,7 @@ Caducidad:
 
 ## Comments
 
+- Hecho en `93e898b`.
 - La regla única recibe el instante: `sessionLives(connection)` da `(account, session, now)` y `sessionLivesWhere(session, account, now)` toma la expresión SQL del instante. Todos sus usos le pasan el reloj de la plataforma: subir un archivo (en cada trozo y antes de las filas), `ctx.files.attach`, la limpieza de preparados, el cambio de contraseña y los comprobantes. El canal (02) y las entregas (05) deben usarla igual.
 - La comprobación de `actions/proofs.ts` que solo miraba si la fila existe se llama ahora `sessionExists`: decide si un comprobante queda atado a su sesión; si vive lo dice la regla. Pedir un comprobante desde una sesión caducada responde `UNAUTHORIZED`.
 - Las confirmaciones pendientes siguen mirando solo que su sesión exista (`bound = 0 OR session IS NOT NULL`): no estaban en la lista de usos. Queda abierto si 08 las suma.
