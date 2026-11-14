@@ -3,9 +3,11 @@
 // the device cookie names it when it is known, and a new device is created otherwise. Which device a session
 // belongs to is kept on the server; the cookie is not a credential. Each session entering a device writes a new
 // `entry` on it before it is created, and the same value as its own `deviceEntry`: the session the device has
-// enabled for notices is the one that matches (ADR 0029).
+// enabled for notices is the one that matches (ADR 0029). A request with the key of a connected app signs nobody in
+// or out (ADR 0030).
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import type Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 
@@ -120,6 +122,16 @@ export function createAuth(
 			},
 		},
 		telemetry: { enabled: false },
+		hooks: {
+			// A key is an app's credential, never a person's: Better Auth answers it with its own UNAUTHORIZED.
+			before: createAuthMiddleware(async (context) => {
+				if (context.headers?.has("authorization"))
+					throw new APIError("UNAUTHORIZED", {
+						code: "UNAUTHORIZED",
+						message: "a key signs nobody in or out",
+					});
+			}),
+		},
 		databaseHooks: {
 			session: {
 				create: {

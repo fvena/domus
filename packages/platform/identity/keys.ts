@@ -42,6 +42,31 @@ export function parseKey(key: string): KeyParts | undefined {
 	return { id, secret };
 }
 
+/**
+ * What a request's `Authorization` header carries: no header, a key of the agreed form, or a bad key and why, the
+ * reason only for the operator's log.
+ */
+export type AuthorizationRead =
+	| { readonly kind: "none" }
+	| { readonly kind: "key"; readonly key: string }
+	| { readonly kind: "bad"; readonly reason: "empty" | "scheme" | "malformed" };
+
+/**
+ * Reads the value of `Authorization`, `null` when the request has none: the scheme `Bearer`, in any case, one or more
+ * spaces and one key of the agreed form, spaces around ignored as HTTP does. An empty value, another scheme or
+ * another form is a bad key, never no key: a bad credential never falls back to anonymous (ADR 0030).
+ */
+export function readAuthorization(value: string | null): AuthorizationRead {
+	if (value === null) return { kind: "none" };
+	const [scheme, ...rest] = value.split(" ").filter((part) => part !== "");
+	if (scheme === undefined) return { kind: "bad", reason: "empty" };
+	if (scheme.toLowerCase() !== "bearer") return { kind: "bad", reason: "scheme" };
+	const [key, ...more] = rest;
+	if (key === undefined) return { kind: "bad", reason: "empty" };
+	if (more.length > 0 || parseKey(key) === undefined) return { kind: "bad", reason: "malformed" };
+	return { kind: "key", key };
+}
+
 /** Whether `text` is the one base64url form of exactly `bytes` bytes. */
 function encodes(text: string, bytes: number): boolean {
 	const decoded = Buffer.from(text, "base64url");
@@ -151,6 +176,21 @@ export function checkKey(
 	if (row.revokedAt !== null) return { ok: false, reason: "revoked" };
 	if (!apps.some(({ name }) => name === row.app)) return { ok: false, reason: "unknown-app" };
 	return { ok: true, id: parts.id, app: row.app };
+}
+
+/** How often the last use of a key is written at most: once a minute, so a request does not always write. */
+export const LAST_USE_INTERVAL = 60 * 1000;
+
+/**
+ * Notes that the key `id` was used at the instant `now`, unless its last use was noted less than
+ * {@link LAST_USE_INTERVAL} before. A write of its own, outside the transaction of any action.
+ */
+export function noteKeyUse(connection: Database.Database, id: string, now: number): void {
+	connection
+		.prepare(
+			"UPDATE platform_keys SET last_used_at = ? WHERE id = ? AND (last_used_at IS NULL OR last_used_at <= ?)",
+		)
+		.run(now, id, now - LAST_USE_INTERVAL);
 }
 
 /** The SHA-256 of a key's secret, in hex: what the database keeps. */

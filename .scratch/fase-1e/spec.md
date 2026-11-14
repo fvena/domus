@@ -143,6 +143,13 @@ En la 1e no hay turnos de conversación, así que ninguna ruta, comando ni servi
     - Las rutas de Hono (subir y descargar archivos, el canal en directo, la clave VAPID y las suscripciones) y las de Better Auth (iniciar y cerrar sesión): una petición con llave responde `UNAUTHORIZED`, con el formato de errores que ya usa cada una.
 - Llave válida sin mandato, o con un mandato que no resuelve, en una ruta que pide cuenta: `UNAUTHORIZED`. Llave y mandato válidos que la autorización niega: `FORBIDDEN`. Un registro privado ajeno: `NOT_FOUND`, como en cualquier llamada.
 - Ni los valores de `Authorization` ni los de `domus-mandate` aparecen en mensajes de error ni en logs.
+- Detalles que fijó la tarea 02:
+    - Leer la cabecera (`readAuthorization` de `identity/keys.ts`): el esquema `Bearer` en cualquier combinación de mayúsculas, uno o más espacios y una sola llave de la forma acordada; los espacios alrededor no cuentan, como en HTTP. Un tabulador en lugar del espacio es otro esquema, y dos valores, también unidos por una coma, son una forma mala.
+    - La cookie de sesión es la que reconoce Better Auth (`getSessionCookie`: `better-auth.session_token`, también con el prefijo `__Secure-`). Una vacía no cuenta.
+    - El log de quien opera es la opción `log` de la puerta, `console.warn` si no se da, con una línea `key refused: <motivo>`: `empty`, `scheme`, `malformed`, `unknown`, `wrong-secret`, `revoked`, `unknown-app` o `session-cookie`. `test-utils` lo calla, porque sus pruebas mandan llaves malas a propósito; la prueba de los motivos está en la puerta de `platform`.
+    - Las rutas que no admiten llave la rechazan por traer `Authorization`, sin comprobarla: no anotan su último uso ni dejan motivo en el log. Solo `status` comprueba la llave en la 02; la 03 lo hace también en las rutas que admiten un mandato.
+    - Iniciar y cerrar sesión con llave lo rechaza Better Auth con su propio error, un 401 `{ code: "UNAUTHORIZED", message }`, desde un `before` de sus hooks.
+    - El último uso se reescribe cuando ha pasado un minuto o más desde el anotado: a los 59 999 ms no, al minuto justo sí.
 
 ### Autorización vía Kira (Q8, Q13, Q14)
 
@@ -208,7 +215,8 @@ En el Domus real, sin `probe`, ejecutada por ssh, porque aquí nadie teclea una 
     - `test.prepare.key(app)` crea una llave real con la misma función de la plataforma que usa el comando, y devuelve la llave entera.
     - `test.mandate(browser, { app?, conversation? })` emite un mandato real por la función de emisión de la plataforma, que solo alcanza `testing`. Nace de la sesión de ese `browser()` y hereda su cuenta, su aparato, su cuenta del aparato y su `identity`, sin poder cambiarlos. Pasa por la misma tabla, el mismo hash y la misma caducidad que usará la 5a. Si una prueba necesita un contexto imposible, como otra identidad, usa los contextos sintéticos que ya existen sobre el camino de las acciones, nunca un mandato.
     - Las llamadas de Kira usan el mismo `clientFor` y el mismo transporte que `assistant`, con `Authorization` y `domus-mandate`, y `fetch` igual al de la puerta. No pasan por `browser()`, así que no llevan su cookie. La cookie mezclada se prueba aparte, a propósito.
-    - Opción nueva, `apps`: apps de prueba que nunca reciben mandatos, para la llave de otra app.
+    - Opción nueva, `apps`: apps de prueba que nunca reciben mandatos, para la llave de otra app. Un nombre repetido, también `kira`, no abre la plataforma.
+    - Para ver y cambiar las llaves sin el comando, como con las sesiones: `test.keys()`, lo que muestra `keys list`, y `test.revokeKey(id)`, que revoca como `keys revoke`. `test-utils` exporta también `PROTOCOL`.
     - Con el reloj de pruebas se prueban la caducidad del mandato en el instante exacto, la de su sesión, el último uso por minuto y la limpieza. Con `restoreBackup` y reabriendo sobre fichero, restaurar y reiniciar.
 - **Costura 2: el núcleo de `keys`**, con un terminal de prueba que anota stdout y stderr:
     - `create` (una app de la lista, una desconocida, sin argumentos);

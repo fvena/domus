@@ -41,6 +41,7 @@ import {
 import { filesFolderOf } from "./files/store";
 import { accessView, registeredAreas } from "./identity/access";
 import { ensureDeviceAccount } from "./identity/accounts";
+import { CONNECTED_APPS, type ConnectedApp } from "./identity/keys";
 import { platformOperations } from "./identity/operations";
 import type { ProofIssuer } from "./identity/proofs";
 import { sessionLives } from "./identity/sessions";
@@ -145,6 +146,11 @@ export interface PlatformRuntime {
 	readonly channelQueue?: number;
 	/** Only from the testing entry: how the deliveries reach the push service, the global `fetch` unless given. */
 	readonly fetch?: typeof fetch;
+	/**
+	 * Only from the testing entry: connected apps of the test besides {@link CONNECTED_APPS}, which never receive
+	 * mandates (ADR 0030).
+	 */
+	readonly apps?: readonly ConnectedApp[];
 }
 
 const IN_MEMORY = ":memory:";
@@ -166,6 +172,7 @@ const internals = new WeakMap<
 		readonly notifications: Notifications;
 		readonly interleave: Interleave | undefined;
 		readonly events: Events;
+		readonly apps: readonly ConnectedApp[];
 	}
 >();
 
@@ -199,6 +206,7 @@ export function openPlatform(
 		pushServices = PUSH_SERVICES,
 		channelQueue,
 		fetch = globalThis.fetch,
+		apps: testApps = [],
 	}: PlatformRuntime,
 ): Platform {
 	if (databaseFile !== IN_MEMORY && !isAbsolute(databaseFile)) {
@@ -227,6 +235,10 @@ export function openPlatform(
 				`confirmation.${name} must be a positive whole number of milliseconds, got ${String(value)}`,
 			);
 	checkModules(modules);
+	const apps = [...CONNECTED_APPS, ...testApps];
+	for (const [index, { name }] of apps.entries())
+		if (apps.findIndex((app) => app.name === name) !== index)
+			throw new Error(`connected app "${name}" is listed twice`);
 
 	const areas = registeredAreas(modules);
 	// Before the data is touched, and held until close: no restore runs while the platform has the database open.
@@ -378,6 +390,7 @@ export function openPlatform(
 		notifications,
 		interleave,
 		events,
+		apps,
 	});
 	return platform;
 }
@@ -465,4 +478,9 @@ export function interleaveOf(platform: Platform): Interleave | undefined {
 /** The live channels of a platform. Inside platform only: the door serves `GET /api/events`. */
 export function eventsOf(platform: Platform): Events {
 	return internalsOf(platform).events;
+}
+
+/** The connected apps of a platform: production's and, in a test, the test's own. Inside platform only. */
+export function appsOf(platform: Platform): readonly ConnectedApp[] {
+	return internalsOf(platform).apps;
 }

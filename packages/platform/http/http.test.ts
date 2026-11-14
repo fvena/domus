@@ -10,6 +10,7 @@ import { z } from "zod";
 
 import { createHttpHandler } from ".";
 import { PROTOCOL, platformContract } from "../contracts";
+import { CONNECTED_APPS, createKey, parseKey, revokeKey } from "../identity/keys";
 import { actionsOf, connectionOf, createPlatform } from "../platform";
 import { prepareAccount, preparePassword } from "../testing";
 
@@ -241,6 +242,50 @@ describe("http handler", () => {
 			expect(before).toHaveLength(1);
 			expect(devicesOf(luis)).toEqual(before);
 		});
+	});
+
+	it("tells the operator's log why it refused a key, never the key", async () => {
+		const lines: string[] = [];
+		const logged = createHttpHandler({
+			platform,
+			modules,
+			auth,
+			log: (line) => lines.push(line),
+		});
+		const connection = connectionOf(platform);
+		const tester = [...CONNECTED_APPS, { name: "tester", mandates: false }];
+		const key = createKey(connection, CONNECTED_APPS, "kira", 0);
+		const other = createKey(connection, CONNECTED_APPS, "kira", 0);
+		const revoked = createKey(connection, CONNECTED_APPS, "kira", 0);
+		revokeKey(connection, parseKey(revoked)?.id ?? "", 0);
+		const unlisted = createKey(connection, tester, "tester", 0);
+		const status = (headers: Record<string, string>) =>
+			logged.fetch(new Request("http://domus/api/rpc/status", { method: "POST", headers }));
+
+		const cases: readonly [Record<string, string>, string][] = [
+			[{ authorization: "Bearer" }, "empty"],
+			[{ authorization: `Basic ${key}` }, "scheme"],
+			[{ authorization: `Bearer ${key}x` }, "malformed"],
+			[{ authorization: `Bearer domus_AbCdEfGh-_0.${parseKey(key)?.secret}` }, "unknown"],
+			[
+				{ authorization: `Bearer domus_${parseKey(key)?.id}.${parseKey(other)?.secret}` },
+				"wrong-secret",
+			],
+			[{ authorization: `Bearer ${revoked}` }, "revoked"],
+			[{ authorization: `Bearer ${unlisted}` }, "unknown-app"],
+			[
+				{ authorization: `Bearer ${key}`, cookie: "better-auth.session_token=some.token" },
+				"session-cookie",
+			],
+		];
+		for (const [headers, reason] of cases) {
+			lines.length = 0;
+			expect((await status(headers)).status).toBe(401);
+			expect(lines).toEqual([`key refused: ${reason}`]);
+		}
+		lines.length = 0;
+		expect((await status({ authorization: `Bearer ${key}` })).status).toBe(200);
+		expect(lines).toEqual([]);
 	});
 
 	it("refuses a module whose id is one of the platform's procedures", () => {

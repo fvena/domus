@@ -9,11 +9,16 @@ import { z } from "zod";
  */
 export const PROTOCOL = 1;
 
-/** Public on purpose: it carries no personal data. Nothing else is public by default. */
+/**
+ * Public on purpose: it carries no personal data. Nothing else is public by default. With a good key it also says
+ * which connected app calls, `app`; with a bad one it answers `UNAUTHORIZED` (ADR 0030). A new optional field breaks
+ * nobody, so it did not raise {@link PROTOCOL}.
+ */
 export const statusContract = oc.output(
 	z.object({
 		service: z.literal("domus"),
 		protocol: z.number().int(),
+		app: z.string().optional(),
 	}),
 );
 

@@ -12,9 +12,13 @@
 // notice (ADR 0029: a person's own irreversible write, with no level of any area). A write's idempotency key and a sensitive operation's step-up proof come in headers.
 // Besides oRPC, routes of Hono only with a session: uploading and downloading files (ADR 0028), the live channel, the public key
 // of VAPID and the device's subscription to notices (ADR 0029).
+// The key of a connected app comes in `Authorization: Bearer` (ADR 0030). With a good one `status` says which app
+// calls; a bad one, or one next to the session cookie, is refused, never taken as no credential. Every other route
+// still refuses a key: none has a mandate yet.
 import type { ModuleDefinition } from "@domus/module-sdk";
 import { implement, ORPCError, os } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
+import { getSessionCookie } from "better-auth/cookies";
 import { type Context, Hono } from "hono";
 
 import { READ_DELEGATION, READ_LOG } from "../actions";
@@ -24,12 +28,14 @@ import { LIST_TASKS } from "../background/operations";
 import { PROTOCOL, platformContract } from "../contracts";
 import { contentDisposition, errorResponse } from "../files";
 import { AUTH_PREFIX, type AuthOptions, createAuth } from "../identity/auth";
+import { checkKey, noteKeyUse, readAuthorization } from "../identity/keys";
 import { replacePassword, SessionGoneError, verifiedPasswordHash } from "../identity/passwords";
 import { requestProof, WrongPasswordError } from "../identity/proofs";
 import { sessionsOf } from "../identity/sessions";
 import { TEST_NOTICE } from "../notifications/operations";
 import {
 	actionsOf,
+	appsOf,
 	backgroundOf,
 	clockOf,
 	connectionOf,
@@ -69,6 +75,9 @@ const RPC_PREFIX = "/api/rpc";
 /** The header that carries a write's idempotency key; @domus/api-client sends it from the call's context. */
 const IDEMPOTENCY_KEY_HEADER = "idempotency-key";
 
+/** The header that carries the key of a connected app, as `Bearer <key>` (ADR 0030). */
+const AUTHORIZATION_HEADER = "authorization";
+
 /** The header that carries a sensitive operation's step-up proof; @domus/api-client sends it from the call's context. */
 const PROOF_HEADER = "step-up-proof";
 
@@ -81,11 +90,17 @@ export interface HttpHandlerOptions {
 	readonly modules: readonly ModuleDefinition[];
 	/** How sessions are signed and which origins the app is served from. */
 	readonly auth: AuthOptions;
+	/** The operator's log, for why a key was refused, never with the key: `console.warn` unless given (ADR 0030). */
+	readonly log?: (line: string) => void;
 }
 
-/** What each RPC call carries: who it comes from, once a procedure asks, its idempotency key and its proof. */
+/**
+ * What each RPC call carries: who it comes from and which app's key it has, once a procedure asks, its idempotency key
+ * and its proof.
+ */
 interface DoorContext {
 	readonly verify: () => Promise<VerifiedContext | null>;
+	readonly app: () => string | undefined;
 	readonly idempotencyKey: string | undefined;
 	readonly proof: string | undefined;
 }
@@ -93,7 +108,12 @@ interface DoorContext {
 const platformProcedures = implement(platformContract).$context<DoorContext>();
 const actionProcedure = os.$context<DoorContext>();
 
-export function createHttpHandler({ platform, modules, auth }: HttpHandlerOptions): HttpHandler {
+export function createHttpHandler({
+	platform,
+	modules,
+	auth,
+	log = console.warn,
+}: HttpHandlerOptions): HttpHandler {
 	const connection = connectionOf(platform);
 	const notifications = notificationsOf(platform);
 	const interleave = interleaveOf(platform);
@@ -165,10 +185,15 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 
 	const rpc = new RPCHandler({
 		...moduleRouters,
-		status: platformProcedures.status.handler(() => ({
-			service: "domus" as const,
-			protocol: PROTOCOL,
-		})),
+		// Public without a credential; with a good key it also says which app calls, and a bad one is refused.
+		status: platformProcedures.status.handler(({ context }) => {
+			const app = context.app();
+			return {
+				service: "domus" as const,
+				protocol: PROTOCOL,
+				...(app === undefined ? {} : { app }),
+			};
+		}),
 		password: {
 			change: platformProcedures.password.change.handler(
 				async ({ input, context, errors }) => {
@@ -329,6 +354,7 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 			context: {
 				// Read once per request, only when a procedure needs it: status works without a session.
 				verify: () => (verified ??= contextOf(request, responseHeaders)),
+				app: () => appOf(request),
 				idempotencyKey: request.headers.get(IDEMPOTENCY_KEY_HEADER) ?? undefined,
 				proof: request.headers.get(PROOF_HEADER) ?? undefined,
 			},
@@ -442,6 +468,27 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	);
 
 	/**
+	 * The connected app whose key the request carries in `Authorization: Bearer`, `undefined` without the header. A
+	 * bad key, of any form, and a key next to the session cookie of Better Auth are refused with `UNAUTHORIZED`, never
+	 * taken as no key (ADR 0030).
+	 */
+	function appOf(request: Request): string | undefined {
+		const read = readAuthorization(request.headers.get(AUTHORIZATION_HEADER));
+		if (read.kind === "none") return undefined;
+		/** The same answer to every failure; only the operator's log tells them apart. */
+		const refuse = (reason: string): never => {
+			log(`key refused: ${reason}`);
+			throw new ORPCError("UNAUTHORIZED");
+		};
+		if (read.kind === "bad") return refuse(read.reason);
+		if (getSessionCookie(request) !== null) return refuse("session-cookie");
+		const check = checkKey(connection, appsOf(platform), read.key);
+		if (!check.ok) return refuse(check.reason);
+		noteKeyUse(connection, check.id, clockOf(platform)());
+		return check.app;
+	}
+
+	/**
 	 * The verified context of a request, from its session alone. Over HTTP, in phase 1c, the account is the
 	 * session's and asks itself: no via, the app channel, proven by password, no conversation.
 	 */
@@ -449,6 +496,8 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 		request: Request,
 		responseHeaders: Headers,
 	): Promise<VerifiedContext | null> {
+		// A key, good or bad, admits nothing that needs an account yet, not even next to a session that lives.
+		if (request.headers.has(AUTHORIZATION_HEADER)) return null;
 		const session = await identity.sessionOf(request, responseHeaders);
 		if (!session) return null;
 		return sealContext({

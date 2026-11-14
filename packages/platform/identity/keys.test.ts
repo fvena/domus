@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { connectionOf, createPlatform, type Platform } from "../platform";
-import { checkKey, CONNECTED_APPS, createKey, parseKey, revokeKey, UnknownAppError } from "./keys";
+import {
+	checkKey,
+	CONNECTED_APPS,
+	createKey,
+	parseKey,
+	readAuthorization,
+	revokeKey,
+	UnknownAppError,
+} from "./keys";
 
 describe("checkKey", () => {
 	let platform: Platform;
@@ -77,5 +85,42 @@ describe("parseKey", () => {
 		["nothing", ""],
 	])("refuses %s", (_, key) => {
 		expect(parseKey(key)).toBeUndefined();
+	});
+});
+
+describe("readAuthorization", () => {
+	const key = `domus_${ID}.${SECRET}`;
+
+	it("finds no key without the header", () => {
+		expect(readAuthorization(null)).toEqual({ kind: "none" });
+	});
+
+	it.each([
+		["Bearer", `Bearer ${key}`],
+		["the scheme in lower case", `bearer ${key}`],
+		["the scheme in capitals", `BEARER ${key}`],
+		["the scheme in mixed case", `bEaReR ${key}`],
+		["several spaces after the scheme", `Bearer   ${key}`],
+		["spaces around", `  Bearer ${key}  `],
+	])("reads the key with %s", (_, value) => {
+		expect(readAuthorization(value)).toEqual({ kind: "key", key });
+	});
+
+	it.each([
+		["an empty value", "", "empty"],
+		["only spaces", "   ", "empty"],
+		["the scheme alone", "Bearer", "empty"],
+		["the scheme and spaces", "Bearer   ", "empty"],
+		["another scheme", `Basic ${key}`, "scheme"],
+		["the key without a scheme", key, "scheme"],
+		["a scheme that only starts like Bearer", `Bearerx ${key}`, "scheme"],
+		["a tab instead of a space", `Bearer\t${key}`, "scheme"],
+		["two values", `Bearer ${key} ${key}`, "malformed"],
+		["two values joined by a comma", `Bearer ${key}, Bearer ${key}`, "malformed"],
+		["a key of another form", `Bearer ${key}x`, "malformed"],
+		["a key of another prefix", `Bearer domux_${ID}.${SECRET}`, "malformed"],
+		["a key with a short secret", `Bearer domus_${ID}.${SECRET.slice(1)}`, "malformed"],
+	])("finds a bad key with %s", (_, value, reason) => {
+		expect(readAuthorization(value)).toEqual({ kind: "bad", reason });
 	});
 });
