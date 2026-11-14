@@ -33,3 +33,13 @@ Paco y Rocío tienen la app abierta. Rocío añade una nota pública y a los dos
 - [x] La función pura de la decisión tiene sus propias pruebas: con y sin `read`, antes y después, dueño o público, creado y borrado.
 - [x] La regla de dependencias de `events` salta en su prueba de arquitectura.
 - [x] `pnpm check` pasa.
+
+## Comments
+
+- Hecho en `343974c`.
+- La escritura deja sus registros cambiados con `invalidations.remember(changesOf(transitions))` en `perform` de `actions/index.ts`, después de los trabajos de la bandeja y antes de `capture.clear()`. `events` los guarda en una tabla temporal dentro de la transacción (un rollback, también de un savepoint, los deshace) y los reparte cuando no queda ninguna transacción abierta. Anotado en la spec.
+- La decisión es `invalidationReaches(view, account, change)` de `authorization/invalidations.ts`, sobre `RecordChange` (`before` y `after` con dueño y visibilidad, `null` si no existía). La 07 añade ahí la variante de la tabla de área, sin dueño, y en `perform` sus registros tocados.
+- `events/index.ts` tiene ya `end(channel)` (`purge` y cierre tras lo que tenía) y `cut(channel)` (cierre sin `purge`, tirando la cola), y `share()`, que reparte lo confirmado. La 08 debe llamar a `share()` antes de mandar `reset` o `purge`, para no adelantar a una escritura ya confirmada, y exponer desde `Events` el fin por sesiones y el `reset` por cuenta.
+- Decidido sin preguntar, y anotado en la spec: cada reparto comprueba también que la sesión de cada canal vive y, si no, le manda `purge` sin esperar al latido; el corte tira lo que había en cola; el latido ocupa sitio en la cola; su comentario es `: heartbeat`.
+- Las pruebas usan el latido como centinela de «no llegó nada más»: lo confirmado antes de un latido sale antes que él. `test-utils` ofrece `openChannel(browser)`, `readEvents(stream)` y la opción `channelQueue`.
+- Better Auth pone la caducidad con la hora real: dos navegadores que entran con milisegundos de diferencia caducan con milisegundos de diferencia. Para que uno siga vivo, se hace caducar el que entró antes.
