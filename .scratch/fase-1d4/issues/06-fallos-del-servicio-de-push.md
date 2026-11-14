@@ -29,3 +29,11 @@ Lo que hace Domus cuando el servicio de push no responde bien. Que falle un apar
 - [x] Con dos suscripciones, una que falla con 500 y otra que responde 201: la segunda llega una sola vez, y el reintento de la primera no la repite.
 - [x] Las funciones puras cubren cada estado, `Retry-After` en segundos, en fecha, inválido y más allá del plazo.
 - [x] `pnpm check` pasa.
+
+## Comments
+
+- Hecho en `20b8df6`.
+- La clasificación y `Retry-After` son `classifyAnswer` y `retryAfterInstant` de `notifications/answers.ts`, puras; los códigos `PUSH_REJECTED`, `PUSH_UNAUTHORIZED` y `PUSH_REDIRECT` viven ahí, y `DELIVERY_EXPIRED` en `notices.ts`. `PushServiceError` desaparece: un fallo pasajero con estado es `PassingJobError HTTP_<estado>`, y un error de red se relanza tal cual.
+- El motor da ahora `JobContext.retryAt(notBefore?)`: el instante al que reintentaría un fallo pasajero de ese intento, o nada en el último. Quien construya un `JobContext` a mano (pruebas, `testing/child.ts`) debe pasarlo.
+- Decidido sin preguntar, y anotado en la spec: como el motor reintenta un tiempo agotado sin mirar lo que lanza el trabajo, la comprobación antes de cada envío gana un paso, después de la decisión sobre el registro y antes del endpoint: una entrega pasada su plazo termina `DELIVERY_EXPIRED` sin enviar. Un 4xx que la tabla no nombra es `PUSH_REJECTED`; la fecha de `Retry-After` solo en IMF-fixdate.
+- La 09: su entrega de prueba pasa por el mismo `send` y la misma clasificación; no hace falta tocarlos. Las pruebas de esta tarea están en `modules/probe/tests/push-answers.test.ts`, aparte de `notices.test.ts`. El servicio falso ofrece `neverAnswers` para una petición que no termina.
