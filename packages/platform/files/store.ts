@@ -18,7 +18,7 @@ import { dirname, join } from "node:path";
 /** The folder of the store in the data folder, unless the platform is given another. */
 const FILES_FOLDER = "files";
 
-/** The folder of the contents in the store.'s. */
+/** The folder of the contents inside the store. */
 const CONTENTS = "contents";
 
 /** How many characters of the hash name the folder a content lives in. */
