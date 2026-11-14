@@ -29,4 +29,4 @@ Files (ADR 0028): a module reaches files only through `ctx.files`, on records of
 
 After changing `server/schema.ts`, run `pnpm db:generate`: it writes `server/migrations/` and `server/migrations.ts`. Commit both; never edit an applied migration.
 
-The module list of `apps/api` is written by `pnpm modules:generate` and kept in git; a test fails when it is stale, and CI regenerates both and expects no change. No runtime loading or installing. `testOnly: true` keeps a module out of that list: tests import it and pass it to `test-utils`.
+The module list of `apps/api` is written by `pnpm modules:generate` and kept in git; a test fails when it is stale, and CI regenerates both and expects no change. No runtime loading or installing. `testOnly: true` keeps a module out of that list: tests import it and pass it to `test-utils`. Only the image of the restore rehearsal adds them, built with `DOMUS_MODULES=rehearsal` (`pnpm modules:generate --rehearsal` inside the image, never committed).

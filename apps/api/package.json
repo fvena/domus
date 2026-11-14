@@ -22,6 +22,7 @@
 		"hono": "catalog:"
 	},
 	"devDependencies": {
+		"@domus/probe": "workspace:*",
 		"@domus/test-utils": "workspace:*",
 		"@domus/tsconfig": "workspace:*",
 		"@types/node": "catalog:",

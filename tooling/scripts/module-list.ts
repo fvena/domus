@@ -1,6 +1,7 @@
 // The fixed module list of apps/api (ADR 0021), written by `pnpm modules:generate` and kept in git. It imports
-// the server entry of every module that is not testOnly, in the order of their ids. The web gets its own list
-// with its first module screen.
+// the server entry of every module that is not testOnly, in the order of their ids. The rehearsal image alone
+// writes over it, in its build, a list with the testOnly ones too. The web gets its own list with its first module
+// screen.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -41,11 +42,24 @@ export async function loadModules(root: string): Promise<FoundModule[]> {
 	);
 }
 
+/** Which modules a list holds: production's leaves out the testOnly ones, the rehearsal image's has every one. */
+export type Composition = "production" | "rehearsal";
+
+const HEADERS: Readonly<Record<Composition, string>> = {
+	production:
+		"// Written by `pnpm modules:generate` (ADR 0021). Do not edit: add or change a module and generate.",
+	rehearsal:
+		"// Written by `pnpm modules:generate --rehearsal` (ADR 0021) for the rehearsal image only; never committed.",
+};
+
 /**
  * The source of the module list of apps/api, formatted with Oxfmt. Throws when a module's id is not its
  * folder's name, or when the modules would not pass `checkModules`.
  */
-export function moduleListSource(modules: readonly FoundModule[]): string {
+export function moduleListSource(
+	modules: readonly FoundModule[],
+	composition: Composition = "production",
+): string {
 	for (const { folder, definition } of modules)
 		if (definition.id !== folder)
 			throw new Error(
@@ -54,11 +68,11 @@ export function moduleListSource(modules: readonly FoundModule[]): string {
 	checkModules(modules.map((module) => module.definition));
 
 	const listed = modules
-		.filter((module) => !module.definition.testOnly)
+		.filter((module) => composition === "rehearsal" || !module.definition.testOnly)
 		.sort((a, b) => (a.definition.id < b.definition.id ? -1 : 1));
 	const name = (module: FoundModule) => `${module.definition.id}Module`;
 	const source = [
-		"// Written by `pnpm modules:generate` (ADR 0021). Do not edit: add or change a module and generate.",
+		HEADERS[composition],
 		"",
 		'import type { PlatformOptions } from "@domus/platform";',
 		...listed.map((module) => `import ${name(module)} from "${module.packageName}/server";`),

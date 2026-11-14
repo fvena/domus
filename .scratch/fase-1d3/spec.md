@@ -348,6 +348,7 @@ Un fichero que falta en disco con su contenido presente es un fallo interno (`IN
 
 - Una imagen `domus-api:ensayo`, con una composición explícita de módulos que incluye `probe` sin quitarle su `testOnly`. La lista de producción no cambia y su prueba sigue dejando fuera los módulos `testOnly`. Cómo se elige la composición al construir se decide en la tarea de la Pi.
 - El ensayo vacía solo el volumen de `domus-restore`.
+- Decidido al implementar la 10: la imagen se construye con `--build-arg DOMUS_MODULES=rehearsal`, que dentro de la imagen reescribe la lista de `apps/api` con `pnpm modules:generate --rehearsal`, también con los módulos `testOnly`; sin el argumento, o con `production`, la imagen lleva la lista de git, y otro valor hace fallar la construcción. `apps/api` gana `@domus/probe` como dependencia de desarrollo, para que esa lista se resuelva al empaquetar; la de producción no lo importa. Las pruebas de la lista comprueban las dos composiciones.
 
 ### Reglas y documentación
 
