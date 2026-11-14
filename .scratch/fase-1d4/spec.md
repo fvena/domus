@@ -138,6 +138,10 @@ Una suscripción la registra la app desde la sesión que el aparato tiene habili
 - Dentro de `api`, ese camino escribe `purge` y cierra los canales de las sesiones terminadas, después de confirmar la transacción que las termina, nunca antes.
 - Restaurar trabaja con `api` parado y `pnpm accounts` es otro proceso. Sus cambios los recoge el latido.
 - La regla única de que una sesión vive (`sessionLivesWhere` y `sessionLives`) pasa a exigir también que no haya caducado, con el reloj de la plataforma. Afecta a todos sus usos: comprobantes, archivos preparados, limpieza de preparados, referencias de archivo, canal y entregas. Las pruebas de la 1c y la 1d3 ganan el caso de la sesión caducada con su fila todavía en la base.
+    - La comprobación recibe el instante: `sessionLives(connection)` da `(account, session, now)` y `sessionLivesWhere` toma la expresión SQL del instante, siempre del reloj de la plataforma. La de `actions/proofs.ts`, que solo miraba si la fila existe, pasa a llamarse `sessionExists`: decide si un comprobante queda atado a su sesión, no si la sesión vive.
+    - Pedir un comprobante desde una sesión caducada, con su fila todavía ahí, responde `UNAUTHORIZED`, como la que termina mientras se comprueba la contraseña.
+    - Las confirmaciones pendientes siguen mirando solo si su sesión existe: no están en la lista de usos.
+    - En las pruebas, Better Auth pone la caducidad de las sesiones de `browser()` con la hora real y la plataforma usa el reloj de pruebas. `test-utils` gana `sessionExpiresAt(session)`, que lee la caducidad de la fila, y la prueba mueve el reloj hasta ella. El proceso hijo que sube un archivo (`hold: "publish"`) recibe `now`, como el de la limpieza, para que su sesión preparada viva en él.
 - Las suscripciones cuelgan de su sesión con una clave ajena `ON DELETE CASCADE`. Terminar una sesión borra su suscripción, también al restaurar.
 
 ### `no-store` (Q17)

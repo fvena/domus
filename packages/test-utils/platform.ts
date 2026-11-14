@@ -20,6 +20,7 @@ import {
 	type Grant,
 	hasAccount,
 	hasSession,
+	sessionExpiresAt,
 	invokeAction,
 	type IssuedProof,
 	type LogEntry,
@@ -391,6 +392,11 @@ export interface TestPlatform<
 	/** True while the session exists. */
 	hasSession(session: string): boolean;
 	/**
+	 * The instant the session's row says it expires, `undefined` when there is none. A session the browser signed
+	 * in has its expiry from the real time, as Better Auth sets it: the test moves the platform clock to it.
+	 */
+	sessionExpiresAt(session: string): number | undefined;
+	/**
 	 * Reads the action log through the platform's real operation: the annotations of the represented account's
 	 * own entries, in order, never their input or inverse. Via Kira it needs the platform's read delegated: a
 	 * denial is thrown as `FORBIDDEN`, and a delegation that asks as `CONFIRMATION_REQUIRED`.
@@ -645,6 +651,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		revokeDevice: (context, session, options) =>
 			operate(context, "revokeDevice", { session }, options),
 		hasSession: (session) => hasSession(platform, session),
+		sessionExpiresAt: (session) => sessionExpiresAt(platform, session),
 		readLog: (context) =>
 			invokeAction(platform, {
 				context,

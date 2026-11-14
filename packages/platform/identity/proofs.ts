@@ -8,9 +8,10 @@ import { ORPCError } from "@orpc/server";
 import type Database from "better-sqlite3";
 
 import type { Actions, Clock, ProvenOperation } from "../actions";
-import { type Proofs, sessionLives } from "../actions/proofs";
+import { type Proofs, sessionExists } from "../actions/proofs";
 import { isVerified, type VerifiedContext } from "../authorization";
 import { passwordHashOf, verifiedPasswordHash } from "./passwords";
+import { sessionLives } from "./sessions";
 
 export interface ProofIssuer {
 	readonly connection: Database.Database;
@@ -42,7 +43,7 @@ export class WrongPasswordError extends Error {
 /**
  * A step-up proof for `operation`, once `password` is the account's current one. Throws `FORBIDDEN` for an
  * identity not proven by password, the errors of an unknown or invalid operation or one that is not sensitive,
- * {@link WrongPasswordError}, and `UNAUTHORIZED` when the session ended while the password was being checked.
+ * {@link WrongPasswordError}, and `UNAUTHORIZED` when the session ended, or expired, before the proof is stored.
  * A password changed while it was being checked is no longer the current one, so it is a wrong password too
  * (ADR 0023: changing the password ends its proofs): the answer reveals no more than giving the new one wrong.
  */
@@ -55,11 +56,12 @@ export async function requestProof(
 	if (context.identity !== "password") throw new ORPCError("FORBIDDEN");
 	const fingerprint = actions.fingerprintOf(operation);
 	const { session } = context;
-	const bound = session !== undefined && sessionLives(connection, session);
+	const bound = session !== undefined && sessionExists(connection, session);
+	const lives = sessionLives(connection);
 	const checked = await verifiedPasswordHash(connection, context.account, password);
 	if (checked === undefined) throw new WrongPasswordError();
 	return connection.transaction(() => {
-		if (bound && !sessionLives(connection, session)) throw new ORPCError("UNAUTHORIZED");
+		if (bound && !lives(context.account, session, clock())) throw new ORPCError("UNAUTHORIZED");
 		if (passwordHashOf(connection, context.account) !== checked) throw new WrongPasswordError();
 		return proofs.issue(context, fingerprint, clock());
 	})();

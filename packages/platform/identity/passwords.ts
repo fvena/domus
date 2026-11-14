@@ -68,7 +68,7 @@ export async function replacePassword(
 	const lives = sessionLives(connection);
 	const hash = await hashPassword(password);
 	return connection.transaction(() => {
-		if (keep !== undefined && !lives(account, keep)) throw new SessionGoneError();
+		if (keep !== undefined && !lives(account, keep, now)) throw new SessionGoneError();
 		setPasswordHash(connection, account, hash, now);
 		endConfirmationsOf(connection, account);
 		endProofsOf(connection, account);
