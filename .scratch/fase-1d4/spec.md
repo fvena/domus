@@ -181,7 +181,7 @@ Una suscripción la registra la app desde la sesión que el aparato tiene habili
 ### `ctx.notify` (Q2, Q5)
 
 - `ctx.notify({ to, about })` en el contexto de una escritura: `to` es el id de una cuenta, y `about` es `{ type, id }`, un registro de una tabla con dueño o de área del propio módulo. El módulo lo pone la plataforma.
-- Un `about` con un tipo que no es de una tabla con dueño o de área del módulo es un error del módulo: la escritura se revierte con un fallo interno.
+- Un `about` con un tipo que no es de una tabla con dueño o de área del módulo, o con un `id` que no es un número entero (también `"1"`), como el de un registro tocado de tabla de área, es un error del módulo: la escritura se revierte con un fallo interno.
 - No comprueba en el momento que `to` sea un miembro ni que vea el registro: eso lo decide la entrega, con lo vigente entonces. Un `to` que es la cuenta `device`, o que no existe, deja un aviso que termina omitido.
 - Deja un trabajo `notice` del carril corto con `{ to, module, type, id }` en `payload`, nunca texto.
 - Una escritura puede dejar varios avisos. Repetirla con la misma clave devuelve el acuse y no deja otros.
@@ -252,7 +252,7 @@ Una suscripción la registra la app desde la sesión que el aparato tiene habili
     - La 04 deja la función pura `vapidSubject(origins)`; llevar los orígenes hasta la entrega es de la 05.
 - **Detalles de la tarea 04.**
     - Las rutas comprueban, en este orden: que la sesión vive con el reloj de la plataforma (`UNAUTHORIZED`, también al pedir la clave y al darse de baja), la autorización (`FORBIDDEN`), la forma del cuerpo (`BAD_REQUEST`), el endpoint (`push-endpoint-not-allowed`) y, ya en la transacción, otra vez que la sesión vive y que es la habilitada (`CONFLICT`).
-    - El cuerpo es exactamente `{ endpoint, keys: { p256dh, auth } }`, con textos no vacíos: el `expirationTime` que añade `PushSubscription.toJSON()` se rechaza, así que la app de la fase 2 manda solo esos campos.
+    - El cuerpo es `{ endpoint, keys: { p256dh, auth } }`, con textos no vacíos, y nada más salvo el `expirationTime` opcional (un número o nulo) que añade `PushSubscription.toJSON()`, que se admite y se ignora: la app de la fase 2 puede mandar lo que da el navegador tal cual. Cualquier otro campo, también dentro de `keys`, responde `BAD_REQUEST`. Corregido en la revisión de código: antes se rechazaba `expirationTime`.
     - Las sesiones anteriores a la 1d4 no tienen `deviceEntry`: ninguna está habilitada hasta que se vuelva a entrar en el aparato.
     - Un fallo en el punto `entering` (una promesa rechazada o un error) hace fallar el inicio de sesión, con el `entry` ya escrito.
     - `test-utils` gana `test.subscriptions()`, cada suscripción como dato con su aparato, sesión, cuenta y si está habilitada (su sesión vive y es la habilitada del aparato).

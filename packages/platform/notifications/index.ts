@@ -23,12 +23,14 @@ export { endpointAllowed, PUSH_SERVICES } from "./endpoint";
 export { vapidSubject } from "./keys";
 
 /**
- * What the app sends to subscribe: the endpoint and keys of its browser's push subscription, and nothing else, so
- * not the `expirationTime` that `PushSubscription.toJSON()` adds.
+ * What the app sends to subscribe: the endpoint and keys of its browser's push subscription, as
+ * `PushSubscription.toJSON()` gives them, and nothing else. Its `expirationTime`, a number or null, is accepted
+ * and ignored: the push service drops an expired subscription, which then answers 404 or 410.
  */
 const subscriptionBody = z.strictObject({
 	endpoint: z.string().min(1),
 	keys: z.strictObject({ p256dh: z.string().min(1), auth: z.string().min(1) }),
+	expirationTime: z.number().nullable().optional(),
 });
 
 export interface Notifications {
