@@ -24,6 +24,7 @@ Kira lee y deshace lo de una persona dentro de su delegación, y nada más de la
 
 ## Comments
 
+- Hecho en `4251696`.
 - La lista es `admitsMandate` de `authorization/mandates.ts`, por la ruta `<grupo>/<nombre>` de cada operación. La puerta no pasa `{ mandate: true }` a mano en los dos manejadores, como decía la 03: todos los manejadores de la plataforma dan su llamada entera (`{ context, path, input }`) a `verifiedSession`, `signedIn` o `platformWrite`, y `verifiedSession` pregunta a la lista con la ruta que da oRPC, nunca con la URL que escribió el cliente. Así decide solo la lista y una operación nueva nace cerrada. Está en la spec («La puerta», detalles de la 05).
 - Vía Kira, `log/read` pide la delegación de `platform` en `read`, y `log/undo` la de la inversa en el momento de deshacer; ya lo hacía el camino de las acciones, la 05 solo les abre la puerta.
 - Las pruebas están en `modules/probe/tests/platform-mandates-http.test.ts`. La de las superficies cerradas recorre `platformContract`: una operación nueva la rompe hasta que se llama allí con llave y mandato buenos o se añade a la lista. Las rutas de Hono y de Better Auth siguen cerradas por lo que hizo la 02, no por la lista.
