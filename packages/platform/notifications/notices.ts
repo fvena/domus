@@ -9,7 +9,7 @@ import { z } from "zod";
 
 import { type Clock, NOTICE, type OutboxJob } from "../actions";
 import type { AccessView } from "../authorization";
-import { noticeDecision } from "../authorization/notices";
+import { noticeDecision, testNoticeDecision } from "../authorization/notices";
 import { type JobKind, PermanentJobError } from "../background";
 import type { Interleave } from "../files";
 import { sessionEnabledWhere, sessionLivesWhere } from "../identity/sessions";
@@ -32,13 +32,19 @@ export const PUSH_ENDPOINT_NOT_ALLOWED = "PUSH_ENDPOINT_NOT_ALLOWED";
 /** The code of a delivery whose subscription's keys cannot encrypt: the browser never gave them. */
 export const PUSH_KEYS_INVALID = "PUSH_KEYS_INVALID";
 
-/** The data of a notice: its recipient and the record it is about. Never text. */
-const noticePayload = z.strictObject({
-	to: z.string(),
-	module: z.string(),
-	type: z.string(),
-	id: z.number().int(),
-});
+/**
+ * The data of a notice: its recipient and the record it is about, or, for the test notice, its kind and who asked
+ * for it. Never text.
+ */
+const noticePayload = z.union([
+	z.strictObject({ kind: z.literal("test"), to: z.string() }),
+	z.strictObject({
+		to: z.string(),
+		module: z.string(),
+		type: z.string(),
+		id: z.number().int(),
+	}),
+]);
 type NoticePayload = z.infer<typeof noticePayload>;
 
 export interface NoticeJobsOptions {
@@ -106,6 +112,12 @@ export function noticeJobs({
 		FROM platform_push_subscriptions WHERE id = @id`,
 	);
 
+	/** Whether a notice goes to its recipient now: the test notice, about no record, asks only for a person. */
+	const decisionOf = (notice: NoticePayload) =>
+		"kind" in notice
+			? testNoticeDecision(view, notice.to)
+			: noticeDecision(view, notice.to, records(notice));
+
 	/** Shares a notice out, in one transaction: its outcome, `distributed` once its deliveries exist. */
 	const distribute = connection.transaction((id: number, notice: NoticePayload): string => {
 		const found = selectNotice.get(id);
@@ -113,7 +125,7 @@ export function noticeJobs({
 		if (!found || found.entry === null)
 			throw new PermanentJobError(`the notice ${id} has no entry of its write`);
 		if (found.undone === 1) return "undone";
-		const decision = noticeDecision(view, notice.to, records(notice));
+		const decision = decisionOf(notice);
 		if (decision !== "deliver") return decision;
 		for (const { id: subscription } of selectEnabled.all({
 			account: notice.to,
@@ -143,7 +155,7 @@ export function noticeJobs({
 		if (!subscription) return "subscription-gone";
 		if (subscription.lives !== 1) return "session-ended";
 		if (subscription.enabled !== 1) return "not-enabled";
-		const decision = noticeDecision(view, notice.to, records(notice));
+		const decision = decisionOf(notice);
 		if (decision !== "deliver") return decision;
 		if (!endpointAllowed(subscription.endpoint, pushServices))
 			throw new PermanentJobError("the endpoint is not of a push service Domus admits", {
@@ -153,12 +165,15 @@ export function noticeJobs({
 			throw new PermanentJobError("no https origin to sign VAPID tokens with", {
 				code: PUSH_NOT_CONFIGURED,
 			});
-		const content = {
-			module: notice.module,
-			type: notice.type,
-			id: notice.id,
-			notice: delivery.notice,
-		};
+		const content =
+			"kind" in notice
+				? { kind: notice.kind, notice: delivery.notice }
+				: {
+						module: notice.module,
+						type: notice.type,
+						id: notice.id,
+						notice: delivery.notice,
+					};
 		try {
 			return webPush.generateRequestDetails(
 				{

@@ -410,15 +410,19 @@ export function createActions({
 		return operationFingerprint(operation.action, value);
 	}
 
-	/** What authorization needs to know of an operation of the platform: whether it is sensitive, and its subject. */
+	/**
+	 * What authorization needs to know of an operation of the platform: whether it is sensitive or a person's own,
+	 * and its subject.
+	 */
 	function sensitivityOf(
 		found: RegisteredAction,
 		input: unknown,
 		context: VerifiedContext,
-	): Pick<AuthorizationRequest, "sensitive" | "subject"> {
+	): Pick<AuthorizationRequest, "sensitive" | "personal" | "subject"> {
 		const subject = found.subject?.(input, context);
 		return {
 			...(found.sensitive === undefined ? {} : { sensitive: found.sensitive }),
+			...(found.personal === true ? { personal: true } : {}),
 			...(subject === undefined ? {} : { subject }),
 		};
 	}

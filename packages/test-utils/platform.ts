@@ -418,6 +418,11 @@ export interface TestPlatform<
 	 * ends, and so do the pending confirmations and proofs born there.
 	 */
 	revokeDevice(context: VerifiedContext, session: string, options: WriteOptions): WriteOutcome;
+	/**
+	 * Asks for a test notice to oneself through the platform's real operation: an irreversible write with its key,
+	 * of a person by itself, that leaves a notice to who asks about no record.
+	 */
+	testNotice(context: VerifiedContext, options: WriteOptions): WriteOutcome;
 	/** True while the session exists. */
 	hasSession(session: string): boolean;
 	/**
@@ -702,6 +707,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 			operate(context, "revokeSession", { session }, options),
 		revokeDevice: (context, session, options) =>
 			operate(context, "revokeDevice", { session }, options),
+		testNotice: (context, options) => operate(context, "testNotice", undefined, options),
 		hasSession: (session) => hasSession(platform, session),
 		sessionExpiresAt: (session) => sessionExpiresAt(platform, session),
 		subscriptions: () => readSubscriptions(platform),

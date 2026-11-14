@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AccessView, AreaPolicy, Grant } from ".";
-import { noticeDecision } from "./notices";
+import { noticeDecision, testNoticeDecision } from "./notices";
 
 const AREA: AreaPolicy = {
 	defaultVisibility: "private",
@@ -82,5 +82,17 @@ describe("a notice about an area table's record", () => {
 		expect(noticeDecision(view("none"), "luis", label)).toBe("not-visible");
 		expect(noticeDecision(view(), "luis", { area: "gone" })).toBe("not-visible");
 		expect(noticeDecision(view(), "screen", label)).toBe("not-member");
+	});
+});
+
+describe("the test notice", () => {
+	it("goes to a person, about no record, whatever the person reads", () => {
+		expect(testNoticeDecision(view("none"), "luis")).toBe("deliver");
+		expect(testNoticeDecision(view(), "ana")).toBe("deliver");
+	});
+
+	it("does not go to the device account, nor to an account that does not exist", () => {
+		expect(testNoticeDecision(view(), "screen")).toBe("not-member");
+		expect(testNoticeDecision(view(), "nobody")).toBe("not-member");
 	});
 });

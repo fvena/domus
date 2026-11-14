@@ -66,6 +66,11 @@ export interface AuthorizationRequest {
 	 */
 	readonly sensitive?: SensitiveOperation;
 	/**
+	 * An operation of the platform a person asks for themselves, with no level of any area, such as the test notice
+	 * (ADR 0029): only a person's account, from the app and by itself. It needs no proof.
+	 */
+	readonly personal?: true;
+	/**
 	 * The step-up proof the request brings, as the path of the actions found it: `valid` when it was issued for
 	 * this account, session, device and exact operation and is still usable; `invalid` otherwise. Absent when
 	 * it brings none. The proof itself never reaches here.
@@ -177,6 +182,11 @@ export function delegationOf(
 /** The decision, in the order of ADR 0023. Pure: everything it reads comes in `request` and `view`. */
 export function decide(request: AuthorizationRequest, view: AccessView): Decision {
 	const { context, permission, subject, sensitive } = request;
+	// A person's own operation asks for no level: who asks is all that counts. A proof does not match it.
+	if (request.personal === true) {
+		if (context.channel !== "app" || !personByItself(view, context)) return "deny";
+		return request.proof === undefined ? "allow" : "step-up";
+	}
 	// Permissions: only the admin, on another account. An account's own settings: only that account, or the
 	// admin for the device account.
 	if (sensitive === "permissions") {
