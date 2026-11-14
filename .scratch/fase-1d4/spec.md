@@ -303,13 +303,13 @@ Mismo formato que las rutas de archivos: el estado HTTP y, como cuerpo, el JSON 
 
 ### La comprobación en la Pi (Q10)
 
-- En el ensayo con `domus-api:ensayo`, por Tailscale (https), con dos cuentas y `curl` sobre `/api/events`:
+- En el ensayo con `domus-api:ensayo`, con dos cuentas y `curl` sobre `/api/events` (decidido en el cierre: dentro de la Pi, porque el ensayo solo escucha en `127.0.0.1:3001` y sacarlo por Tailscale pedía cambiar `tailscale serve`; que el proxy de Tailscale no retiene los eventos se comprueba en el Domus real):
     - una nota pública nueva llega a las dos en menos de 1 s (objetivo nuevo, se anota la medida);
     - una privada llega solo a su dueño;
     - pasar una nota pública a privada llega al lector anterior, que al volver a pedirla ya no la ve;
     - revocar una sesión cierra su canal con `purge`;
     - las claves VAPID son las mismas tras reiniciar y tras recrear `api`.
-- En el Domus real: `/api/events` sin sesión responde `401` con `no-store`, y `GET /api/notifications/key` con sesión responde una clave.
+- En el Domus real: `/api/events` sin sesión responde `401` con `no-store`, `GET /api/notifications/key` con sesión responde una clave, y el canal abierto por Tailscale (https) recibe `ready` al momento y el latido a los 25 s.
 
 ### Reglas y documentación
 

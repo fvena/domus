@@ -53,7 +53,7 @@ Una tabla de un módulo cuyos registros son de una cuenta: cada uno guarda su du
 _Evitar_: tabla privada, tabla protegida.
 
 **Tabla de área** (`area table`):
-Una tabla de un módulo sin dueño cuyos registros son de la casa: los ve quien tiene permiso de ver su área, sin visibilidad por registro. Lo declara al crearse; una tabla sin dueño que no lo declara no avisa a nadie de sus cambios.
+Una tabla de un módulo sin dueño cuyos registros son de la casa: los ve quien tiene permiso de ver su área, sin visibilidad por registro. Nunca está en un área siempre privada, como la salud. Lo declara al crearse; una tabla sin dueño que no lo declara no avisa a nadie de sus cambios.
 _Evitar_: tabla pública, tabla compartida.
 
 **Visibilidad** (`visibility`):
