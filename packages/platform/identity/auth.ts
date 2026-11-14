@@ -11,6 +11,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 
 import { account, session, user, verification } from "../schema";
 import { randomId } from "./accounts";
+import type { SessionsEnded } from "./sessions";
 
 /** The cookie that names the device; another one than the session's, and it outlives signing out. */
 export const DEVICE_COOKIE = "domus.device";
@@ -38,8 +39,13 @@ export interface SessionRecord {
 	readonly device: string;
 }
 
-/** What signing in tells the rest of the platform about a session entering a device. */
+/** What signing in and out tells the rest of the platform about a session entering a device or leaving it. */
 export interface EntryHooks {
+	/**
+	 * After Better Auth deleted a session: signing out, the way of ending a session that does not go through
+	 * `endSessions`. Better Auth also deletes here one it found expired, which had already ended.
+	 */
+	readonly ended?: SessionsEnded;
 	/**
 	 * Once the device's new `entry` is written, with no transaction open, and before the session is created: where a
 	 * test waits.
@@ -64,7 +70,7 @@ const MIN_SECRET_LENGTH = 32;
 export function createAuth(
 	connection: Database.Database,
 	{ secret, origins }: AuthOptions,
-	{ entering, entered }: EntryHooks = {},
+	{ entering, entered, ended }: EntryHooks = {},
 ): Auth {
 	if (secret.length < MIN_SECRET_LENGTH)
 		throw new Error(`the auth secret must have at least ${MIN_SECRET_LENGTH} characters`);
@@ -141,6 +147,11 @@ export function createAuth(
 					},
 					after: async (created) => {
 						entered?.(created.id);
+					},
+				},
+				delete: {
+					after: async (deleted) => {
+						ended?.([deleted.id], "sign-out");
 					},
 				},
 			},

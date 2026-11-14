@@ -352,7 +352,7 @@ export function openPlatform(
 		retention,
 		confirmations: createConfirmations(db, confirmationTimes),
 		proofs,
-		operations: [...platformOperations(db, areas), ...taskOperations(background)],
+		operations: [...platformOperations(db, areas, events), ...taskOperations(background)],
 		references: createReferences(db, view),
 		...(files === undefined ? {} : { openContent: (hash: string) => files.open(hash) }),
 		outbox: background.outbox,

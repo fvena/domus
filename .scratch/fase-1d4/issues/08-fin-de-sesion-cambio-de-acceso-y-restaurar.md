@@ -1,6 +1,6 @@
 # 08. Fin de sesión, cambio de acceso y restaurar
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 02, 05
 
 Spec: [`../spec.md`](../spec.md), secciones «Cuando termina una sesión», «El reparto de invalidaciones» (`reset` y el cierre al perder acceso) y «Restaurar». Costura 4. ADR 0029.
@@ -22,13 +22,13 @@ Cómo se reparte el trabajo entre `identity` y `events` (un camino común con el
 
 ## Criterios de aceptación
 
-- [ ] Cada una de las cuatro formas internas (cerrar sesión por `browser()`, `revokeSession`, `revokeDevice` y cambiar la contraseña) escribe `purge` en los canales de las sesiones que termina y en ningún otro, y los cierra.
-- [ ] Si la transacción que termina la sesión se revierte, no sale ningún `purge`.
-- [ ] Una sesión que caduca con su fila en la base recibe `purge` en el siguiente latido.
-- [ ] Una sesión terminada desde una segunda conexión a la misma base en fichero recibe `purge` en el siguiente latido. La prueba deja escrito que esto demuestra la detección del cambio externo, no que `pnpm accounts` revoque bien, que ya lo cubren sus pruebas de la 1c.
-- [ ] En cada una de las formas, la suscripción de la sesión terminada desaparece y la de una sesión anterior del aparato sigue sin estar habilitada.
-- [ ] Quitar `read` en un área con el canal abierto: `reset` y cierre. Al reconectar, `ready`, y lo de esa área ya no llega.
-- [ ] Dar `read` en un área: `reset` sin cierre, y desde ahí llegan sus invalidaciones.
-- [ ] Cambiar la delegación de la cuenta no manda nada por el canal.
-- [ ] Con `restoreBackup`, sobre una copia con suscripciones, avisos y entregas pendientes: tras restaurar no hay suscripciones, los trabajos están cancelados y no salen al arrancar, y `GET /api/notifications/key` responde la clave de la copia.
-- [ ] `pnpm check` pasa.
+- [x] Cada una de las cuatro formas internas (cerrar sesión por `browser()`, `revokeSession`, `revokeDevice` y cambiar la contraseña) escribe `purge` en los canales de las sesiones que termina y en ningún otro, y los cierra.
+- [x] Si la transacción que termina la sesión se revierte, no sale ningún `purge`.
+- [x] Una sesión que caduca con su fila en la base recibe `purge` en el siguiente latido.
+- [x] Una sesión terminada desde una segunda conexión a la misma base en fichero recibe `purge` en el siguiente latido. La prueba deja escrito que esto demuestra la detección del cambio externo, no que `pnpm accounts` revoque bien, que ya lo cubren sus pruebas de la 1c.
+- [x] En cada una de las formas, la suscripción de la sesión terminada desaparece y la de una sesión anterior del aparato sigue sin estar habilitada.
+- [x] Quitar `read` en un área con el canal abierto: `reset` y cierre. Al reconectar, `ready`, y lo de esa área ya no llega.
+- [x] Dar `read` en un área: `reset` sin cierre, y desde ahí llegan sus invalidaciones.
+- [x] Cambiar la delegación de la cuenta no manda nada por el canal.
+- [x] Con `restoreBackup`, sobre una copia con suscripciones, avisos y entregas pendientes: tras restaurar no hay suscripciones, los trabajos están cancelados y no salen al arrancar, y `GET /api/notifications/key` responde la clave de la copia.
+- [x] `pnpm check` pasa.

@@ -95,9 +95,11 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	const connection = connectionOf(platform);
 	const notifications = notificationsOf(platform);
 	const interleave = interleaveOf(platform);
+	const events = eventsOf(platform);
 	const identity = createAuth(connection, auth, {
 		entering: () => interleave?.("entering"),
 		entered: (session) => notifications.entered(session),
+		ended: events.sessionsEnded,
 	});
 	const actions = actionsOf(platform);
 	const files = filesOf(platform);
@@ -181,6 +183,7 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 							input.newPassword,
 							clockOf(platform)(),
 							session,
+							events.sessionsEnded,
 						);
 						return { endedSessions };
 					} catch (error) {
@@ -429,7 +432,7 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	// The live channel of this session (ADR 0029): an `EventSource` of the app, only with a session that lives.
 	app.get(
 		EVENTS_PATH,
-		sessionRoute(async (verified, _request, c) => eventsOf(platform).open(c, verified)),
+		sessionRoute(async (verified, _request, c) => events.open(c, verified)),
 	);
 
 	/**

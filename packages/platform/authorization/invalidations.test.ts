@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AccessView, AreaPolicy, Grant } from ".";
-import { invalidationReaches, type RecordChange } from "./invalidations";
+import { invalidationReaches, readLost, type RecordChange } from "./invalidations";
 
 const AREA: AreaPolicy = {
 	defaultVisibility: "private",
@@ -78,5 +78,15 @@ describe("an invalidation", () => {
 	it("reaches nobody in an area that is not registered, nor an account that does not exist", () => {
 		expect(invalidationReaches(view(), "luis", change(null, anaPublic, "gone"))).toBe(false);
 		expect(invalidationReaches(view(), "nadie", change(null, anaPublic))).toBe(false);
+	});
+});
+
+describe("whether a change of grant takes away read", () => {
+	it("is true only from a grant that reads to one that does not", () => {
+		const grants: readonly Grant[] = ["none", "read", "write", "manage"];
+		const lost = grants.flatMap((before) =>
+			grants.filter((after) => readLost(before, after)).map((after) => `${before}→${after}`),
+		);
+		expect(lost).toEqual(["read→none", "write→none", "manage→none"]);
 	});
 });
