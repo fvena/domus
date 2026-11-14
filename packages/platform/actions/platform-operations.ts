@@ -35,6 +35,8 @@ export interface PlatformOperation {
 	 */
 	readonly undoable?: boolean;
 	readonly sensitive?: SensitiveOperation;
+	/** One a person asks for themselves, with no level of any area (`personal` of authorization). */
+	readonly personal?: true;
 	/** Undefined for one that takes no input. */
 	readonly inputSchema: AnySchema | undefined;
 	/** The account whose settings or data it reads or changes, read inside its read or write. */
@@ -92,6 +94,7 @@ export function platformActions(
 			inputSchema: operation.inputSchema,
 			outputSchema: undefined,
 			...(operation.sensitive === undefined ? {} : { sensitive: operation.sensitive }),
+			...(operation.personal === true ? { personal: true } : {}),
 			subject: operation.subject,
 			...(operation.find === undefined ? {} : { find: operation.find }),
 			execute:

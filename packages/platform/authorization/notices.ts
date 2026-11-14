@@ -31,3 +31,12 @@ export function noticeDecision(
 	if (!reaches(grantOf(view, to, record.area), "read")) return "not-visible";
 	return record.owner === to || record.visibility === "public" ? "deliver" : "not-visible";
 }
+
+/**
+ * Whether the test notice (ADR 0029, «El aviso de prueba») goes to `to`, who asked for it: about no record, so only
+ * that `to` is a person.
+ */
+export function testNoticeDecision(view: AccessView, to: string): "deliver" | "not-member" {
+	const role = view.roleOf(to);
+	return role === "admin" || role === "member" ? "deliver" : "not-member";
+}
