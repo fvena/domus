@@ -32,3 +32,11 @@ Cómo se reparte el trabajo entre `identity` y `events` (un camino común con el
 - [x] Cambiar la delegación de la cuenta no manda nada por el canal.
 - [x] Con `restoreBackup`, sobre una copia con suscripciones, avisos y entregas pendientes: tras restaurar no hay suscripciones, los trabajos están cancelados y no salen al arrancar, y `GET /api/notifications/key` responde la clave de la copia.
 - [x] `pnpm check` pasa.
+
+## Comments
+
+- Hecho en `ae8e9d0`.
+- El camino común es `endSessions(connection, which, why, ended?)` de `identity/sessions.ts`; cerrar sesión llega por `databaseHooks.session.delete.after` de Better Auth, que `createAuth` recibe como `ended`. Dentro de `api`, `ended` es `events.sessionsEnded`, y `permissions/set` llama a `events.accessChanged(account, closes)` con `readLost(before, after)` de `authorization/invalidations.ts`. Las dos dejan su marca en la tabla temporal de las invalidaciones, dentro de su transacción, así que el reparto va en orden de confirmación y un rollback no manda nada. `Events` implementa `IdentityChanges` de `identity/operations.ts`, que `platformOperations` recibe ahora como tercer argumento.
+- Decidido sin preguntar, y anotado en la spec: `reset` sale con cada `permissions/set` confirmado, aunque el nivel no cambie; la prueba del rollback hace fallar la entrada del registro de `revokeSession` con un disparador temporal escrito por el cliente en bruto de `probe`; la segunda conexión es otra plataforma de pruebas sobre el mismo fichero; la caducidad con la fila todavía ahí la cubre ya `events.test.ts` (02).
+- Restaurar ya cumplía su garantía: `restore-notices.test.ts` lo deja probado, con una entrega retenida en `delivering` para que la otra y un segundo aviso esperen durante la copia.
+- Sigue abierto lo que dejó la 01: las confirmaciones pendientes miran solo si su sesión existe, no si vive. Esta tarea no lo cambia.
