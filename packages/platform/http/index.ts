@@ -15,8 +15,9 @@
 // The key of a connected app comes in `Authorization: Bearer` (ADR 0030). With a good one `status` says which app
 // calls; a bad one, or one next to the session cookie, is refused, never taken as no credential. With a good key
 // and a mandate in `domus-mandate`, the actions of the modules run on the person's behalf: the door seals the
-// context the mandate keeps, with `via` the key's app and the channel `contexto`. Every other route still refuses
-// a key: the platform's operations open to mandates in their own ticket.
+// context the mandate keeps, with `via` the key's app and the channel `contexto`. Of the platform's operations, only
+// those the list of authorization admits a mandate for (`admitsMandate`: `log/read` and `log/undo`), by the path
+// oRPC routed to; every other one, also one added tomorrow, and every route of Hono and of Better Auth refuse a key.
 import type { ModuleDefinition } from "@domus/module-sdk";
 import { implement, ORPCError, os } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
@@ -25,7 +26,7 @@ import { type Context, Hono } from "hono";
 
 import { READ_DELEGATION, READ_LOG } from "../actions";
 import { internalError } from "../actions/failures";
-import { sealContext, type VerifiedContext } from "../authorization";
+import { admitsMandate, sealContext, type VerifiedContext } from "../authorization";
 import { LIST_TASKS } from "../background/operations";
 import { PROTOCOL, platformContract } from "../contracts";
 import { contentDisposition, errorResponse } from "../files";
@@ -106,13 +107,22 @@ export interface HttpHandlerOptions {
 /**
  * What each RPC call carries: who it comes from and which app's key it has, once a procedure asks, its idempotency key
  * and its proof. Who it comes from is a session's context, or with `mandate` also the one a mandate keeps, which only
- * the actions of the modules admit.
+ * the actions of the modules and the operations of the platform in authorization's list admit.
  */
 interface DoorContext {
 	readonly verify: (admits?: { readonly mandate?: boolean }) => Promise<VerifiedContext | null>;
 	readonly app: () => string | undefined;
 	readonly idempotencyKey: string | undefined;
 	readonly proof: string | undefined;
+}
+
+/**
+ * A call to an operation of the platform as its handler receives it: the door's context and the operation's path,
+ * which oRPC gives from the procedure it routed to, never from what the client wrote.
+ */
+interface OperationCall {
+	readonly context: DoorContext;
+	readonly path: readonly string[];
 }
 
 const platformProcedures = implement(platformContract).$context<DoorContext>();
@@ -144,30 +154,32 @@ export function createHttpHandler({
 	 */
 	async function platformWrite(
 		name: string,
-		input: unknown,
-		context: DoorContext,
+		call: OperationCall & { readonly input?: unknown },
 	): Promise<never> {
 		return actions.invoke({
-			context: await verifiedSession(context),
+			context: await verifiedSession(call),
 			action: `platform.${name}`,
-			input,
-			idempotencyKey: context.idempotencyKey,
-			proof: context.proof,
+			input: call.input,
+			idempotencyKey: call.context.idempotencyKey,
+			proof: call.context.proof,
 		}) as never;
 	}
 
-	/** The verified context of a platform operation, which always needs a session. */
-	async function verifiedSession(context: DoorContext): Promise<VerifiedContext> {
-		const verified = await context.verify();
+	/**
+	 * The verified context of the platform operation at `path`: a session's, or a mandate's only for an operation that
+	 * authorization's list admits one for (ADR 0030). Every other one, also one added tomorrow, needs a session.
+	 */
+	async function verifiedSession({ context, path }: OperationCall): Promise<VerifiedContext> {
+		const verified = await context.verify({ mandate: admitsMandate(path.join("/")) });
 		if (!verified?.session) throw new ORPCError("UNAUTHORIZED");
 		return verified;
 	}
 
 	/** The account and session of a platform operation on one's own password or sessions. */
 	async function signedIn(
-		context: DoorContext,
+		call: OperationCall,
 	): Promise<{ readonly account: string; readonly session: string }> {
-		const { account, session = "" } = await verifiedSession(context);
+		const { account, session = "" } = await verifiedSession(call);
 		return { account, session };
 	}
 
@@ -205,132 +217,135 @@ export function createHttpHandler({
 			};
 		}),
 		password: {
-			change: platformProcedures.password.change.handler(
-				async ({ input, context, errors }) => {
-					const { account, session } = await signedIn(context);
-					if (
-						(await verifiedPasswordHash(connection, account, input.currentPassword)) ===
-						undefined
-					)
-						throw errors.FORBIDDEN({ data: { reason: "wrong-password" } });
-					try {
-						const endedSessions = await replacePassword(
-							connection,
-							account,
-							input.newPassword,
-							clockOf(platform),
-							{ keep: session, ended: events.sessionsEnded },
-						);
-						return { endedSessions };
-					} catch (error) {
-						if (error instanceof SessionGoneError) throw new ORPCError("UNAUTHORIZED");
-						throw error;
-					}
-				},
-			),
+			change: platformProcedures.password.change.handler(async (call) => {
+				const { input, errors } = call;
+				const { account, session } = await signedIn(call);
+				if (
+					(await verifiedPasswordHash(connection, account, input.currentPassword)) ===
+					undefined
+				)
+					throw errors.FORBIDDEN({ data: { reason: "wrong-password" } });
+				try {
+					const endedSessions = await replacePassword(
+						connection,
+						account,
+						input.newPassword,
+						clockOf(platform),
+						{ keep: session, ended: events.sessionsEnded },
+					);
+					return { endedSessions };
+				} catch (error) {
+					if (error instanceof SessionGoneError) throw new ORPCError("UNAUTHORIZED");
+					throw error;
+				}
+			}),
 		},
 		sessions: {
-			list: platformProcedures.sessions.list.handler(async ({ context }) => {
-				const { account, session } = await signedIn(context);
+			list: platformProcedures.sessions.list.handler(async (call) => {
+				const { account, session } = await signedIn(call);
 				return sessionsOf(connection, account, session);
 			}),
-			revoke: platformProcedures.sessions.revoke.handler(({ input, context }) =>
-				platformWrite("revokeSession", input, context),
+			revoke: platformProcedures.sessions.revoke.handler((call) =>
+				platformWrite("revokeSession", call),
 			),
 		},
 		devices: {
-			revoke: platformProcedures.devices.revoke.handler(({ input, context }) =>
-				platformWrite("revokeDevice", input, context),
+			revoke: platformProcedures.devices.revoke.handler((call) =>
+				platformWrite("revokeDevice", call),
 			),
 		},
 		permissions: {
-			set: platformProcedures.permissions.set.handler(({ input, context }) =>
-				platformWrite("setPermission", input, context),
+			set: platformProcedures.permissions.set.handler((call) =>
+				platformWrite("setPermission", call),
 			),
 		},
 		delegation: {
 			read: platformProcedures.delegation.read.handler(
-				async ({ input, context }) =>
+				async (call) =>
 					actions.invoke({
-						context: await verifiedSession(context),
+						context: await verifiedSession(call),
 						action: READ_DELEGATION,
-						input,
+						input: call.input,
 					}) as never,
 			),
-			set: platformProcedures.delegation.set.handler(({ input, context }) =>
-				platformWrite("setDelegation", input, context),
+			set: platformProcedures.delegation.set.handler((call) =>
+				platformWrite("setDelegation", call),
 			),
 		},
 		proofs: {
-			request: platformProcedures.proofs.request.handler(
-				async ({ input, context, errors }) => {
-					try {
-						return await requestProof(
-							proofIssuerOf(platform),
-							await verifiedSession(context),
-							input,
-						);
-					} catch (error) {
-						if (error instanceof WrongPasswordError)
-							throw errors.FORBIDDEN({ data: { reason: "wrong-password" } });
-						throw error;
-					}
-				},
-			),
+			request: platformProcedures.proofs.request.handler(async (call) => {
+				try {
+					return await requestProof(
+						proofIssuerOf(platform),
+						await verifiedSession(call),
+						call.input,
+					);
+				} catch (error) {
+					if (error instanceof WrongPasswordError)
+						throw call.errors.FORBIDDEN({ data: { reason: "wrong-password" } });
+					throw error;
+				}
+			}),
 		},
+		// With a session, or with a key and a mandate: the two operations of the platform authorization's list admits
+		// one for, through the delegation in force.
 		log: {
 			read: platformProcedures.log.read.handler(
-				async ({ context }) =>
+				async (call) =>
 					actions.invoke({
-						context: await verifiedSession(context),
+						context: await verifiedSession(call),
 						action: READ_LOG,
 					}) as never,
 			),
-			undo: platformProcedures.log.undo.handler(async ({ input, context }) =>
+			undo: platformProcedures.log.undo.handler(async (call) =>
 				actions.undo({
-					context: await verifiedSession(context),
-					entry: input.entry,
-					idempotencyKey: context.idempotencyKey ?? "",
-					...(context.proof === undefined ? {} : { proof: context.proof }),
+					context: await verifiedSession(call),
+					entry: call.input.entry,
+					idempotencyKey: call.context.idempotencyKey ?? "",
+					...(call.context.proof === undefined ? {} : { proof: call.context.proof }),
 				}),
 			),
 		},
 		notifications: {
-			test: platformProcedures.notifications.test.handler(({ context }) =>
-				platformWrite(TEST_NOTICE, undefined, context),
+			test: platformProcedures.notifications.test.handler((call) =>
+				platformWrite(TEST_NOTICE, call),
 			),
 		},
 		tasks: {
 			list: platformProcedures.tasks.list.handler(
-				async ({ context }) =>
+				async (call) =>
 					actions.invoke({
-						context: await verifiedSession(context),
+						context: await verifiedSession(call),
 						action: LIST_TASKS,
 					}) as never,
 			),
-			setTime: platformProcedures.tasks.setTime.handler(({ input, context }) =>
-				platformWrite("setTaskTime", input, context),
+			setTime: platformProcedures.tasks.setTime.handler((call) =>
+				platformWrite("setTaskTime", call),
 			),
-			pause: platformProcedures.tasks.pause.handler(({ input, context }) =>
-				platformWrite("pauseTask", input, context),
+			pause: platformProcedures.tasks.pause.handler((call) =>
+				platformWrite("pauseTask", call),
 			),
-			resume: platformProcedures.tasks.resume.handler(({ input, context }) =>
-				platformWrite("resumeTask", input, context),
+			resume: platformProcedures.tasks.resume.handler((call) =>
+				platformWrite("resumeTask", call),
 			),
-			launch: platformProcedures.tasks.launch.handler(({ input, context }) =>
-				platformWrite("launchTask", input, context),
+			launch: platformProcedures.tasks.launch.handler((call) =>
+				platformWrite("launchTask", call),
 			),
 		},
+		// Only with a session: Kira never confirms (ADR 0030, «El "sí" lo reconoce la puerta»).
 		confirmations: {
-			confirm: platformProcedures.confirmations.confirm.handler(async ({ input, context }) =>
+			confirm: platformProcedures.confirmations.confirm.handler(async (call) =>
 				actions.confirm({
-					context: await verifiedSession(context),
-					confirmation: input.id,
-					...(context.proof === undefined ? {} : { proof: context.proof }),
+					context: await verifiedSession(call),
+					confirmation: call.input.id,
+					...(call.context.proof === undefined ? {} : { proof: call.context.proof }),
 				}),
 			),
-			reject: platformProcedures.confirmations.reject.handler(async ({ input, context }) => {
-				actions.reject({ context: await verifiedSession(context), confirmation: input.id });
+			reject: platformProcedures.confirmations.reject.handler(async (call) => {
+				actions.reject({
+					context: await verifiedSession(call),
+					confirmation: call.input.id,
+				});
 			}),
 		},
 	});
