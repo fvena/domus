@@ -164,4 +164,12 @@ export const generatedMigrations: readonly ModuleMigration[] = [
 			"\nCREATE UNIQUE INDEX `platform_deliveries_notice_subscription` ON `platform_deliveries` (`notice`,`subscription`);",
 		],
 	},
+	{
+		tag: "0015_violet_doomsday",
+		position: 16,
+		hash: "73c448fdef4f60fefaefb67778ddf016deb0abf50a4885b6ed98288653b608aa",
+		statements: [
+			"CREATE TABLE `platform_keys` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`app` text NOT NULL,\n\t`secret_hash` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`last_used_at` integer,\n\t`revoked_at` integer\n);\n",
+		],
+	},
 ];

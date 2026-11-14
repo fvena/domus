@@ -18,7 +18,9 @@ describe("the api's bundles", () => {
 		["main.mjs", [], "DOMUS_DATA_DIR is required"],
 		["restore.mjs", ["list"], "DOMUS_DATA_DIR is required"],
 		["accounts.mjs", [], "accounts needs a subcommand"],
-	])("%s starts and stops on its configuration", (bundle, args, expected) => {
+		["keys.mjs", [], "keys needs a subcommand"],
+		["keys.mjs", ["create", "kira"], "DOMUS_DATA_DIR is required"],
+	])("%s %j starts and stops on its configuration", (bundle, args, expected) => {
 		const run = spawnSync(process.execPath, [join(api, "dist", bundle), ...args], {
 			env: { PATH: process.env["PATH"] ?? "" },
 			encoding: "utf8",
@@ -26,5 +28,7 @@ describe("the api's bundles", () => {
 		});
 		expect(run.status).not.toBe(0);
 		expect(run.stderr).toContain(expected);
+		// `keys create` is redirected to the key's file: a failure leaves it empty.
+		expect(run.stdout).toBe("");
 	});
 });

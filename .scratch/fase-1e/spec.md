@@ -114,6 +114,12 @@ En la 1e no hay turnos de conversación, así que ninguna ruta, comando ni servi
 - Los errores y los mensajes van a stderr, con los códigos de salida de `accounts`: 0 bien, 1 rechazado, 2 uso incorrecto. Nunca aparece un secreto en stderr ni en stdout, salvo la llave recién creada.
 - No pide nada por el terminal, así que no exige TTY. Abre la plataforma como `accounts`, con el cerrojo compartido.
 - En el contenedor es `node /app/keys.mjs`, y en desarrollo `pnpm keys`, que debe dejar stdout igual de limpio.
+- Detalles que fijó la tarea 01:
+    - `create` dice en stderr qué llave creó, por su id, para que quien redirige stdout sepa que salió bien.
+    - Una línea de `list` es `<id>  <app>  created <instante>  last used <instante>` (o `never used`) `  live` (o `revoked <instante>`), con los instantes en ISO 8601 UTC. Sin llaves, stdout queda vacío y stderr dice `no keys`.
+    - `revoke` de una llave ya revocada sale con 0: no es un error, conserva el instante de entonces y lo dice en stderr.
+    - Los argumentos se validan por su forma antes de abrir la plataforma, con el código 2: `revoke` pide un id de 11 caracteres en base64url, así que una llave entera pegada por error se rechaza sin repetirla. El nombre de una app solo se repite en un error si tiene forma de nombre (minúsculas, cifras y guiones, hasta 32 caracteres), que ni una llave ni su secreto tienen.
+    - `create` con una app fuera de la lista es un rechazo (1), no un uso incorrecto (2), porque la lista es de la plataforma.
 
 ### Mandatos (Q1, Q5, Q6, Q15, Q18)
 

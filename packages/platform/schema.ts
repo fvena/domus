@@ -571,3 +571,17 @@ export const deliveries = sqliteTable(
 		uniqueIndex("platform_deliveries_notice_subscription").on(table.notice, table.subscription),
 	],
 );
+
+/**
+ * A key of a connected app (ADR 0030): its public id, the app it is of, the SHA-256 of its secret in hex, never the
+ * secret, when it was created, when it was last used, if ever, and when it was revoked, if it was. Revoking keeps
+ * the row. An app may have several live keys at once, to rotate without cutting the service.
+ */
+export const keys = sqliteTable("platform_keys", {
+	id: text().primaryKey(),
+	app: text().notNull(),
+	secretHash: text("secret_hash").notNull(),
+	createdAt: integer("created_at").notNull(),
+	lastUsedAt: integer("last_used_at"),
+	revokedAt: integer("revoked_at"),
+});

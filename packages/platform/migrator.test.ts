@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readJobs } from "./background";
+import { checkKey, CONNECTED_APPS, createKey, listKeys } from "./identity/keys";
 import { sessionEnabledWhere } from "./identity/sessions";
 import { migrations as platformMigrations } from "./migrations";
 import { migrate } from "./migrator";
@@ -274,6 +275,26 @@ describe("migrations at start", () => {
 		expect(
 			connection.prepare("SELECT count(*) FROM platform_push_subscriptions").pluck().get(),
 		).toBe(0);
+		after.close();
+	});
+
+	it("brings the keys of the connected apps to a database of phase 1d4, its accounts kept and no key yet", () => {
+		// Phase 1d4 ended with the platform's migration 0014, at position 15.
+		const phase1d4 = platformMigrations.filter(({ position }) => position <= 15);
+		const before = new Database(databaseFile);
+		migrate(before, [{ module: "platform", migrations: phase1d4 }]);
+		before.exec(
+			"INSERT INTO platform_user (id, name, email, created_at, updated_at) VALUES ('ana', 'Ana', 'ana@domus.test', 0, 0);",
+		);
+		before.close();
+
+		const after = createPlatform({ databaseFile, modules: [] });
+		const connection = connectionOf(after);
+		expect(after.appliedMigrations).toBe(platformMigrations.length - phase1d4.length);
+		expect(connection.prepare("SELECT id FROM platform_user").pluck().all()).toContain("ana");
+		expect(listKeys(connection)).toEqual([]);
+		const key = createKey(connection, CONNECTED_APPS, "kira", 1);
+		expect(checkKey(connection, CONNECTED_APPS, key)).toMatchObject({ ok: true, app: "kira" });
 		after.close();
 	});
 
