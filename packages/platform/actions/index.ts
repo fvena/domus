@@ -270,10 +270,13 @@ export function createActions({
 		if (registered(action).kind !== "read")
 			throw new ORPCError("NOT_FOUND", { message: `no read "${action}"` });
 		const { found, value } = validated(action, input);
-		// Authorization first, outside the transaction, so a pending confirmation it stores stays.
-		const checked = authorizeRead(found, context, action, value, { proof, file });
-		return openingDownload(connection, (opened) =>
-			opened(openReturned(found, context, value, file, { proof, checked })),
+		// Authorized inside the transaction that opens the file, as a write is, so nothing it checked (the proof, its
+		// session) can change before the read; a confirmation it asks for is stored once that transaction rolled back.
+		return orPending(readPending(context, action, value, file), () =>
+			openingDownload(connection, (opened) => {
+				const checked = checkRead(found, context, action, value, { proof });
+				return opened(openReturned(found, context, value, file, { proof, checked }));
+			}),
 		);
 	}
 
@@ -465,15 +468,44 @@ export function createActions({
 		context: VerifiedContext,
 		action: string,
 		input: unknown,
-		{
-			proof,
-			confirmed = false,
-			file,
-		}: { readonly proof?: string; readonly confirmed?: boolean; readonly file?: string },
+		options: { readonly proof?: string; readonly confirmed?: boolean; readonly file?: string },
 	): ProofCheck | undefined {
+		return orPending(readPending(context, action, input, options.file), () =>
+			checkRead(found, context, action, input, options),
+		);
+	}
+
+	/** The pending confirmation a read waits as: a download's when it is asked to open `file`. */
+	function readPending(
+		context: VerifiedContext,
+		action: string,
+		input: unknown,
+		file: string | undefined,
+	): NewPending {
 		const fingerprint = operationFingerprint(action, input);
-		const checked = proofs.check(proof, context, fingerprint, clock());
-		const request: AuthorizationRequest = {
+		return file === undefined
+			? { kind: "read", operation: { action, input }, fingerprint, origin: context }
+			: {
+					kind: "read",
+					operation: { action, input, file },
+					fingerprint: downloadFingerprint(fingerprint, file),
+					origin: context,
+				};
+	}
+
+	/**
+	 * Checks a read's proof and authorizes it, throwing `ConfirmationNeeded` for {@link orPending} to store. Returns
+	 * how its proof checked.
+	 */
+	function checkRead(
+		found: RegisteredAction,
+		context: VerifiedContext,
+		action: string,
+		input: unknown,
+		{ proof, confirmed = false }: { readonly proof?: string; readonly confirmed?: boolean },
+	): ProofCheck | undefined {
+		const checked = proofs.check(proof, context, operationFingerprint(action, input), clock());
+		authorize({
 			context,
 			action,
 			kind: "read",
@@ -482,18 +514,7 @@ export function createActions({
 			...sensitivityOf(found, input, context),
 			...(confirmed ? { confirmed } : {}),
 			...(checked === undefined ? {} : { proof: checked }),
-		};
-		orPending(
-			file === undefined
-				? { kind: "read", operation: { action, input }, fingerprint, origin: context }
-				: {
-						kind: "read",
-						operation: { action, input, file },
-						fingerprint: downloadFingerprint(fingerprint, file),
-						origin: context,
-					},
-			() => authorize(request),
-		);
+		});
 		return checked;
 	}
 
