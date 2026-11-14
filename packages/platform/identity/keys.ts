@@ -134,6 +134,14 @@ export function revokeKey(connection: Database.Database, id: string, now: number
 		.immediate();
 }
 
+/**
+ * Revokes every live key at the instant `now`, keeping their rows, inside the caller's transaction: restoring does
+ * it, since a key revoked after the copy would be good again. One already revoked keeps its instant.
+ */
+export function revokeEveryKey(connection: Database.Database, now: number): void {
+	connection.prepare("UPDATE platform_keys SET revoked_at = ? WHERE revoked_at IS NULL").run(now);
+}
+
 /** The app asked for is not one of the connected apps. */
 export class UnknownAppError extends Error {
 	constructor() {

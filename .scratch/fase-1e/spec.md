@@ -176,11 +176,13 @@ En la 1e no hay turnos de conversación, así que ninguna ruta, comando ni servi
 ### Limpieza (Q5, Q18)
 
 - La limpieza diaria borra, por lotes en su propia transacción, los mandatos caducados y los de una sesión que ya no vive. Nunca cambia una respuesta: un mandato que ya no resuelve sigue sin resolver cuando se borra su fila.
+- Detalles que fijó la tarea 04: un mandato caduca para la limpieza con la misma regla que al resolverlo, desde `expiresAt <= now`, y su sesión vive por `sessionLivesWhere`, la regla única. La tabla de mandatos no gana índices: guarda unos minutos de mandatos, y la limpieza corre una vez al día.
 
 ### Restaurar
 
 - El saneamiento de la copia ya cierra todas las sesiones, y con eso los mandatos dejan de valer. Además borra sus filas, y revoca todas las llaves con el instante de la restauración. Una llave revocada después de la copia volvería a valer, igual que una sesión revocada, que es por lo que restaurar ya cierra todas las sesiones (ADR 0026). Tras restaurar, el admin crea una llave nueva para Kira. `despliegue.md` lo añade a los pasos de restaurar.
 - Esta decisión no se tomó en el grilling: sale de la regla del ADR 0026, y se añade al ADR 0030 en la misma rama que esta spec.
+- Detalles que fijó la tarea 04: el saneamiento revoca las llaves vivas de la copia con el instante de restaurar; una que ya venía revocada conserva su instante, como `keys revoke` de una ya revocada. Lo hace en la misma transacción que cierra las sesiones.
 
 ### Gitleaks (Q12)
 
