@@ -410,9 +410,15 @@ describe("the session a device has enabled", () => {
 	describe("with two sign-ins on the same device at once, only the last to write its entry may subscribe", () => {
 		/**
 		 * Signs Paco and Rocío in on copies of one device: `first` writes its entry and waits at `entering` until
-		 * the other sign-in has ended.
+		 * the other sign-in has ended and `meanwhile`, given the browsers and who entered second, has run.
 		 */
-		async function bothEnter(first: Person) {
+		async function bothEnter(
+			first: Person,
+			meanwhile: (
+				browsers: Record<Person, TestBrowser>,
+				second: Person,
+			) => Promise<void> = async () => {},
+		) {
 			let holding = false;
 			const reached = resolvable();
 			const released = resolvable();
@@ -434,6 +440,7 @@ describe("the session a device has enabled", () => {
 			const firstSignIn = browsers[first].signIn(`${first}@domus.test`, PASSWORD);
 			await reached.promise;
 			await enter(browsers[second], second);
+			await meanwhile(browsers, second);
 			released.resolve();
 			expect((await firstSignIn).status).toBe(200);
 			for (const browser of Object.values(browsers))
@@ -460,6 +467,30 @@ describe("the session a device has enabled", () => {
 						enabled: true,
 					},
 				]);
+			});
+
+		for (const order of ["paco", "rocio"] as const)
+			it(`keeps the subscription of the second, made while ${order} was still entering`, async () => {
+				const { test, browsers, first, second } = await bothEnter(
+					order,
+					async (entered, who) => {
+						expect((await subscribe(entered[who], pushSubscription(who))).status).toBe(
+							200,
+						);
+					},
+				);
+				await using _ = test;
+
+				expect(subscribers(test)).toEqual([
+					{
+						account: second,
+						endpoint: pushSubscription(second).endpoint,
+						enabled: true,
+					},
+				]);
+				expect(
+					await answer(await subscribe(browsers[first], pushSubscription(first))),
+				).toEqual(notEnabled);
 			});
 	});
 

@@ -79,9 +79,15 @@ function wrap(name: string, after: (context: HandlerContext) => void): void {
 	);
 }
 
+/** Room enough on the volume for every upload of these tests, whatever the machine has free. */
+const ROOMY = () => 100 * 1024 * 1024 * 1024;
+
+/** The start of a JPEG and a few bytes of it: enough for its signature. */
+const JPEG = Uint8Array.of(0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00);
+
 /** A platform with probe where Ana and Luis, members, and the device account each have a password. */
 async function household(options: { readonly channelQueue?: number } = {}) {
-	const test = createTestPlatform({ modules: [probe], ...options });
+	const test = createTestPlatform({ modules: [probe], freeSpace: ROOMY, ...options });
 	for (const id of ["ana", "luis"]) {
 		test.prepare.account({ id, role: "member" });
 		await test.prepare.password(id, PASSWORD);
@@ -489,6 +495,74 @@ describe("an area table on the live channel", () => {
 
 		expect(await untilBeat(ana.channel)).toEqual([]);
 		expect(test.invoke(ana.context, "probe.listLabels", undefined)).toEqual([]);
+	});
+});
+
+/** Uploads a photo from `browser` and returns the id of the prepared file. */
+async function prepared(browser: TestBrowser): Promise<string> {
+	const response = await browser.fetch(
+		new Request(new URL("/api/files", TEST_ORIGIN), {
+			method: "POST",
+			body: JPEG,
+			headers: { "content-length": String(JPEG.length), "x-file-name": "nevera.jpg" },
+		}),
+	);
+	expect(response.status).toBe(200);
+	return ((await response.json()) as { id: string }).id;
+}
+
+describe("files on the live channel", () => {
+	it("tells the readers of a note that its files changed, and nobody else", async () => {
+		await using test = await household();
+		const { ana, luis } = await bothListening(test);
+		test.invoke(ana.context, "probe.addNote", { body: "privada" }, key());
+		test.invoke(ana.context, "probe.addNote", { body: "nevera" }, key());
+		test.invoke(ana.context, "probe.setNoteVisibility", { id: 2, visibility: "public" }, key());
+		beat(test);
+		expect(await untilBeat(luis.channel)).toEqual([notes(2)]);
+		expect(await untilBeat(ana.channel)).toEqual([notes(1), notes(2), notes(2)]);
+
+		const photo = await prepared(ana.browser);
+		const another = await prepared(ana.browser);
+		test.invoke(ana.context, "probe.attachFile", { noteId: 1, prepared: photo }, key());
+		const shared = test.invoke(
+			ana.context,
+			"probe.attachFile",
+			{ noteId: 2, prepared: another },
+			key(),
+		);
+		if ("repeated" in shared) throw new Error("attached before");
+		const detached = test.invoke(
+			ana.context,
+			"probe.detachFile",
+			{ noteId: 2, file: shared.result.id },
+			key(),
+		);
+		test.undo(ana.context, detached.entry, key());
+		beat(test);
+
+		expect(await untilBeat(luis.channel)).toEqual([notes(2), notes(2), notes(2)]);
+		expect(await untilBeat(ana.channel)).toEqual([notes(1), notes(2), notes(2), notes(2)]);
+	});
+
+	it("tells once of a note deleted with its file, and once of its undo", async () => {
+		await using test = await household();
+		const { ana, luis } = await bothListening(test);
+		test.invoke(ana.context, "probe.addNote", { body: "nevera" }, key());
+		test.invoke(ana.context, "probe.setNoteVisibility", { id: 1, visibility: "public" }, key());
+		const photo = await prepared(ana.browser);
+		test.invoke(ana.context, "probe.attachFile", { noteId: 1, prepared: photo }, key());
+		beat(test);
+		expect(await untilBeat(luis.channel)).toEqual([notes(1), notes(1)]);
+		expect(await untilBeat(ana.channel)).toEqual([notes(1), notes(1), notes(1)]);
+
+		const deleted = test.invoke(ana.context, "probe.deleteNote", { id: 1 }, key());
+		test.undo(ana.context, deleted.entry, key());
+		beat(test);
+
+		expect(await untilBeat(luis.channel)).toEqual([notes(1), notes(1)]);
+		expect(await untilBeat(ana.channel)).toEqual([notes(1), notes(1)]);
+		expect(test.invoke(luis.context, "probe.getNote", { id: 1 })?.files).toHaveLength(1);
 	});
 });
 

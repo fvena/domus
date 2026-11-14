@@ -104,9 +104,12 @@ export function createNotifications({
 	const removeOfSession = connection.prepare<[string, string]>(
 		"DELETE FROM platform_push_subscriptions WHERE device = ? AND session = ?",
 	);
+	// Only those of no enabled session: a sign-in on the device that wrote its entry later, and may have subscribed
+	// before this one's creation ended, keeps its subscription.
 	const removeOthers = connection.prepare<[{ session: string }]>(
 		`DELETE FROM platform_push_subscriptions
-		WHERE device = (SELECT device_id FROM platform_session WHERE id = @session) AND session <> @session`,
+		WHERE device = (SELECT device_id FROM platform_session WHERE id = @session) AND session <> @session
+			AND NOT ${sessionEnabledWhere("platform_push_subscriptions.session")}`,
 	);
 
 	/** The session of a context that lives on the platform clock, else `UNAUTHORIZED`. */

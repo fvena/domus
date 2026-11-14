@@ -14,6 +14,8 @@ import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 
 import { conflict } from "../actions/failures";
 import { type AccessView, visibleTo } from "../authorization";
+import type { OwnedRecordChange } from "../authorization/invalidations";
+import type { Ownership } from "../authorization/visibility";
 import { editableTo, type RecordArea } from "../authorization/writes";
 import { randomId } from "../identity/accounts";
 import { sessionLives } from "../identity/sessions";
@@ -36,6 +38,12 @@ export interface WriteRun {
 	 * the actions merges with the handler's own, each record once.
 	 */
 	readonly touched: TouchedRecord[];
+	/**
+	 * The records `ctx.files` changed, as the live channel tells of them (ADR 0029): one per change, each with its
+	 * owner and visibility when its files changed as both its states, since changing files leaves its row alone.
+	 * The path of the actions adds those the capture did not see, each record once.
+	 */
+	readonly changed: OwnedRecordChange[];
 	/** The references detached by an undoable write, to link to its entry once the log has its number. */
 	readonly released: Set<string>;
 }
@@ -136,11 +144,23 @@ export function createReferences(connection: Database.Database, view: AccessView
 					.where(and(eq(table.id, id), predicate))
 					.get() !== undefined;
 
+			/** The owner and visibility of the record of `table` with `id`, which exists. */
+			const ownershipOf = (table: OwnedTable, id: number): Ownership => {
+				const found = db
+					.select({ owner: table.owner, visibility: table.visibility })
+					.from(table)
+					.where(eq(table.id, id))
+					.get() as Ownership | undefined;
+				if (!found) throw new Error("the record is gone");
+				return found;
+			};
+
 			/**
 			 * Opens a change of a record's files, which must exist, be seen and be editable, as for an edit: the write,
 			 * the SQL name of the record's table, and `touch`, which notes the record as touched with the same type
-			 * and id as a change of a column once the change is made. A read, which may not change anything, and a
-			 * table that is not one of the module's owned tables are the module's mistakes.
+			 * and id as a change of a column once the change is made, and as changed with its owner and visibility. A
+			 * read, which may not change anything, and a table that is not one of the module's owned tables are the
+			 * module's mistakes.
 			 */
 			const changeFilesOf = ({
 				table,
@@ -157,7 +177,18 @@ export function createReferences(connection: Database.Database, view: AccessView
 				return {
 					run: write,
 					tableName: getTableName(table),
-					touch: () => write.touched.push({ type, id }),
+					touch: () => {
+						write.touched.push({ type, id });
+						const state = ownershipOf(table, id);
+						write.changed.push({
+							module,
+							type,
+							id,
+							area: area.id,
+							before: state,
+							after: state,
+						});
+					},
 				};
 			};
 
