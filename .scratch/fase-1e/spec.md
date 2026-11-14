@@ -251,3 +251,18 @@ En el Domus real, sin `probe`, ejecutada por ssh, porque aquí nadie teclea una 
 - El ADR 0030, sus enlaces de vuelta, el README de arquitectura, el glosario y el plan ya están al día en la rama del grilling. Esta spec añade al ADR 0030 que restaurar revoca todas las llaves.
 - Algunas decisiones de detalle se toman en esta spec y no en el grilling: la longitud del id de la llave, las dos tablas, `DOMUS_API_KEY_FILE` y `DOMUS_KIRA_KEY`, arrancar sin llave cuando el fichero falta, los códigos de salida de `keys`, que `status` no sube `PROTOCOL`, la opción `apps` de la plataforma de pruebas y que restaurar revoca las llaves. Si la implementación muestra que alguna no encaja, se corrige aquí antes de seguir.
 - La 1d3 sigue en curso hasta comprobar la copia del 2026-11-15 y la limpieza del 2026-11-16 en la Pi. La 1e puede construirse antes, pero no se cierra antes que la 1d3 y la 1d4.
+
+## Tareas
+
+| Tarea                                                                  | Qué                                                         | Bloqueada por                        |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------ |
+| [01](issues/01-llaves-y-el-comando-keys.md)                            | Llaves y el comando `keys`                                  | —                                    |
+| [02](issues/02-la-llave-en-la-puerta-y-en-status.md)                   | La llave en la puerta y en `status`                         | 01                                   |
+| [03](issues/03-kira-llama-a-acciones-con-un-mandato.md)                | Kira llama a acciones con un mandato                        | 02                                   |
+| [04](issues/04-cuando-muere-un-mandato-limpieza-y-restaurar.md)        | Cuándo muere un mandato, la limpieza y restaurar            | 03                                   |
+| [05](issues/05-operaciones-de-la-plataforma-y-superficies-cerradas.md) | Las operaciones de la plataforma y las superficies cerradas | 03                                   |
+| [06](issues/06-assistant-con-su-llave.md)                              | `assistant` con su llave                                    | 02, 03                               |
+| [07](issues/07-la-regla-de-gitleaks.md)                                | La regla de gitleaks                                        | —                                    |
+| [08](issues/08-la-pi-y-el-cierre.md)                                   | La Pi y el cierre de la 1e                                  | todas y el cierre de la 1d3 y la 1d4 |
+
+La 01 y la 03 generan cada una una migración de la plataforma; como la 03 espera a la 01, no se pisan. La 04 y la 05 pueden ir a la vez tras la 03. La 06 puede adelantar su conexión y su configuración tras la 02. La 07 no espera a nada y conviene hacerla antes de probar llaves a mano.
