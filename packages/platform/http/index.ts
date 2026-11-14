@@ -8,7 +8,8 @@
 // the password), delegation (reading one's own, or the device account's as admin) and the action log (reading
 // one's own annotations, undoing one's own entry). The sensitive ones (changing permissions and delegation,
 // revoking sessions and devices) are writes on that same path, and so are the settings of the scheduled tasks
-// (ADR 0025: listing them, a read; changing a time, pausing, resuming and launching, `manage` writes). A write's idempotency key and a sensitive operation's step-up proof come in headers.
+// (ADR 0025: listing them, a read; changing a time, pausing, resuming and launching, `manage` writes) and the test
+// notice (ADR 0029: a person's own irreversible write, with no level of any area). A write's idempotency key and a sensitive operation's step-up proof come in headers.
 // Besides oRPC, routes of Hono only with a session: uploading and downloading files (ADR 0028), the live channel, the public key
 // of VAPID and the device's subscription to notices (ADR 0029).
 import type { ModuleDefinition } from "@domus/module-sdk";
@@ -26,6 +27,7 @@ import { AUTH_PREFIX, type AuthOptions, createAuth } from "../identity/auth";
 import { replacePassword, SessionGoneError, verifiedPasswordHash } from "../identity/passwords";
 import { requestProof, WrongPasswordError } from "../identity/proofs";
 import { sessionsOf } from "../identity/sessions";
+import { TEST_NOTICE } from "../notifications/operations";
 import {
 	actionsOf,
 	backgroundOf,
@@ -254,6 +256,11 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 					idempotencyKey: context.idempotencyKey ?? "",
 					...(context.proof === undefined ? {} : { proof: context.proof }),
 				}),
+			),
+		},
+		notifications: {
+			test: platformProcedures.notifications.test.handler(({ context }) =>
+				platformWrite(TEST_NOTICE, undefined, context),
 			),
 		},
 		tasks: {

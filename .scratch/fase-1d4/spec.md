@@ -259,6 +259,10 @@ Una suscripción la registra la app desde la sesión que el aparato tiene habili
 - `platform/authorization`: solo una sesión de la app, sin `via`, de una cuenta de persona; sin nivel de ningún área y sin comprobante.
 - Deja un trabajo `notice` con `{ kind: "test", to: <el actor> }`. Su reparto se salta los pasos 3 y 4 y su entrega no comprueba registro. El destino en la app son los ajustes.
 - Sin suscripción habilitada, el aviso termina `distributed` sin entregas, y la escritura responde bien.
+- Decidido al implementar (09):
+    - la operación se llama `platform.testNotice` en el registro de acciones, no recibe entrada y su resultado es `{ to }`, la cuenta a la que va, siempre quien la pide;
+    - «sin nivel de ningún área» es una marca nueva, `personal`, de la operación y de la petición a `platform/authorization`: `decide` la atiende antes que cualquier nivel y solo deja pasar una cuenta de persona, sin `via` y desde el canal `app`. No pide comprobante; uno que traiga no le corresponde y responde `STEP_UP_REQUIRED`, como en cualquier operación que no es sensible. Pedir un comprobante para ella responde `BAD_REQUEST`;
+    - el reparto y la entrega del aviso de prueba solo comprueban que `to` sea una persona, con `testNoticeDecision(view, to)` de `authorization/notices.ts`, que da `deliver` o `not-member`.
 
 ### Restaurar (Q3, Q14)
 
