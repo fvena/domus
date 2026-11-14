@@ -1,6 +1,6 @@
 # 06. `assistant` con su llave
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 02, 03
 
 Spec: [`../spec.md`](../spec.md), sección «`status` y la conexión de `assistant`». ADR 0030 y ADR 0020.
@@ -19,10 +19,21 @@ La máquina de estados, la configuración y `checkApi` solo dependen de la 02 y 
 
 ## Criterios de aceptación
 
-- [ ] Con respuestas programadas, `rejected` se mantiene y vuelve a comprobar cada 30 s, y pasa a `ready` cuando la misma comprobación empieza a ser aceptada, sin reiniciar la vigilancia.
-- [ ] Las transiciones de siempre (conectando, listo, incompatible, el límite de 10 s) siguen como estaban.
-- [ ] Contra la puerta en proceso, `checkApi` da `rejected` sin llave, con una llave mala y con la de una app de prueba, y `ready` con la de `kira`. Nunca da `ready` cuando `status` responde bien sin acreditar a `kira`.
-- [ ] La configuración da una llave con el fichero presente, y ninguna con el fichero ausente o vacío, sin pararse y sin imprimir la llave.
-- [ ] El mismo `clientFor` y el mismo transporte que usa `assistant` ejecutan una acción de `probe` con llave y mandato, y sin la llave dan `UNAUTHORIZED`.
-- [ ] `docker compose config` falla sin `DOMUS_KIRA_KEY`, y la prueba de la CI de contenedores sigue arrancando los tres programas sanos.
-- [ ] `pnpm check` pasa.
+- [x] Con respuestas programadas, `rejected` se mantiene y vuelve a comprobar cada 30 s, y pasa a `ready` cuando la misma comprobación empieza a ser aceptada, sin reiniciar la vigilancia.
+- [x] Las transiciones de siempre (conectando, listo, incompatible, el límite de 10 s) siguen como estaban.
+- [x] Contra la puerta en proceso, `checkApi` da `rejected` sin llave, con una llave mala y con la de una app de prueba, y `ready` con la de `kira`. Nunca da `ready` cuando `status` responde bien sin acreditar a `kira`.
+- [x] La configuración da una llave con el fichero presente, y ninguna con el fichero ausente o vacío, sin pararse y sin imprimir la llave.
+- [x] El mismo `clientFor` y el mismo transporte que usa `assistant` ejecutan una acción de `probe` con llave y mandato, y sin la llave dan `UNAUTHORIZED`.
+- [x] `docker compose config` falla sin `DOMUS_KIRA_KEY`, y la prueba de la CI de contenedores sigue arrancando los tres programas sanos.
+- [x] `pnpm check` pasa.
+
+## Comments
+
+- Hecho en `a67a778`.
+- `assistant` tiene un solo cliente, `apiClient(contrato, acceso, mandato?)` de `apps/assistant/src/api.ts`, con la llave en `Authorization` y el mandato opcional en `domus-mandate`; `checkApi` lo usa. La 5a debería llamar por él y no montar otro transporte. `api-client` no cambia; `assistant` gana `@orpc/client` (para reconocer `UNAUTHORIZED` con `ORPCError`) y `@orpc/contract` (los tipos del cliente).
+- El criterio del ADR 0020 está en `tooling/scripts/assistant-acts.test.ts`, no en las pruebas de `assistant`: estas no pueden importar `probe` (`assistant-and-voice-gateway-only-talk-to-api`) y `probe` no puede importar una app (`nothing-imports-an-app`). `tooling` ya compone módulos reales, así que las reglas no cambian; `@domus/scripts` gana `@domus/probe` y `@domus/test-utils` como dependencias de desarrollo.
+- La configuración quita los espacios y el salto de línea de los extremos del fichero, porque `keys create kira > fichero` deja uno. La prueba de «no se puede leer» usa una carpeta en lugar de un fichero `000`, que como root sí se leería.
+- En `pnpm dev`, `apps/assistant/src/dev.ts` resuelve un `DOMUS_API_KEY_FILE` relativo desde la raíz del repositorio, como hace `dev-env` de `api` con `data`. Probado a mano con `pnpm keys create kira`: sin fichero, con una llave mala y con la buena.
+- El log de rechazado nombra el fichero y dice si faltaba la llave o si la api no acepta la que hay, y que hay que arrancar `assistant` otra vez (en Docker, recrear el contenedor). Nunca repite la llave.
+- Comprobado en local como la CI, con otro proyecto de compose: con el fichero vacío los tres arrancan sanos y `assistant` queda en rechazado; con `node /app/keys.mjs create kira` y `up -d --force-recreate assistant`, queda listo. La CI crea el fichero vacío con 600 y dueño 1000, como la contraseña de las copias.
+- Quedan para la 08: los `AGENTS.md` de `apps` y `packages` (siguen diciendo «connecting, ready or incompatible»), el README de arquitectura, la guía (`docs/guia/programas.md`) y `despliegue.md`. `voice-gateway` no cambia: su llave es de la 5c.
