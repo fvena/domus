@@ -45,13 +45,14 @@ function noteById(
 	return found ? withFiles(context.files, found) : null;
 }
 
-/** Leaves one notice about the note to each account of `accounts`. */
+/** Leaves one notice about the record of `type` and `id` to each account of `accounts`. */
 function notifyAbout(
 	notify: ActionContext<unknown, typeof schema>["notify"],
 	accounts: readonly string[] | undefined,
+	type: "note" | "label",
 	id: number,
 ): void {
-	for (const to of accounts ?? []) notify({ to, about: { type: "note", id } });
+	for (const to of accounts ?? []) notify({ to, about: { type, id } });
 }
 
 /** The records the account sees of a table with only a body, oldest first. */
@@ -114,7 +115,7 @@ export default defineModule({
 				.values({ ...ownership(schema.notes), body: input.body })
 				.returning(note)
 				.get();
-			notifyAbout(notify, input.notify, added.id);
+			notifyAbout(notify, input.notify, "note", added.id);
 			return {
 				result: added,
 				touched: [{ type: "note", id: added.id }],
@@ -129,7 +130,7 @@ export default defineModule({
 				.set({ body: input.body })
 				.where(and(eq(schema.notes.id, input.id), visible(schema.notes)))
 				.run();
-			notifyAbout(notify, input.notify, before.id);
+			notifyAbout(notify, input.notify, "note", before.id);
 			return {
 				result: { id: before.id, body: input.body },
 				touched: [{ type: "note", id: before.id }],
@@ -280,8 +281,7 @@ export default defineModule({
 				.values({ name: input.name })
 				.returning(label)
 				.get();
-			for (const to of input.notify ?? [])
-				notify({ to, about: { type: "label", id: added.id } });
+			notifyAbout(notify, input.notify, "label", added.id);
 			return {
 				result: added,
 				touched: [{ type: "label", id: added.id }],
