@@ -155,6 +155,7 @@ async function deleteUntil(task: Extract<ChildTask, { hold: "delete" }>): Promis
 				signal: new AbortController().signal,
 				startedAt: task.now,
 				payload: undefined,
+				retryAt: () => undefined,
 			});
 		},
 	);

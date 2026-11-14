@@ -221,7 +221,13 @@ Una suscripción la registra la app desde la sesión que el aparato tiene habili
     - un endpoint que ya no está en la lista es un fallo definitivo, `PUSH_ENDPOINT_NOT_ALLOWED`, sin enviar; unas claves que `web-push` no puede usar para cifrar (la ruta solo exige textos no vacíos), un fallo definitivo, `PUSH_KEYS_INVALID`;
     - la plataforma recibe los orígenes en `PlatformOptions.origins`, que `apps/api` llena con `DOMUS_ORIGINS`; sin ningún `https`, `PUSH_NOT_CONFIGURED`;
     - `web-push` entra en la 3.6.7, con `@types/web-push`: la 4.0.0 tenía una semana, cambia a ESM y no trae tipos;
-    - mientras la 06 no clasifica las respuestas, cualquiera que no sea 2xx es un fallo pasajero `PushServiceError HTTP_<estado>`.
+- Decidido al implementar (06):
+    - la clasificación es `classifyAnswer` de `notifications/answers.ts`, pura, y `retryAfterInstant` lee `Retry-After`. Un 4xx que la tabla no nombra (405, 422…) es `PUSH_REJECTED`; un estado fuera de 2xx a 5xx, pasajero. `Retry-After` solo se lee en 429 y 503; la fecha HTTP se acepta solo en su forma actual (IMF-fixdate, `Sun, 06 Nov 1994 08:49:37 GMT`), no en las dos obsoletas, y una fecha que no existe es inválida. Un instante más allá del plazo se devuelve tal cual: lo decide la entrega;
+    - un fallo pasajero con estado es `PassingJobError HTTP_<estado>`, con `notBefore` si hay `Retry-After`; un error de red se relanza tal cual y guarda su nombre y su código. El mensaje de los definitivos es `the push service answered <estado>`;
+    - para saber si un reintento caería después del plazo, el motor da en `JobContext.retryAt(notBefore?)` el instante al que reintentaría un fallo pasajero de ese intento (el mayor de la espera creciente y `notBefore`), o nada en el último intento, que un fallo pasajero deja fallido. La entrega termina con `DELIVERY_EXPIRED` si ese instante pasa el plazo;
+    - un tiempo agotado se reintenta siempre (el motor no mira lo que lanza el trabajo cancelado), así que la comprobación antes de cada envío gana un paso: después de la decisión sobre el registro y antes del endpoint, una entrega ya pasada su plazo termina con `DELIVERY_EXPIRED` sin enviar. Cubre también la entrega que la Pi alcanza tarde;
+    - 404 y 410 borran la suscripción por su id: cualquier cambio de una suscripción le da otro id, así que es la misma a la que fue la petición;
+    - el servicio falso ofrece `neverAnswers`, una respuesta que queda pendiente hasta que se aborta la señal de la petición y entonces rechaza con su razón, como `fetch`.
 
 ### Suscripciones (Q3, Q4, Q8)
 

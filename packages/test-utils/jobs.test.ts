@@ -486,3 +486,38 @@ describe("a passing error with the earliest instant of its retry", () => {
 		]);
 	});
 });
+
+describe("the instant a job's retry would go at", () => {
+	it("is the later of the growing wait and the instant asked for, and none in the last attempt", async () => {
+		const seen: (readonly [number | undefined, number | undefined])[] = [];
+		const job: SyntheticJob = {
+			lane: "short",
+			run: ({ retryAt }) => {
+				seen.push([retryAt(), retryAt(test.clock.now() + 90 * SECOND)]);
+				throw new Error("the network is down");
+			},
+		};
+		await using test = createTestPlatform({ modules: [], jobs: { flaky: job } });
+		test.background.start();
+		test.background.enqueue("flaky");
+		const start = test.clock.now();
+		await test.background.flush();
+
+		for (const wait of [30, 60, 120, 240]) {
+			test.clock.advance(wait * SECOND);
+			await test.background.flush();
+		}
+
+		expect(seen).toEqual([
+			[start + 30 * SECOND, start + 90 * SECOND],
+			// From the third attempt on, the growing wait comes after the 90 s asked for.
+			[start + 90 * SECOND, start + 120 * SECOND],
+			[start + 210 * SECOND, start + 210 * SECOND],
+			[start + 450 * SECOND, start + 450 * SECOND],
+			[undefined, undefined],
+		]);
+		expect(test.background.jobs()).toEqual([
+			expect.objectContaining({ state: "failed", attempts: 5 }),
+		]);
+	});
+});
