@@ -35,14 +35,20 @@ export const FIRST_RETRY = 30 * 1000;
 const MAX_ERROR = 200;
 
 /**
- * What a job's work receives: its id, its cancellation signal, checked between steps, the instant it started and its
- * data, as its kind's schema gave it back (undefined for a kind without one).
+ * What a job's work receives: its id, its cancellation signal, checked between steps, the instant it started, its
+ * data, as its kind's schema gave it back (undefined for a kind without one), and when a retry of it would go.
  */
 export interface JobContext {
 	readonly id: number;
 	readonly signal: AbortSignal;
 	readonly startedAt: number;
 	readonly payload: unknown;
+	/**
+	 * The instant, from now, at which a passing error of this attempt would be retried, with `notBefore` as a
+	 * {@link PassingJobError} would carry it; undefined in the last attempt, which a passing error leaves failed. A job
+	 * with a deadline of its own uses it to fail for good instead of waiting for a retry past it.
+	 */
+	readonly retryAt: (notBefore?: number) => number | undefined;
 }
 
 /**
@@ -328,6 +334,7 @@ export function createEngine({
 					signal: abort.signal,
 					startedAt,
 					payload: payloadOf(kind, row),
+					retryAt: (notBefore) => retryInstant(row, clock(), notBefore),
 				});
 			})
 			.then(
@@ -448,9 +455,15 @@ const INTERRUPTED = "interrupted: the process ended while the job ran";
  * later; failed at the maximum of attempts either way.
  */
 function afterPassingError(row: JobRow, error: string, now: number, notBefore?: number): End {
-	if (row.attempts >= MAX_ATTEMPTS) return { state: "failed", error };
+	const retryAt = retryInstant(row, now, notBefore);
+	return retryAt === undefined ? { state: "failed", error } : { state: "retry", retryAt, error };
+}
+
+/** When a passing error at `now` retries a job: undefined once it used up its attempts. */
+function retryInstant(row: JobRow, now: number, notBefore?: number): number | undefined {
+	if (row.attempts >= MAX_ATTEMPTS) return undefined;
 	const backoff = now + FIRST_RETRY * 2 ** (row.attempts - 1);
-	return { state: "retry", retryAt: Math.max(backoff, notBefore ?? backoff), error };
+	return Math.max(backoff, notBefore ?? backoff);
 }
 
 /** The JSON a new job keeps of its data; a kind without a schema takes none. */

@@ -25,6 +25,7 @@ export {
 	FAKE_PUSH_HOST,
 	type FakePushService,
 	fakePushService,
+	neverAnswers,
 	type PushAnswer,
 	pushClient,
 	type PushClient,

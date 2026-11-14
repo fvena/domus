@@ -37,7 +37,13 @@ function withCleanup(batchSize?: number) {
 				"platform_task_runs",
 			].map(all),
 		run: (signal = new AbortController().signal) =>
-			job.run({ id: 1, signal, startedAt: NOW, payload: undefined }),
+			job.run({
+				id: 1,
+				signal,
+				startedAt: NOW,
+				payload: undefined,
+				retryAt: () => undefined,
+			}),
 		[Symbol.dispose]: () => platform.close(),
 	};
 }
