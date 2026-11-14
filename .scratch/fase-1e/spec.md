@@ -157,6 +157,10 @@ En la 1e no hay turnos de conversación, así que ninguna ruta, comando ni servi
     - Las rutas que no admiten llave la rechazan por traer `Authorization`, sin comprobarla: no anotan su último uso ni dejan motivo en el log. Solo `status` comprueba la llave en la 02; la 03 lo hace también en las rutas que admiten un mandato.
     - Iniciar y cerrar sesión con llave lo rechaza Better Auth con su propio error, un 401 `{ code: "UNAUTHORIZED", message }`, desde un `before` de sus hooks.
     - El último uso se reescribe cuando ha pasado un minuto o más desde el anotado: a los 59 999 ms no, al minuto justo sí.
+- Detalles que fijó la tarea 05:
+    - La lista es `admitsMandate` de `authorization/mandates.ts`, que recibe la ruta `<grupo>/<nombre>` con que la puerta sirve cada operación (`log/read`, `log/undo`). Cualquier otro texto, también otra forma de escribir una de las dos (`log.read`, `/log/read`, `Log/read`), no la admite.
+    - La puerta la aplica en el único paso por el que cada operación de la plataforma pide su contexto, con la ruta que oRPC da al manejador del procedimiento al que encaminó la petición, nunca con la que escribió el cliente. Así una operación nueva escrita con ese paso nace cerrada a los mandatos sin tocar nada más. La 03 decía pasar `{ mandate: true }` en esos dos manejadores; se eligió esto para que lo decida solo la lista.
+    - La prueba de las superficies cerradas recorre el contrato de la plataforma: una operación nueva la rompe hasta que se pone entre las cerradas o se añade a la lista.
 
 ### Autorización vía Kira (Q8, Q13, Q14)
 
@@ -164,6 +168,7 @@ En la 1e no hay turnos de conversación, así que ninguna ruta, comando ni servi
 - Una acción `manage` vía Kira con `identity: password` llega a pedir comprobante, pero `proofs/request` no admite mandatos, así que no se completa.
 - Una pendiente creada vía Kira guarda el contexto con el canal `contexto` y la delegación de entonces. Se confirma por la app desde cualquier sesión de la misma persona, durante sus 24 h, como cualquier otra. Por `contexto` no hay forma de confirmarla en la 1e.
 - La clave de idempotencia sigue siendo única por cuenta y `via`.
+- Vía Kira, `log/read` pide la delegación del área `platform` en `read`, porque leer el registro es una lectura de esa área, y `log/undo` la de la inversa, con el área y el nivel de la acción que deshace y la delegación del momento de deshacer, no la de la escritura. Las dos ya lo hacían en el camino de las acciones; la 05 solo les abre la puerta.
 
 ### `status` y la conexión de `assistant` (Q11, Q16)
 

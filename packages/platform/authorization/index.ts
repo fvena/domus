@@ -7,6 +7,7 @@ import type { PermissionLevel } from "@domus/module-sdk/contracts";
 
 import type { VerifiedContext } from "./context";
 
+export { admitsMandate } from "./mandates";
 export { newOwnership, visibleTo } from "./visibility";
 
 export {
@@ -261,8 +262,8 @@ export function decisionOf(authorizer: Authorizer, request: AuthorizationRequest
 
 /**
  * Whether the context may upload a file (ADR 0028), an operation of the platform: a person's account, by itself.
- * Never the device account, which is shared and would leave a file without a person behind it, nor Kira, until
- * its key (phase 1e).
+ * Never the device account, which is shared and would leave a file without a person behind it, nor Kira: the door
+ * refuses a key on the routes of files, and phase 5a decides how Kira reaches its conversations' attachments (ADR 0030).
  */
 export function mayUpload(view: AccessView, context: VerifiedContext): boolean {
 	return personByItself(view, context);
