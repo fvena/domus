@@ -7,6 +7,7 @@ La Pi se llama `kira`: `kira.local` en casa y `kira.taildd967b.ts.net` por Tails
 | Código       | `/home/fvena/domus`, un clon de `fvena/domus` en la rama `main`                                                                                 |
 | Contenedores | `api`, `assistant` y `voice-gateway`, del proyecto de compose `domus`                                                                           |
 | Datos        | el volumen `domus_domus-data`, montado solo en `api`                                                                                            |
+| Archivos     | `/data/files` en ese volumen: los contenidos en `contents/` y las subidas en curso en `incoming/` (ver «Los archivos»)                          |
 | Secretos     | `/home/fvena/domus/.env`, fuera de git (ver «Secretos»)                                                                                         |
 | Copias       | el repositorio de restic en `/srv/backups/domus` y su contraseña en `/home/fvena/.config/domus/backup-password` (ver «Las copias de seguridad») |
 | Acceso       | `http://kira.local:3000` en casa; `https://kira.taildd967b.ts.net` por Tailscale, solo dentro de la red (`tailscale serve` → `:3000`)           |
@@ -37,6 +38,12 @@ ssh kira 'cd ~/domus && docker compose ps && docker compose logs --no-color assi
 
     ```bash
     for rpc in log/read probe/listNotes; do curl -s -o /dev/null -w "$rpc %{http_code}\n" -X POST "localhost:3000/api/rpc/$rpc"; done
+    ```
+
+    Las dos rutas de los archivos tampoco responden sin sesión. Esta escribe `files 401` y `files/download 401`:
+
+    ```bash
+    for ruta in files files/download; do curl -s -o /dev/null -w "$ruta %{http_code}\n" -X POST "localhost:3000/api/$ruta"; done
     ```
 
 - `docker compose logs --no-color api | grep database` dice `database at /data/domus.db: <N> migrations applied`: las que había pendientes en ese arranque, y `0` si no había ninguna. Si una migración falla, `api` no arranca y la base de datos queda como estaba.
@@ -208,9 +215,54 @@ docker compose exec api node -e "const db = new (require('better-sqlite3'))('/da
 
 4. Con otro comprobante, de `platform.setTaskTime` con `{"task":"cleanup","time":"05:00"}`, cambia la hora con `tasks/setTime`. Tras `docker compose restart api` y tras `docker compose up -d --force-recreate api`, la orden de arriba sigue dando `time` `05:00` y el mismo `next_at`. Para volver, deshaz esa entrada con `log/undo` y un comprobante de `{"undo":<n>}`: la lista vuelve a `04:30`.
 
+## Los archivos
+
+Los archivos que se suben a Domus viven en `/data/files`, dentro del volumen de datos (ADR 0028). Cada contenido se guarda una sola vez, con su SHA-256 por nombre, en `contents/<dos primeros caracteres>/<hash>`, y nunca se reescribe: dos subidas con los mismos bytes comparten el contenido. `incoming/` guarda las subidas en curso. La carpeta nace con la primera subida.
+
+Subir es `POST /api/files`, con sesión, con el archivo tal cual en el cuerpo, su `Content-Length` y su nombre en `X-File-Name`, en UTF-8 codificado como en una URL y de 255 bytes como mucho. Domus acepta:
+
+- hasta 25 MB por archivo (`413 FILE_TOO_LARGE`);
+- JPEG, PNG, WebP, HEIC, PDF y texto en UTF-8, reconocidos por sus bytes y no por el nombre (`415 FILE_TYPE_NOT_ALLOWED`);
+- hasta 20 archivos o 200 MB subiéndose o preparados a la vez en cada sesión (`429 UPLOAD_LIMIT`), y siempre que queden 2 GB libres en el disco (`507 INSUFFICIENT_STORAGE`);
+- un minuto sin recibir bytes corta la subida (`408 UPLOAD_TIMEOUT`).
+
+Una subida buena responde con un archivo preparado: un id que vale 24 h, solo para la sesión que lo subió y una sola vez, para vincularlo a un registro con una acción de su módulo. Hasta que llegue un módulo real con archivos, en el Domus real solo se puede subir; vincular, descargar y deshacer se comprueban en el ensayo, con `probe` (ver «Ensayar con archivos»).
+
+La limpieza de las 04:30 borra los archivos preparados caducados o de sesiones cerradas, los contenidos a los que ya no apunta nada, los ficheros sin fila de más de una hora y lo que quedó en `incoming/` sin una subida en curso.
+
+### Comprobar los archivos
+
+En la terminal de «Comprobar las cuentas y la autorización» (con `D` y `entrar`), entra como Paco con `entrar <correo de Paco> paco`. Después, estas órdenes crean tres archivos de prueba y los suben. El nombre va tal cual porque es ASCII; uno con tildes o espacios tiene que ir codificado.
+
+```bash
+subir() { curl -s -w ' %{http_code}\n' -b "$D/paco" -H 'Origin: http://kira.local:3000' -H "X-File-Name: $(basename "$1")" --data-binary @"$1" localhost:3000/api/files; }
+printf 'Pilas para el mando, café y jabón.\n' > "$D/lista-compra.txt"
+head -c 128 /dev/zero > "$D/programa.bin"
+head -c 27262976 /dev/zero | tr '\0' a > "$D/grande.txt"
+subir "$D/lista-compra.txt"; subir "$D/programa.bin"; subir "$D/grande.txt"
+```
+
+El 2026-11-14 escribieron:
+
+```text
+{"id":"…","name":"lista-compra.txt","type":"text/plain","size":37,"expiresAt":1794746330632} 200
+{"defined":false,"code":"FILE_TYPE_NOT_ALLOWED","status":415,"message":"FILE_TYPE_NOT_ALLOWED"} 415
+{"defined":false,"code":"FILE_TOO_LARGE","status":413,"message":"FILE_TOO_LARGE"} 413
+```
+
+El contenido de la primera está en el almacén, con el nombre que da `sha256sum "$D/lista-compra.txt"`:
+
+```bash
+docker compose exec -T api find /data/files -type f
+```
+
+Escribió `/data/files/contents/ae/aec5af8ea8339032b725746103d6a76ab89b5e383a82ddf949133850602180ca`. Ese archivo preparado no se vincula a nada: caduca a las 24 h, y la limpieza de la noche siguiente lo borra con su contenido, así que la misma orden ya no escribe ninguno.
+
 ## Las copias de seguridad
 
 Cada noche, la tarea `backup` saca una instantánea de la base, la comprueba y la guarda con restic en un repositorio cifrado (ADR 0026 y ADR 0027). Un proceso hijo de Node, con su propia conexión y el cerrojo compartido de la base, la copia con `VACUUM INTO` en `/data/backup-staging/domus.db`; otro proceso hijo le pasa `quick_check`; restic la sube con el host `domus` y el instante de captura, que es el de antes de empezar la copia. Después aplica la retención: 7 diarias, 4 semanales y 3 mensuales. La carpeta de preparación se vacía al terminar, también si algo falla. La copia necesita en el NVMe un espacio libre del tamaño de la base, además del repositorio.
+
+La copia lleva también los contenidos de archivo que la base necesita en el instante de captura: los de las referencias vivas y los de las soltadas que todavía se pueden deshacer (ADR 0028). El mismo proceso hijo de `quick_check` los saca de la instantánea, y entran en `/data/backup-staging/files/` como enlaces duros, sin ocupar más espacio. En la instantánea quedan en `/files/contents/…`, junto a `/domus.db`. Los archivos preparados no entran. Si falta uno de los contenidos necesarios, la copia falla sin subir nada.
 
 El repositorio está en el mismo NVMe que los datos, de forma provisional: protege de borrados y errores, no de perder el disco o la Pi. Sin su contraseña no se puede leer ni restaurar.
 
@@ -314,6 +366,8 @@ Restaurar pone la base de una instantánea del repositorio en lugar de la actual
 
 Antes de tocar la base activa, prepara la copia aparte, en `/data/restore-staging`: la comprueba, le aplica las migraciones que le falten y la sanea. Una copia hecha con un código más nuevo, o una migración que falla, se paran ahí con el mensaje del migrador, y la base activa sigue igual. Sirve también si la base actual está dañada o no existe.
 
+Los contenidos de archivo vuelven con la base (ADR 0028). Restaurar prepara también los que la copia necesita y comprueba el SHA-256 de cada uno. Si falta uno, se niega con `the backup lacks a file content its database needs`, y si uno no coincide, con `a file content of the backup does not match its hash`; en los dos casos no toca nada. Después los pone en `/data/files/contents`, antes de cambiar la base, y nunca borra un contenido del almacén. Si una restauración se corta antes de cambiar la base, los contenidos que ya puso los recoge la limpieza.
+
 ### Restaurar el Domus real
 
 En la Pi, dentro de `~/domus`:
@@ -374,7 +428,7 @@ La carpeta `before-restore` está completa y sincronizada antes de que se escrib
 
 ### Las carpetas `before-restore`
 
-Cada restauración guarda la base que había, con su `-wal` y su `-shm` si existían, en `/data/before-restore-<instante UTC>` (por ejemplo, `before-restore-20261113T093113Z`). Son enlaces duros, hechos sin abrir los ficheros, así que valen igual si la base estaba dañada o no existía. Nunca se borran solas, y no entran en las copias.
+Cada restauración guarda la base que había, con su `-wal` y su `-shm` si existían, en `/data/before-restore-<instante UTC>` (por ejemplo, `before-restore-20261113T093113Z`). Son enlaces duros, hechos sin abrir los ficheros, así que valen igual si la base estaba dañada o no existía. Nunca se borran solas, y no entran en las copias. Los archivos no van en ellas, porque restaurar no borra ningún contenido del almacén: la base devuelta encuentra los suyos donde estaban, salvo los que la limpieza ya hubiera recogido.
 
 Para ver cuáles hay:
 
@@ -406,12 +460,13 @@ docker compose exec api rm -r /data/before-restore-20261113T093113Z
 
 ### Qué vuelve con la copia y qué se pierde
 
-Vuelve todo lo que había en la base al capturar la copia: los datos, las contraseñas, los permisos, la delegación de cada cuenta y los ajustes de las tareas (horas y pausas). Una contraseña cambiada o un permiso quitado después de la copia vuelven a como estaban: revísalos.
+Vuelve todo lo que había en la base al capturar la copia: los datos, las contraseñas, los permisos, la delegación de cada cuenta, los ajustes de las tareas (horas y pausas) y los archivos vinculados, también los soltados que todavía se pueden deshacer. Una contraseña cambiada o un permiso quitado después de la copia vuelven a como estaban: revísalos.
 
 Al sanear, la restauración:
 
 - cierra todas las sesiones: todo el mundo vuelve a entrar;
 - anula las confirmaciones pendientes y los comprobantes;
+- descarta los archivos preparados y las referencias soltadas cuyo deshacer ya caducó, y olvida los contenidos a los que no apunta nada, que la limpieza borra del almacén;
 - descarta los trabajos pendientes, en curso o atascados de la copia, que quedan `cancelled` con `discarded by restore`, para no repetir lo que ya salió;
 - calcula la próxima ejecución de cada tarea desde el momento de restaurar, sin lanzar de golpe las atrasadas, y una pausada sigue pausada;
 - y anota de qué instantánea viene la base.
@@ -461,6 +516,98 @@ rpc -b "$D/paco" -d '{}' localhost:3000/api/auth/sign-out
 curl -s -w ' %{http_code}\n' -b "$D/ensayo" -H 'Origin: http://localhost:3001' -H 'content-type: application/json' -d '{}' localhost:3001/api/auth/sign-out
 unset pw correo; rm -rf "$D"
 ```
+
+### Ensayar con archivos
+
+El ensayo con archivos comprueba que base y archivos se restauran juntos. Como el Domus real todavía no tiene módulos con archivos, usa una imagen con `probe`, `domus-api:ensayo`, construida con `DOMUS_MODULES=rehearsal`: la lista de módulos de esa imagen lleva también los de prueba, y la de producción no cambia. En la Pi, dentro de `~/domus`:
+
+```bash
+docker build -f docker/Dockerfile --target api --build-arg DOMUS_MODULES=rehearsal -t domus-api:ensayo .
+```
+
+Con `E` como arriba, restaura en el ensayo la última copia real con esa imagen y arráncalo con las copias encendidas, sobre su propio repositorio:
+
+```bash
+export DOMUS_ENSAYO_IMAGE=domus-api:ensayo
+DOMUS_ENSAYO_BACKUPS=/srv/backups/domus $E run --rm --no-deps --entrypoint node api /app/restore.mjs
+DOMUS_ENSAYO_BACKUPS_OFF= $E up -d
+```
+
+Al restaurar, la copia real recibe las migraciones de `probe`. Sin sesión, `curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:3001/api/rpc/probe/listNotes` escribe `401`, y no `404` como en el Domus real. Entra en el ensayo como dice el apartado de arriba, con la cookie en `$D/ensayo`, y define estas funciones y los cuatro archivos de prueba:
+
+```bash
+O='Origin: http://localhost:3001'
+subir() { curl -s -b "$D/ensayo" -H "$O" -H "X-File-Name: $(basename "$1")" --data-binary @"$1" localhost:3001/api/files | jq -r .id; }
+probe() { curl -s -b "$D/ensayo" -H "$O" -H 'content-type: application/json' -H "idempotency-key: $1" -d "{\"json\":$3}" "localhost:3001/api/rpc/probe/$2"; echo; }
+bajar() { curl -s -b "$D/ensayo" -H "$O" -H 'content-type: application/json' -d "{\"action\":\"probe.getNote\",\"input\":{\"id\":$1},\"file\":\"$2\"}" localhost:3001/api/files/download | sha256sum; }
+printf '\x89PNG\r\n\x1a\n\0\0\0\rIHDR' > "$D/foto-caldera.png"
+printf '%%PDF-1.4\n%%%%EOF\n' > "$D/factura-luz.pdf"
+printf 'Pilas para el mando, café y jabón.\n' > "$D/lista-compra.txt"
+printf 'Este archivo se prepara y no se vincula.\n' > "$D/sin-usar.txt"
+sha256sum "$D"/*.png "$D"/*.pdf "$D"/*.txt
+```
+
+Sube los cuatro, crea dos notas, vincula la foto y la factura a la primera y la lista a la segunda, y borra la segunda. Su deshacer sigue vigente:
+
+```bash
+F=$(subir "$D/foto-caldera.png"); P=$(subir "$D/factura-luz.pdf"); L=$(subir "$D/lista-compra.txt"); S=$(subir "$D/sin-usar.txt")
+probe nota-1 addNote '{"body":"Revisión de la caldera"}'
+probe nota-2 addNote '{"body":"Compra del sábado"}'
+probe vincular-1 attachFile "{\"noteId\":1,\"prepared\":\"$F\"}"
+probe vincular-2 attachFile "{\"noteId\":1,\"prepared\":\"$P\"}"
+probe vincular-3 attachFile "{\"noteId\":2,\"prepared\":\"$L\"}"
+probe borrar-1 deleteNote '{"id":2}'
+probe leer getNote '{"id":1}'
+```
+
+Cada escritura responde su resultado y su `entry`. Las tres de `attachFile` devuelven el id de su archivo, y `getNote` devuelve la nota 1 con sus dos archivos en `files`. Apunta el `entry` de `deleteNote` y el id de cada archivo. `bajar 1 <id>` escribe el mismo hash que su original.
+
+Lanza la copia del ensayo con un comprobante, como en «Lanzar una copia a mano» pero en `localhost:3001`. Pega la primera línea sola y escribe la contraseña de Paco:
+
+```bash
+read -rsp 'Contraseña de Paco: ' pw; echo
+```
+
+```bash
+K=$(printf '{"json":{"password":"%s","operation":{"action":"platform.launchTask","input":{"task":"backup"}}}}' "$pw" | curl -s -b "$D/ensayo" -H "$O" -H 'content-type: application/json' --data-binary @- localhost:3001/api/rpc/proofs/request | jq -r '.json.proof'); unset pw
+curl -s -b "$D/ensayo" -H "$O" -H 'content-type: application/json' -H 'idempotency-key: copia-ensayo-1' -H "step-up-proof: $K" -d '{"json":{"task":"backup"}}' localhost:3001/api/rpc/tasks/launch; echo
+```
+
+Esta orden enseña lo que guardó la copia:
+
+```bash
+$E exec -T -e RESTIC_REPOSITORY=/backups -e RESTIC_PASSWORD_FILE=/run/secrets/backup-password api restic ls --no-cache latest
+```
+
+Después, vacía solo el volumen de datos del ensayo y restaura en él la copia que acaba de guardar, desde el repositorio del ensayo (sin `DOMUS_ENSAYO_BACKUPS`):
+
+```bash
+$E down
+docker volume rm domus-restore_data
+$E run --rm --no-deps --entrypoint node api /app/restore.mjs
+DOMUS_ENSAYO_BACKUPS_OFF= $E up -d
+```
+
+La sesión de antes ya no vale: vuelve a entrar en el ensayo y comprueba lo restaurado. Con `S` y el `entry` de `deleteNote` en `U`:
+
+```bash
+bajar 1 <id de la foto>; bajar 1 <id de la factura>
+probe tras-1 attachFile "{\"noteId\":1,\"prepared\":\"$S\"}"
+curl -s -b "$D/ensayo" -H "$O" -H 'content-type: application/json' -H 'idempotency-key: deshacer-1' -d "{\"json\":{\"entry\":$U}}" localhost:3001/api/rpc/log/undo; echo
+probe leer-2 getNote '{"id":2}'
+bajar 2 <id de la lista>
+```
+
+En el ensayo del 2026-11-14, con la última copia real (`d1dd591a…`, de las 05:00):
+
+- la nota 1 devolvió en `files` `foto-caldera.png` (`image/png`) y `factura-luz.pdf` (`application/pdf`), y las dos descargas llevaron `cache-control: no-store`, `x-content-type-options: nosniff` y `content-disposition: attachment; filename="…"; filename*=UTF-8''…`;
+- `tasks/launch` respondió `200` y la copia `8c402530`, de 272 KiB, guardó `/domus.db` y tres contenidos en `/files/contents/…`: la foto, la factura y la lista, soltada con su deshacer vigente; el archivo preparado sin usar no entró;
+- tras vaciar el volumen, restaurar escribió `restored 8c402530…, captured 2026-11-14T12:41:59.000Z`, el log de su `api` dijo `0 migrations applied`, el almacén tenía los tres contenidos y la cookie de antes respondió `401`;
+- con la sesión nueva, la foto y la factura se descargaron con el mismo hash que sus originales;
+- el archivo preparado de antes de la copia respondió `NOT_FOUND` y `404`;
+- deshacer el borrado respondió `200`, la nota 2 volvió con `lista-compra.txt` en `files`, y su descarga dio el mismo hash que el original.
+
+Para salir, cierra la sesión del ensayo y desmonta el ensayo como dice «Desmontar el ensayo», con `docker image rm domus-api:ensayo`.
 
 ### Medir la copia
 
@@ -546,7 +693,7 @@ $E down -v
 docker image rm domus-api:ensayo
 ```
 
-`down -v` borra los volúmenes `domus-restore_data` y `domus-restore_backups`. La segunda orden solo hace falta si construiste una imagen de rama. El Domus real no se toca: su `/health` sigue en `ok` con `backups: saved`.
+`down -v` borra los volúmenes `domus-restore_data` y `domus-restore_backups`. La segunda orden solo hace falta si construiste una imagen de rama o la del ensayo con archivos. El Domus real no se toca: su `/health` sigue en `ok` con `backups: saved`.
 
 ## Secretos
 

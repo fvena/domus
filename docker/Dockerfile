@@ -19,7 +19,14 @@ RUN corepack enable
 # Dependencies from the lockfile alone, so this layer survives source changes.
 RUN pnpm fetch
 COPY . .
-RUN pnpm install --offline --frozen-lockfile && pnpm build
+RUN pnpm install --offline --frozen-lockfile
+# The modules of the image: production's list, kept in git, unless DOMUS_MODULES=rehearsal, which writes over it a
+# list with the testOnly ones too (probe), for the image of the restore rehearsal alone.
+ARG DOMUS_MODULES=production
+RUN case "$DOMUS_MODULES" in production) ;; \
+    rehearsal) pnpm --filter @domus/scripts exec tsx modules-generate.ts --rehearsal ;; \
+    *) echo "DOMUS_MODULES is production or rehearsal, not $DOMUS_MODULES" >&2; exit 1 ;; esac \
+  && pnpm build
 
 # better-sqlite3 for the api image, outside its bundle. The package ships prebuilt Node-API binaries for every
 # platform, so it is taken from the build stage (the version in the lockfile, the one the bundle was built against)

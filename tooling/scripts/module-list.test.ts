@@ -39,6 +39,25 @@ describe("moduleListSource", () => {
 		);
 	});
 
+	it("in the rehearsal composition, imports the testOnly ones too", () => {
+		const source = moduleListSource(
+			[found("tasks", "tasks"), found("probe", "probe", true)],
+			"rehearsal",
+		);
+		expect(source).toBe(
+			[
+				"// Written by `pnpm modules:generate --rehearsal` (ADR 0021) for the rehearsal image only; never committed.",
+				"",
+				'import type { PlatformOptions } from "@domus/platform";',
+				'import probeModule from "@domus/probe/server";',
+				'import tasksModule from "@domus/tasks/server";',
+				"",
+				'export const modules: PlatformOptions["modules"] = [probeModule, tasksModule];',
+				"",
+			].join("\n"),
+		);
+	});
+
 	it("writes an empty list when every module is testOnly", () => {
 		expect(moduleListSource([found("probe", "probe", true)])).toBe(
 			[
@@ -75,5 +94,11 @@ describe("the real modules", () => {
 		const modules = await loadModules(root);
 		expect(modules.map((module) => module.definition.id)).toContain("probe");
 		expect(moduleListSource(modules)).not.toContain("@domus/probe");
+	});
+
+	it("give the rehearsal image a list that imports probe", async () => {
+		expect(moduleListSource(await loadModules(root), "rehearsal")).toContain(
+			'import probeModule from "@domus/probe/server";',
+		);
 	});
 });

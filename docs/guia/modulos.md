@@ -12,7 +12,7 @@ Un módulo se declara con su nombre, sus tablas, sus migraciones y sus acciones,
 
 Una tabla solo puede apuntar a otra de su mismo módulo. Hay una prueba que lo comprueba sobre todos los módulos.
 
-api no va a buscar los módulos cuando arranca. Usa una lista fija que escribe un comando a partir de la carpeta de módulos y que se guarda con el código. Si alguien añade un módulo y se olvida de actualizarla, una comprobación automática lo avisa. Los módulos de prueba como probe no entran nunca en esa lista; las pruebas los cargan aparte.
+api no va a buscar los módulos cuando arranca. Usa una lista fija que escribe un comando a partir de la carpeta de módulos y que se guarda con el código. Si alguien añade un módulo y se olvida de actualizarla, una comprobación automática lo avisa. Los módulos de prueba como probe no entran en esa lista, y las pruebas los cargan aparte. Solo la imagen del ensayo de restaurar los añade al construirse, para probar en la Pi lo que el Domus real todavía no usa.
 
 ## Por qué es así
 
@@ -26,6 +26,6 @@ Cómo se protegen los módulos unos de otros está contado en [Seguridad y priva
 
 - La forma de un módulo: `modules/probe/` tiene `package.json`, `contracts/index.ts` (los contratos de sus acciones), `server/schema.ts` (las tablas), `server/index.ts` (`defineModule` con las acciones), `server/migrations.ts` y `tests/`.
 - `@domus/module-sdk`: `defineModule`, `checkModules` y `PLATFORM_ID`. `@domus/module-sdk/db` ofrece `moduleTables(id)`, `id()`, las columnas, `sql` y `eq`. `@domus/module-sdk/contracts` ofrece `readAction` y `writeAction({ undoable })`. Un módulo no puede importar drizzle-orm directamente.
-- La lista: `apps/api/src/modules.ts`, que escribe `pnpm modules:generate` (`tooling/scripts/module-list.ts`).
+- La lista: `apps/api/src/modules.ts`, que escribe `pnpm modules:generate` (`tooling/scripts/module-list.ts`). La imagen del ensayo se construye con `--build-arg DOMUS_MODULES=rehearsal`, que la reescribe con `pnpm modules:generate --rehearsal` dentro de la imagen y deja la del repositorio igual.
 - Probar un módulo: `createTestPlatform({ modules })` de `@domus/test-utils`, con `invoke` para sus acciones y `dbFor(módulo)` para preparar y leer sus tablas sin pasar por ellas.
 - Decisiones: [ADR 0017](../architecture/adr/0017-estructura-del-repositorio.md), [ADR 0021](../architecture/adr/0021-datos-de-los-modulos-y-migraciones.md) y [ADR 0022](../architecture/adr/0022-acciones.md).
