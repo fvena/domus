@@ -159,6 +159,12 @@ Una suscripción la registra la app desde la sesión que el aparato tiene habili
 - Para probar la bandeja antes de que existan los avisos, `@domus/platform/testing` ofrece encolar un trabajo sintético en la transacción de la escritura en curso, desde un manejador de `probe` envuelto por la prueba. Ningún módulo ni `module-sdk` lo alcanza.
 - Deshacer una entrada cancela, en su misma transacción, los trabajos `pending` con esa `entry`, avisos y entregas incluidos. El estado pasa a `cancelled` con la razón `undone`. Reclamar y cancelar comprueban los dos `state = 'pending'`, así que solo gana uno.
 - Un error pasajero puede llevar el instante mínimo de su próximo intento. El motor programa el reintento en el mayor de ese instante y su espera creciente, sin cambiar el número máximo de intentos.
+- Detalles de la tarea 03:
+    - el código del `payload` que no cumple es `INVALID_PAYLOAD`. Lo es también un `payload` ausente en un tipo con esquema, o uno presente en un tipo sin esquema. Encolar datos para un tipo sin esquema ya falla al encolar, porque es un error del código;
+    - un `PermanentJobError` puede llevar un código, y el trabajo guarda `PermanentJobError <código>: <mensaje>`. Lo usarán `PUSH_REJECTED`, `PUSH_UNAUTHORIZED`, `PUSH_REDIRECT` y `DELIVERY_EXPIRED`;
+    - el error pasajero con instante mínimo es `PassingJobError`, con `notBefore` y un código opcional. Como cualquier error pasajero, solo guarda su nombre y su código;
+    - el trabajo de un tipo deja su `outcome` devolviendo un texto; si no devuelve nada, queda nulo;
+    - la razón `undone` va en la columna `error`, como `discarded by restore` al restaurar.
 
 ### `ctx.notify` (Q2, Q5)
 

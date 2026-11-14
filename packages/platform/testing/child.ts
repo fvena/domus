@@ -109,7 +109,11 @@ async function deleteUntil(task: Extract<ChildTask, { hold: "delete" }>): Promis
 		async (platform) => {
 			const sweeps = filesOf(platform)?.sweeps ?? [];
 			const { job } = cleanupTask(connectionOf(platform), () => task.now, { sweeps });
-			await job.run({ signal: new AbortController().signal, startedAt: task.now });
+			await job.run({
+				signal: new AbortController().signal,
+				startedAt: task.now,
+				payload: undefined,
+			});
 		},
 	);
 }

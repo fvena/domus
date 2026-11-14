@@ -3,9 +3,12 @@
 // transaction of the one connection, so two claims never take the same job. Each job gets a cancellation signal,
 // aborted when its maximum time runs out; one that does not end within a margin after that is stuck, and its
 // lane stays taken until it ends. A permanent error fails at once; a passing one, timing out included, is retried
-// with a growing wait up to a maximum of attempts. What a previous process left running is recovered at start.
+// with a growing wait up to a maximum of attempts, never before the instant it may ask for. A job of the outbox
+// (ADR 0029) carries its data, which its kind's schema checks when it is claimed, and the log entry of the write
+// that left it, whose undo cancels it while pending. What a previous process left running is recovered at start.
 // The engine sets no timer of its own: whoever drives it calls `pump` when `nextDue` says, and stopping waits
 // through the platform's timer.
+import type { AnySchema } from "@orpc/contract";
 import type Database from "better-sqlite3";
 
 import type { Clock } from "../actions";
@@ -31,18 +34,33 @@ export const FIRST_RETRY = 30 * 1000;
 /** The longest error a job's row keeps. */
 const MAX_ERROR = 200;
 
-/** What a job's work receives: its cancellation signal, checked between steps, and the instant it started. */
+/**
+ * What a job's work receives: its cancellation signal, checked between steps, the instant it started and its data,
+ * as its kind's schema gave it back (undefined for a kind without one).
+ */
 export interface JobContext {
 	readonly signal: AbortSignal;
 	readonly startedAt: number;
+	readonly payload: unknown;
 }
 
-/** A kind of job: the lane it runs in, its maximum time if not its lane's, and its work. */
+/**
+ * What a job's work ends with: nothing for plain "done", or the outcome its row keeps when "done" is not all, such
+ * as a notice skipped and why. Written by platform code, without personal data.
+ */
+export type JobResult = string | undefined;
+
+/** A kind of job: the lane it runs in, its maximum time if not its lane's, the schema of its data and its work. */
 export interface JobKind {
 	readonly lane: Lane;
 	/** Milliseconds from its start until its signal is aborted. Unset: {@link LANE_TIMEOUT} of its lane. */
 	readonly timeout?: number;
-	run(context: JobContext): Promise<void> | void;
+	/**
+	 * The schema of the data its jobs carry, checked synchronously when one is claimed: data that does not match fails
+	 * the job for good with {@link INVALID_PAYLOAD}. Unset: its jobs carry none.
+	 */
+	readonly payload?: AnySchema;
+	run(context: JobContext): Promise<JobResult | void> | JobResult | void;
 	/**
 	 * Runs inside the transaction that records the job's end for good when it failed: at once for a permanent error,
 	 * or once a passing error used up its attempts. Not for a job that stopping cancelled.
@@ -56,18 +74,57 @@ export interface JobKind {
  */
 export class PermanentJobError extends Error {
 	override readonly name = "PermanentJobError";
+	/** A fixed code of the failure, such as {@link INVALID_PAYLOAD}, kept before its message. */
+	readonly code: string | undefined;
+
+	constructor(message: string, options: { readonly code?: string } = {}) {
+		super(message);
+		this.code = options.code;
+	}
 }
 
-/** A job to store: its kind, the instant from which it may run and, for a scheduled run, that run's id. */
+/**
+ * A passing error that names the earliest instant of the next attempt, such as a service that asks to wait: the
+ * retry goes at the later of that instant and the growing wait, within the same maximum of attempts. As with any
+ * passing error, its row keeps only its name and code.
+ */
+export class PassingJobError extends Error {
+	override readonly name = "PassingJobError";
+	readonly code: string | undefined;
+	/** The earliest instant, on the platform clock, of the next attempt. */
+	readonly notBefore: number | undefined;
+
+	constructor(
+		message: string,
+		options: { readonly code?: string; readonly notBefore?: number } = {},
+	) {
+		super(message);
+		this.code = options.code;
+		this.notBefore = options.notBefore;
+	}
+}
+
+/** The code of a job whose data does not match the schema of its kind, or that carries data its kind takes none of. */
+export const INVALID_PAYLOAD = "INVALID_PAYLOAD";
+
+/** Why the undo of its entry cancelled a job of the outbox. */
+export const UNDONE = "undone";
+
+/**
+ * A job to store: its kind, the instant from which it may run, for a scheduled run that run's id and, for a job of
+ * the outbox, its data, which must survive JSON, and the log entry of the write that left it.
+ */
 export interface NewJob {
 	readonly kind: string;
 	readonly runAt: number;
 	readonly taskRun?: number;
+	readonly payload?: unknown;
+	readonly entry?: number;
 }
 
 /** How a job ended for good. `cancelled` when it failed after stopping the engine aborted its signal. */
 export type JobOutcome =
-	| { readonly state: "done" }
+	| { readonly state: "done"; readonly outcome?: string }
 	| { readonly state: "failed" | "cancelled"; readonly error: string };
 
 /** A job as it ends for good, for whoever records what it belonged to. */
@@ -91,6 +148,11 @@ export interface JobSnapshot {
 	readonly attempts: number;
 	readonly runAt: number;
 	readonly error: string | null;
+	/** Its data, parsed from its JSON; null for a job without any. */
+	readonly payload: unknown;
+	/** The log entry of the write that left it; null for a job no write left. */
+	readonly entry: number | null;
+	readonly outcome: string | null;
 }
 
 export interface EngineOptions {
@@ -113,6 +175,11 @@ export interface EngineOptions {
 export interface Engine {
 	/** Stores a pending job and returns its id. Joins the caller's transaction when there is one. */
 	enqueue(job: NewJob): number;
+	/**
+	 * Cancels for good, inside the caller's transaction, every job of `entry` still pending, with the reason
+	 * {@link UNDONE}; one already claimed goes on. Returns how many it cancelled.
+	 */
+	cancelPendingOf(entry: number): number;
 	/**
 	 * Back to pending, its interrupted attempt counted, each job a previous process left running or stuck; failed
 	 * if that was its last attempt. Returns how many it recovered. Before the first `pump`.
@@ -143,6 +210,7 @@ interface JobRow {
 	readonly task_run: number | null;
 	readonly attempts: number;
 	readonly started_at: number | null;
+	readonly payload: string | null;
 }
 
 /** A job on its lane. */
@@ -172,11 +240,11 @@ export function createEngine({
 	onIdle,
 }: EngineOptions): Engine {
 	const insert = connection.prepare(
-		`INSERT INTO platform_jobs (kind, lane, state, run_at, task_run, created_at)
-			VALUES (?, ?, 'pending', ?, ?, ?)`,
+		`INSERT INTO platform_jobs (kind, lane, state, run_at, task_run, payload, entry, created_at)
+			VALUES (?, ?, 'pending', ?, ?, ?, ?, ?)`,
 	);
 	const selectDue = connection.prepare(
-		`SELECT id, kind, lane, task_run, attempts, started_at FROM platform_jobs
+		`SELECT id, kind, lane, task_run, attempts, started_at, payload FROM platform_jobs
 			WHERE lane = ? AND state = 'pending' AND run_at <= ? ORDER BY run_at, id LIMIT 1`,
 	);
 	// A job keeps the start of its first attempt.
@@ -188,7 +256,12 @@ export function createEngine({
 		.prepare("SELECT min(run_at) FROM platform_jobs WHERE state = 'pending' AND run_at > ?")
 		.pluck();
 	const markEnded = connection.prepare(
-		"UPDATE platform_jobs SET state = ?, finished_at = ?, error = ? WHERE id = ?",
+		"UPDATE platform_jobs SET state = ?, finished_at = ?, error = ?, outcome = ? WHERE id = ?",
+	);
+	// Claiming checks `state = 'pending'` too, so of a claim and a cancellation only one changes the row.
+	const cancelOfEntry = connection.prepare(
+		`UPDATE platform_jobs SET state = 'cancelled', finished_at = ?, error = ?
+			WHERE entry = ? AND state = 'pending'`,
 	);
 	const markRetry = connection.prepare(
 		"UPDATE platform_jobs SET state = 'pending', run_at = ?, error = ? WHERE id = ?",
@@ -197,7 +270,7 @@ export function createEngine({
 		"UPDATE platform_jobs SET state = 'stuck' WHERE id = ? AND state = 'running'",
 	);
 	const selectInterrupted = connection.prepare(
-		`SELECT id, kind, lane, task_run, attempts, started_at FROM platform_jobs
+		`SELECT id, kind, lane, task_run, attempts, started_at, payload FROM platform_jobs
 			WHERE state IN ('running', 'stuck') ORDER BY id`,
 	);
 
@@ -219,7 +292,8 @@ export function createEngine({
 			return;
 		}
 		const error = end.state === "done" ? null : end.error;
-		markEnded.run(end.state, finishedAt, error, row.id);
+		const outcome = end.state === "done" ? (end.outcome ?? null) : null;
+		markEnded.run(end.state, finishedAt, error, outcome, row.id);
 		if (end.state === "failed") kinds.get(row.kind)?.failed?.(finishedAt);
 		onFinish?.({
 			id: row.id,
@@ -248,10 +322,13 @@ export function createEngine({
 		const done = Promise.resolve()
 			.then(() => {
 				if (!kind) throw new PermanentJobError(undeclared(row.kind));
-				return kind.run({ signal: abort.signal, startedAt });
+				return kind.run({ signal: abort.signal, startedAt, payload: payloadOf(kind, row) });
 			})
 			.then(
-				(): End => ({ state: "done" }),
+				(result): End =>
+					typeof result === "string"
+						? { state: "done", outcome: result }
+						: { state: "done" },
 				(error: unknown): End => {
 					const now = clock();
 					if (abort.signal.reason === STOPPING)
@@ -260,7 +337,9 @@ export function createEngine({
 						return afterPassingError(row, `timed out after ${timeout} ms`, now);
 					if (error instanceof PermanentJobError)
 						return { state: "failed", error: messageOf(error) };
-					return afterPassingError(row, messageOf(error), now);
+					const notBefore =
+						error instanceof PassingJobError ? error.notBefore : undefined;
+					return afterPassingError(row, messageOf(error), now, notBefore);
 				},
 			)
 			.then((end) => {
@@ -293,9 +372,13 @@ export function createEngine({
 					laneOf(kinds, job.kind),
 					job.runAt,
 					job.taskRun ?? null,
+					storedPayload(kinds, job),
+					job.entry ?? null,
 					clock(),
 				).lastInsertRowid,
 			),
+
+		cancelPendingOf: (entry) => cancelOfEntry.run(clock(), UNDONE, entry).changes,
 
 		recover: () => recover(clock()),
 
@@ -354,10 +437,50 @@ type End =
 /** What the operator reads of a job a previous process left running. */
 const INTERRUPTED = "interrupted: the process ended while the job ran";
 
-/** After a passing error: retried after a wait that doubles from {@link FIRST_RETRY}, or failed at the maximum. */
-function afterPassingError(row: JobRow, error: string, now: number): End {
+/**
+ * After a passing error: retried after a wait that doubles from {@link FIRST_RETRY}, or at `notBefore` when that is
+ * later; failed at the maximum of attempts either way.
+ */
+function afterPassingError(row: JobRow, error: string, now: number, notBefore?: number): End {
 	if (row.attempts >= MAX_ATTEMPTS) return { state: "failed", error };
-	return { state: "retry", retryAt: now + FIRST_RETRY * 2 ** (row.attempts - 1), error };
+	const backoff = now + FIRST_RETRY * 2 ** (row.attempts - 1);
+	return { state: "retry", retryAt: Math.max(backoff, notBefore ?? backoff), error };
+}
+
+/** The JSON a new job keeps of its data; a kind without a schema takes none. */
+function storedPayload(kinds: ReadonlyMap<string, JobKind>, job: NewJob): string | null {
+	if (job.payload === undefined) return null;
+	if (!kinds.get(job.kind)?.payload)
+		throw new Error(`the job kind "${job.kind}" declares no schema for its data`);
+	return JSON.stringify(job.payload);
+}
+
+/**
+ * A claimed job's data as its kind's schema gives it back, checked synchronously. Data that does not match, data of
+ * a kind without a schema, or a schema that answers later fails the job for good with {@link INVALID_PAYLOAD}.
+ */
+function payloadOf(kind: JobKind, row: JobRow): unknown {
+	const invalid = () =>
+		new PermanentJobError(`the data of the job does not match the schema of "${row.kind}"`, {
+			code: INVALID_PAYLOAD,
+		});
+	if (!kind.payload) {
+		if (row.payload !== null) throw invalid();
+		return undefined;
+	}
+	let value: unknown;
+	try {
+		value = row.payload === null ? undefined : JSON.parse(row.payload);
+	} catch {
+		throw invalid();
+	}
+	const result = kind.payload["~standard"].validate(value);
+	if (result instanceof Promise) {
+		result.catch(() => {});
+		throw invalid();
+	}
+	if (result.issues) throw invalid();
+	return result.value;
 }
 
 /** The message of a job of a kind nobody declared. */
@@ -378,10 +501,10 @@ function laneOf(kinds: ReadonlyMap<string, JobKind>, kind: string): Lane {
  */
 function messageOf(error: unknown): string {
 	if (!(error instanceof Error)) return "a non-Error value was thrown";
-	if (error instanceof PermanentJobError)
-		return `${error.name}: ${error.message}`.slice(0, MAX_ERROR);
 	const code = errorCode(error);
-	return (code === undefined ? error.name : `${error.name} ${code}`).slice(0, MAX_ERROR);
+	const named = code === undefined ? error.name : `${error.name} ${code}`;
+	if (error instanceof PermanentJobError) return `${named}: ${error.message}`.slice(0, MAX_ERROR);
+	return named.slice(0, MAX_ERROR);
 }
 
 /**
@@ -413,7 +536,12 @@ export function discardUnfinishedJobs(
 export function readJobs(connection: Database.Database): readonly JobSnapshot[] {
 	return connection
 		.prepare<[], JobSnapshot>(
-			`SELECT id, kind, lane, state, attempts, run_at AS runAt, error FROM platform_jobs ORDER BY id`,
+			`SELECT id, kind, lane, state, attempts, run_at AS runAt, error, payload, entry, outcome
+				FROM platform_jobs ORDER BY id`,
 		)
-		.all();
+		.all()
+		.map((job) => ({
+			...job,
+			payload: typeof job.payload === "string" ? JSON.parse(job.payload) : null,
+		}));
 }

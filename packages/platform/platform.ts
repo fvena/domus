@@ -306,6 +306,7 @@ export function openPlatform(
 		operations: [...platformOperations(db, areas), ...taskOperations(background)],
 		references: createReferences(db, view),
 		...(files === undefined ? {} : { openContent: (hash: string) => files.open(hash) }),
+		outbox: background.outbox,
 	});
 	internals.set(platform, {
 		db,

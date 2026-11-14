@@ -46,6 +46,7 @@ import {
 	changeTask,
 	controlledTimer,
 	STOP_MARGIN,
+	enqueueInWrite,
 	enqueueJob,
 	type JobKind,
 	type JobSnapshot,
@@ -213,8 +214,17 @@ export interface TestBackground {
 	stop(): Promise<void>;
 	/** Wakes it now and settles once no job runs. */
 	runDue(): Promise<void>;
-	/** Stores a job of a synthetic kind of {@link TestPlatformOptions.jobs}, due now, and wakes. Returns its id. */
-	enqueue(kind: string): number;
+	/**
+	 * Stores a job of a synthetic kind of {@link TestPlatformOptions.jobs}, due now, with its data if given, and
+	 * wakes. Returns its id.
+	 */
+	enqueue(kind: string, payload?: unknown): number;
+	/**
+	 * Leaves a job of a synthetic kind with its data in the write whose handler is running, as the outbox does: stored
+	 * after that write's entry and with its number, only if the write commits, run once it committed, and cancelled
+	 * by its undo while pending. Called from a module's handler the test wraps; throws outside one.
+	 */
+	enqueueInWrite(kind: string, payload: unknown): void;
 	/**
 	 * Lets every job the test already ended record its end and starts what that frees, without waiting for the
 	 * jobs still held. No real time passes on the platform clock.
@@ -564,7 +574,8 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 			wakeBackground(platform);
 			return backgroundSettled(platform);
 		},
-		enqueue: (kind) => enqueueJob(platform, kind),
+		enqueue: (kind, payload) => enqueueJob(platform, kind, payload),
+		enqueueInWrite: (kind, payload) => enqueueInWrite(platform, kind, payload),
 		// A job's end is a chain of promises: once the macrotask queue turns, every one already ended has run it.
 		flush: () => new Promise((resolve) => setImmediate(resolve)),
 		settled: () => backgroundSettled(platform),

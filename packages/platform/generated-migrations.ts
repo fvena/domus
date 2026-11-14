@@ -130,4 +130,15 @@ export const generatedMigrations: readonly ModuleMigration[] = [
 			"\nCREATE INDEX `platform_prepared_files_content` ON `platform_prepared_files` (`content`);",
 		],
 	},
+	{
+		tag: "0012_orange_unicorn",
+		position: 13,
+		hash: "02df43c645b39a01a1f90441f560cb302158b26734b8c98459ff0a2c20bac14e",
+		statements: [
+			"ALTER TABLE `platform_jobs` ADD `payload` text;",
+			"\nALTER TABLE `platform_jobs` ADD `entry` integer REFERENCES platform_action_log(entry);",
+			"\nALTER TABLE `platform_jobs` ADD `outcome` text;",
+			"\nCREATE INDEX `platform_jobs_entry` ON `platform_jobs` (`entry`);",
+		],
+	},
 ];

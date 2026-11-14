@@ -340,7 +340,10 @@ export const taskRuns = sqliteTable(
 /**
  * A job of the background engine: its kind, its lane, its state and attempts, the instant from which it may run
  * and, when it is a scheduled run, the run it belongs to. Claiming one moves it from `pending` to `running` in one
- * transaction.
+ * transaction. A job of the outbox (ADR 0029) keeps its data in `payload`, JSON its kind's schema checks when it is
+ * claimed, and the log entry of the write that left it in `entry`, whose undo cancels it while pending; both are
+ * null for a scheduled run. `outcome` is what a job that ended well says when "done" is not all, such as a notice
+ * skipped and why.
  */
 export const jobs = sqliteTable(
 	"platform_jobs",
@@ -358,10 +361,14 @@ export const jobs = sqliteTable(
 		startedAt: integer("started_at"),
 		finishedAt: integer("finished_at"),
 		error: text(),
+		payload: text(),
+		entry: integer().references(() => actionLog.entry),
+		outcome: text(),
 	},
 	(table) => [
 		index("platform_jobs_due").on(table.lane, table.state, table.runAt),
 		index("platform_jobs_task_run").on(table.taskRun),
+		index("platform_jobs_entry").on(table.entry),
 		check("platform_jobs_lane", sql`${table.lane} IN ('short', 'maintenance')`),
 		check(
 			"platform_jobs_state",

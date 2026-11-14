@@ -90,12 +90,13 @@ export { controlledTimer, type ControlledTimer } from "../background";
 export type {
 	JobContext,
 	JobKind,
+	JobResult,
 	JobSnapshot,
 	ScheduledTask,
 	TaskRun,
 	TaskState,
 } from "../background";
-export { PermanentJobError } from "../background";
+export { INVALID_PAYLOAD, PassingJobError, PermanentJobError, UNDONE } from "../background";
 export { STOP_MARGIN } from "../background/engine";
 export type { BackupMarks } from "../backups";
 export type { Interleave, InterleavePoint } from "../files";
@@ -192,9 +193,18 @@ export function backgroundSettled(platform: Platform): Promise<void> {
 	return backgroundOf(platform).settled();
 }
 
-/** Stores a job of a synthetic kind, due now, and wakes the background. Returns its id. */
-export function enqueueJob(platform: Platform, kind: string): number {
-	return backgroundOf(platform).enqueue(kind);
+/** Stores a job of a synthetic kind, due now, with its data if given, and wakes the background. Returns its id. */
+export function enqueueJob(platform: Platform, kind: string, payload?: unknown): number {
+	return backgroundOf(platform).enqueue(kind, payload);
+}
+
+/**
+ * Leaves a job of a synthetic kind with its data in the write whose handler is running, as the outbox does (ADR
+ * 0029): stored after that write's entry, in its transaction, and cancelled by its undo while pending. For a test
+ * that wraps a module's handler; throws outside one.
+ */
+export function enqueueInWrite(platform: Platform, kind: string, payload: unknown): void {
+	actionsOf(platform).enqueueInWrite({ kind, payload });
 }
 
 /** Every job of the background, oldest first. Plain data: changing it changes nothing. */
