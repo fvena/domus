@@ -68,7 +68,7 @@ describe("requestProof", () => {
 			operation: { action: "platform.setDelegation", input: change },
 		});
 		// The change keeps this session, so only the credential tells the old password from the new one.
-		await replacePassword(connectionOf(platform), "ana", NEW, Date.now(), session);
+		await replacePassword(connectionOf(platform), "ana", NEW, Date.now(), { keep: session });
 		release();
 
 		await expect(asking).rejects.toMatchObject({

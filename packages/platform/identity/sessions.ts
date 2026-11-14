@@ -110,14 +110,11 @@ export function sessionsOf(
 		}));
 }
 
-/** Each way a session ends (ADR 0029). */
-export type SessionEnd = "sign-out" | "revoke-session" | "revoke-device" | "password" | "restore";
-
 /**
- * Told which sessions ended and why, inside the transaction that ends them when there is one: inside `api`, the
- * live channel writes `purge` on theirs once it commits, never before.
+ * Told which sessions ended, inside the transaction that ends them when there is one: inside `api`, the live
+ * channel writes `purge` on theirs once it commits, never before.
  */
-export type SessionsEnded = (sessions: readonly string[], why: SessionEnd) => void;
+export type SessionsEnded = (sessions: readonly string[]) => void;
 
 /** Which sessions end: one, every one of a device, an account's but `keep`, or every one there is. */
 export type EndingSessions =
@@ -128,13 +125,12 @@ export type EndingSessions =
 
 /**
  * The one path that ends sessions (ADR 0029), inside the caller's transaction: deletes their rows, which takes
- * their subscriptions to notices with them, and tells `ended` which ones and why. Signing out, which Better Auth
- * deletes itself, reaches `ended` through its hook. Returns how many ended.
+ * their subscriptions to notices with them, and tells `ended` which ones. Signing out, which Better Auth deletes
+ * itself, reaches `ended` through its hook. Returns how many ended.
  */
 export function endSessions(
 	connection: Database.Database,
 	which: EndingSessions,
-	why: SessionEnd,
 	ended?: SessionsEnded,
 ): number {
 	const [where, parameters]: [string, (string | null)[]] =
@@ -149,7 +145,7 @@ export function endSessions(
 		.prepare<(string | null)[], string>(`DELETE FROM platform_session ${where} RETURNING id`)
 		.pluck()
 		.all(...parameters);
-	if (sessions.length > 0) ended?.(sessions, why);
+	if (sessions.length > 0) ended?.(sessions);
 	return sessions.length;
 }
 

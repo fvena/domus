@@ -141,7 +141,7 @@ Una suscripción la registra la app desde la sesión que el aparato tiene habili
 
 ### Cuando termina una sesión (Q14, Q21)
 
-- Un solo camino en `identity` para terminar sesiones, con el motivo: cerrar sesión, revocar una sesión, revocar un aparato, cambiar la contraseña y restaurar. Las cinco operaciones lo usan. Cerrar sesión lo alcanza por el hook de borrado de sesión de Better Auth, si la versión instalada lo ofrece, o envolviendo `/sign-out` en la puerta; se decide al implementar, y la prueba lo cubre igual.
+- Un solo camino en `identity` para terminar sesiones: cerrar sesión, revocar una sesión, revocar un aparato, cambiar la contraseña y restaurar. Las cinco operaciones lo usan. Cerrar sesión lo alcanza por el hook de borrado de sesión de Better Auth, si la versión instalada lo ofrece, o envolviendo `/sign-out` en la puerta; se decide al implementar, y la prueba lo cubre igual. No guarda por qué terminó cada sesión: nada lo lee (revisión de código).
 - Dentro de `api`, ese camino escribe `purge` y cierra los canales de las sesiones terminadas, después de confirmar la transacción que las termina, nunca antes.
 - Restaurar trabaja con `api` parado y `pnpm accounts` es otro proceso. Sus cambios los recoge el latido.
 - La regla única de que una sesión vive (`sessionLivesWhere` y `sessionLives`) pasa a exigir también que no haya caducado, con el reloj de la plataforma. Afecta a todos sus usos: comprobantes, archivos preparados, limpieza de preparados, referencias de archivo, canal y entregas. Las pruebas de la 1c y la 1d3 ganan el caso de la sesión caducada con su fila todavía en la base.
