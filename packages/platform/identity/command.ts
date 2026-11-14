@@ -59,7 +59,7 @@ export async function runAccounts(
 			);
 		const password = await askNewPassword(terminal);
 		if (password === undefined) return 1;
-		const ended = await replacePassword(connection, found.id, password, now());
+		const ended = await replacePassword(connection, found.id, password, now);
 		terminal.print(`changed the password of ${email} and ended its ${ended} sessions`);
 		return 0;
 	} catch {

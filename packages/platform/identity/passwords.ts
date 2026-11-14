@@ -64,18 +64,21 @@ export interface ReplacingPassword {
 
 /**
  * Sets a new password and ends the account's sessions, all but `keep` when it is given, in one transaction,
- * telling `ended` which ones. Returns how many sessions ended.
+ * telling `ended` which ones. It reads `clock` inside that transaction, so a session to keep that expired while
+ * the password was hashed changes nothing. Returns how many sessions ended.
  */
 export async function replacePassword(
 	connection: Database.Database,
 	account: string,
 	password: string,
-	now: number,
+	clock: () => number,
 	{ keep, ended }: ReplacingPassword = {},
 ): Promise<number> {
 	const lives = sessionLives(connection);
 	const hash = await hashPassword(password);
 	return connection.transaction(() => {
+		// Read on the platform clock here, after the hash: the session must still live when the change commits.
+		const now = clock();
 		if (keep !== undefined && !lives(account, keep, now)) throw new SessionGoneError();
 		setPasswordHash(connection, account, hash, now);
 		endConfirmationsOf(connection, account);
@@ -84,7 +87,7 @@ export async function replacePassword(
 	})();
 }
 
-/** The session to keep was revoked while the new password was being hashed. */
+/** The session to keep was revoked, or expired, while the new password was being hashed. */
 export class SessionGoneError extends Error {
 	constructor() {
 		super("the session ended while its password was being changed");
