@@ -37,4 +37,6 @@ export {
 	type ModuleDefinition,
 	type ModuleMigration,
 	PLATFORM_ID,
+	type RecordTable,
+	recordTablesOf,
 } from "./module";

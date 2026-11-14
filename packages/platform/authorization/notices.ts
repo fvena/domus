@@ -1,7 +1,10 @@
 // Whether a notice may go to its recipient (ADR 0029, «A quién va un aviso»). Pure, like `decide`: the grant comes
 // from the same view, with the permissions in force when the notice is shared out or delivered, and the record's
 // facts from the platform, gathered then.
-import { type AccessView, grantOf, reaches } from "./index";
+import type { Visibility } from "@domus/module-sdk";
+
+import { type AccessView, grantOf, isPerson, reaches } from "./index";
+import { isVisibleTo } from "./visibility";
 
 /** A record of an area table as a notice finds it: only its area. */
 export interface AreaNoticeRecord {
@@ -11,7 +14,7 @@ export interface AreaNoticeRecord {
 /** A record of an owned table as a notice finds it: its area, its owner and its visibility. */
 export interface OwnedNoticeRecord extends AreaNoticeRecord {
 	readonly owner: string;
-	readonly visibility: string;
+	readonly visibility: Visibility;
 }
 
 /** A record as a notice finds it, of an owned table or of an area table. */
@@ -32,12 +35,11 @@ export function noticeDecision(
 	to: string,
 	record: NoticeRecord | null,
 ): NoticeDecision {
-	const role = view.roleOf(to);
-	if (role !== "admin" && role !== "member") return "not-member";
+	if (!isPerson(view, to)) return "not-member";
 	if (record === null) return "record-gone";
 	if (!reaches(grantOf(view, to, record.area), "read")) return "not-visible";
 	if (!("owner" in record)) return "deliver";
-	return record.owner === to || record.visibility === "public" ? "deliver" : "not-visible";
+	return isVisibleTo(record, to) ? "deliver" : "not-visible";
 }
 
 /**
@@ -45,6 +47,5 @@ export function noticeDecision(
  * that `to` is a person.
  */
 export function testNoticeDecision(view: AccessView, to: string): "deliver" | "not-member" {
-	const role = view.roleOf(to);
-	return role === "admin" || role === "member" ? "deliver" : "not-member";
+	return isPerson(view, to) ? "deliver" : "not-member";
 }

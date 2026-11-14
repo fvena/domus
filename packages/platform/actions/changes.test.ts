@@ -1,5 +1,6 @@
 // What a write remembers of the records it changed (spec of phase 1d4, «Lo que la escritura recuerda»): per record,
 // its area, its first state before the write and its last after it, from the transitions of the capture in order.
+import type { Visibility } from "@domus/module-sdk";
 import { describe, expect, it } from "vitest";
 
 import type { AreaPolicy } from "../authorization";
@@ -22,7 +23,7 @@ const posts: CapturedTable = {
 	area: { id: "chores.board", policy: POLICY },
 };
 
-type Row = readonly [owner: string, visibility: string];
+type Row = readonly [owner: string, visibility: Visibility];
 
 function insert(table: CapturedTable, id: number, [owner, visibility]: Row): CapturedTransition {
 	return {

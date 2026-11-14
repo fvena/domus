@@ -4,9 +4,8 @@
 // is on, so the row a REPLACE deletes is noted too. What it does not cover is rejected: a handler that changes
 // the schema (dropping a trigger or a table among others), turns `recursive_triggers` off or erases rows of the
 // capture. Tables without an owner are not captured: they rely on the records their handlers declare.
-import { type ModuleDefinition, ownedTableOf } from "@domus/module-sdk";
+import { type ModuleDefinition, recordTablesOf, type Visibility } from "@domus/module-sdk";
 import type Database from "better-sqlite3";
-import { getTableName } from "drizzle-orm";
 
 import type { AreaPolicy } from "../authorization";
 import type { RecordChange } from "../authorization/invalidations";
@@ -50,8 +49,9 @@ interface CaptureRow {
 	readonly new_id: number | null;
 	readonly old_owner: string | null;
 	readonly new_owner: string | null;
-	readonly old_visibility: string | null;
-	readonly new_visibility: string | null;
+	// The `CHECK` of every owned table keeps it one of the visibilities.
+	readonly old_visibility: Visibility | null;
+	readonly new_visibility: Visibility | null;
 }
 
 /** Creates the capture table and the triggers of every owned table of `modules`, on `connection`. */
@@ -62,15 +62,10 @@ export function installCapture(
 ): Capture {
 	const tables = new Map<string, CapturedTable>();
 	for (const module of modules)
-		for (const value of Object.values(module.schema)) {
-			const info = ownedTableOf(value);
-			const policy = info && areas.get(info.area);
-			if (!info || !policy) continue;
-			tables.set(getTableName(value as Parameters<typeof getTableName>[0]), {
-				module: module.id,
-				type: info.type,
-				area: { id: info.area, policy },
-			});
+		for (const { kind, name, type, area } of recordTablesOf(module)) {
+			const policy = areas.get(area);
+			if (kind !== "owned" || !policy) continue;
+			tables.set(name, { module: module.id, type, area: { id: area, policy } });
 		}
 
 	connection.pragma("recursive_triggers = ON");
@@ -180,6 +175,7 @@ export function changesOf(transitions: readonly CapturedTransition[]): RecordCha
 	return [...changes.values()];
 }
 
-function quoted(identifier: string): string {
+/** `identifier` as an SQL identifier between double quotes, for a name that comes from a module's code. */
+export function quoted(identifier: string): string {
 	return `"${identifier.replace(/"/g, '""')}"`;
 }

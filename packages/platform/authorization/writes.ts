@@ -2,7 +2,7 @@
 // same rules as visibility on reads: the owner, or anyone with `write` on a public record where its area allows
 // it. Pure, like `decide`: the grant comes from the same view. `editableTo` puts the same rule in a handler's
 // query, for the one case that must know before it writes (ADR 0024).
-import type { OwnedTable } from "@domus/module-sdk";
+import type { OwnedTable, Visibility } from "@domus/module-sdk";
 import { eq, type SQL } from "drizzle-orm";
 
 import { type AccessView, type AreaPolicy, grantOf, reaches } from "./index";
@@ -15,8 +15,8 @@ export interface RowTransition {
 	readonly newId: number | null;
 	readonly oldOwner: string | null;
 	readonly newOwner: string | null;
-	readonly oldVisibility: string | null;
-	readonly newVisibility: string | null;
+	readonly oldVisibility: Visibility | null;
+	readonly newVisibility: Visibility | null;
 }
 
 /**
@@ -56,7 +56,7 @@ export function checkTransition(
 /** Whether `account` may edit or delete a record as it was before the change. */
 function mayChange(
 	owner: string | null,
-	visibility: string | null,
+	visibility: Visibility | null,
 	account: string,
 	area: RecordArea,
 	view: AccessView,
