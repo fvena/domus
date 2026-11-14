@@ -1,4 +1,5 @@
-// Child processes for the tests that need a process to die (spec of phase 1d2, seam 3): a child takes what its
+// Child processes for the tests that need a process to die (spec of phase 1d2, seam 3, and of phase 1d4, seam 3): a
+// child takes what its
 // task says over a data folder, tells the test once it holds it, and waits until the test kills it with SIGKILL.
 // Only for tests: the child runs the TypeScript source through tsx, and nothing of production reaches it.
 import { fork } from "node:child_process";
@@ -58,6 +59,18 @@ export type ChildTask =
 			readonly dataDirectory: string;
 			readonly now: number;
 			readonly at: Extract<InterleavePoint, "claimed" | "removed">;
+	  }
+	/**
+	 * The background at the instant `now`, with the modules of `modules`, stopped once a notice's job committed its
+	 * deliveries and before its end is recorded (`distributed`, ADR 0029): the child tells the test once it got there.
+	 * Each of `modules` is the URL of a file whose default export is a module's definition, since a child cannot
+	 * import a module. A background that settles first is the child's error, and nothing goes to a push service.
+	 */
+	| {
+			readonly hold: "distribute";
+			readonly dataDirectory: string;
+			readonly now: number;
+			readonly modules: readonly string[];
 	  };
 
 /** A module as a child restores with it: its id and its migrations, which travel as JSON. */

@@ -35,10 +35,11 @@ export const FIRST_RETRY = 30 * 1000;
 const MAX_ERROR = 200;
 
 /**
- * What a job's work receives: its cancellation signal, checked between steps, the instant it started and its data,
- * as its kind's schema gave it back (undefined for a kind without one).
+ * What a job's work receives: its id, its cancellation signal, checked between steps, the instant it started and its
+ * data, as its kind's schema gave it back (undefined for a kind without one).
  */
 export interface JobContext {
+	readonly id: number;
 	readonly signal: AbortSignal;
 	readonly startedAt: number;
 	readonly payload: unknown;
@@ -322,7 +323,12 @@ export function createEngine({
 		const done = Promise.resolve()
 			.then(() => {
 				if (!kind) throw new PermanentJobError(undeclared(row.kind));
-				return kind.run({ signal: abort.signal, startedAt, payload: payloadOf(kind, row) });
+				return kind.run({
+					id: row.id,
+					signal: abort.signal,
+					startedAt,
+					payload: payloadOf(kind, row),
+				});
 			})
 			.then(
 				(result): End =>

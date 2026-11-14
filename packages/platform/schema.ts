@@ -548,3 +548,26 @@ export const pushKeys = sqliteTable(
 	},
 	(table) => [check("platform_push_keys_one_row", sql`${table.id} = 1`)],
 );
+
+/**
+ * A delivery of a notice to one subscription: its own job, of kind `delivery`, the notice's job, the subscription's
+ * id, without a foreign key because the subscription may go first, and its deadline, the notice's creation plus
+ * 24 h. A notice has at most one delivery per subscription, so sharing it out again creates no second batch. Both
+ * jobs' rows take it with them when the cleanup deletes them.
+ */
+export const deliveries = sqliteTable(
+	"platform_deliveries",
+	{
+		job: integer()
+			.primaryKey()
+			.references(() => jobs.id, { onDelete: "cascade" }),
+		notice: integer()
+			.notNull()
+			.references(() => jobs.id, { onDelete: "cascade" }),
+		subscription: text().notNull(),
+		deadline: integer().notNull(),
+	},
+	(table) => [
+		uniqueIndex("platform_deliveries_notice_subscription").on(table.notice, table.subscription),
+	],
+);

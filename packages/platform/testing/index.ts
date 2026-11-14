@@ -153,6 +153,10 @@ export interface TestBackgroundRuntime {
 	readonly diskFull?: () => boolean;
 	/** The most events a live channel holds unwritten before it is cut, lower than production's 100. Only here. */
 	readonly channelQueue?: number;
+	/** The hosts of the push services a subscription's endpoint may be of, such as a fake one's. Only here. */
+	readonly pushServices?: readonly string[];
+	/** How the deliveries reach the push service, such as a fake one that keeps each request. Only here. */
+	readonly fetch?: typeof fetch;
 }
 
 /**
@@ -172,6 +176,8 @@ export function createPlatformWithClock(
 		freeSpace,
 		diskFull,
 		channelQueue,
+		pushServices,
+		fetch,
 	}: TestBackgroundRuntime = {},
 ): Platform {
 	return openPlatform(options, {
@@ -185,6 +191,8 @@ export function createPlatformWithClock(
 		...(freeSpace === undefined ? {} : { freeSpace }),
 		...(diskFull === undefined ? {} : { diskFull }),
 		...(channelQueue === undefined ? {} : { channelQueue }),
+		...(pushServices === undefined ? {} : { pushServices }),
+		...(fetch === undefined ? {} : { fetch }),
 	});
 }
 
