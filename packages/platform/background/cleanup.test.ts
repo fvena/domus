@@ -65,6 +65,31 @@ describe("the cleanup", () => {
 		expect(test.all("platform_proofs").map((row) => row["hash"])).toEqual(["used", "current"]);
 	});
 
+	it("removes the mandates that expired and those whose session no longer lives, and keeps the current", async () => {
+		using test = withCleanup();
+		test.connection
+			.prepare("INSERT INTO platform_devices (id, created_at) VALUES ('d1', 0)")
+			.run();
+		const session = test.connection.prepare(
+			`INSERT INTO platform_session (id, user_id, device_id, token, expires_at, created_at, updated_at)
+				VALUES (?, 'ana', 'd1', ?, ?, 0, 0)`,
+		);
+		session.run("lives", "t1", NOW + DAY);
+		session.run("lapsed", "t2", NOW);
+		const mandate = test.connection.prepare(
+			`INSERT INTO platform_mandates (hash, app, account, device, session, device_account, identity, issued_at,
+				expires_at) VALUES (?, 'kira', 'ana', 'd1', ?, 'ana', 'password', 0, ?)`,
+		);
+		mandate.run("current", "lives", NOW + 1);
+		mandate.run("expired", "lives", NOW);
+		mandate.run("session-lapsed", "lapsed", NOW + 1);
+		mandate.run("session-gone", "gone", NOW + 1);
+
+		await test.run();
+
+		expect(test.all("platform_mandates").map((row) => row["hash"])).toEqual(["current"]);
+	});
+
 	it("purges the jobs ended more than 30 days ago and the runs ended more than 90 days ago", async () => {
 		using test = withCleanup();
 		const run = test.connection.prepare(

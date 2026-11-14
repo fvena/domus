@@ -38,6 +38,14 @@ export function mandateHash(id: string): string {
 	return createHash("sha256").update(id).digest("hex");
 }
 
+/**
+ * Deletes every mandate, inside the caller's transaction: restoring does it, after ending every session, which
+ * already left none that resolves.
+ */
+export function endEveryMandate(connection: Database.Database): void {
+	connection.prepare("DELETE FROM platform_mandates").run();
+}
+
 /** The verified context a mandate keeps: that of the session it was born of, and its conversation, if any. */
 export interface MandateOrigin extends SessionOrigin {
 	readonly conversation?: string;

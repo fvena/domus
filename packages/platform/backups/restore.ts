@@ -48,6 +48,8 @@ import {
 	filesFolderOf,
 	syncToDisk,
 } from "../files/store";
+import { revokeEveryKey } from "../identity/keys";
+import { endEveryMandate } from "../identity/mandates";
 import { endSessions } from "../identity/sessions";
 import { takeExclusiveLock } from "../lock";
 import { migrations } from "../migrations";
@@ -380,6 +382,10 @@ function sanitizeCopy(
 			rescheduleTasks(copy, () => now, BACKUP_SCHEDULES);
 			// A session revoked, or a password changed, after the copy must not come back.
 			endSessions(copy, { every: true });
+			// So does a key revoked after the copy (ADR 0030): every key of before ends now, and the admin creates
+			// Kira's again. No mandate resolves once every session ended; their rows go too.
+			revokeEveryKey(copy, now);
+			endEveryMandate(copy);
 			endEveryConfirmation(copy);
 			endEveryProof(copy);
 			// No prepared file serves once every session ended, and the contents left are exactly the needed ones.
