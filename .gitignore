@@ -47,3 +47,7 @@ docker-compose.override.yml
 
 # Claude Code settings for this machine only
 .claude/settings.local.json
+
+# caches that trail and a worktree's install leave in the repository
+graft/
+.pnpm-store/
