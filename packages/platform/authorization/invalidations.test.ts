@@ -1,9 +1,10 @@
 // Who a changed record reaches on the live channel (ADR 0029): the account has `read` in its area now, and saw the
-// record before the write or sees it after. Pure, over the same view as `decide`.
+// record before the write or sees it after; a record of an area table reaches whoever has `read` in its area now.
+// Pure, over the same view as `decide`.
 import { describe, expect, it } from "vitest";
 
 import type { AccessView, AreaPolicy, Grant } from ".";
-import { invalidationReaches, readLost, type RecordChange } from "./invalidations";
+import { invalidationReaches, type OwnedRecordChange, readLost } from "./invalidations";
 
 const AREA: AreaPolicy = {
 	defaultVisibility: "private",
@@ -31,10 +32,10 @@ const anaPrivate = { owner: "ana", visibility: "private" };
 const anaPublic = { owner: "ana", visibility: "public" };
 
 function change(
-	before: RecordChange["before"],
-	after: RecordChange["after"],
+	before: OwnedRecordChange["before"],
+	after: OwnedRecordChange["after"],
 	area = "jot",
-): RecordChange {
+): OwnedRecordChange {
 	return { module: "jot", type: "jot", id: 1, area, before, after };
 }
 
@@ -78,6 +79,23 @@ describe("an invalidation", () => {
 	it("reaches nobody in an area that is not registered, nor an account that does not exist", () => {
 		expect(invalidationReaches(view(), "luis", change(null, anaPublic, "gone"))).toBe(false);
 		expect(invalidationReaches(view(), "nadie", change(null, anaPublic))).toBe(false);
+	});
+});
+
+describe("an invalidation of an area table's record", () => {
+	const label = (area = "jot") => ({ module: "jot", type: "label", id: 1, area });
+
+	it("reaches every account with read in its area, the device account included", () => {
+		expect(invalidationReaches(view(), "ana", label())).toBe(true);
+		expect(invalidationReaches(view(), "luis", label())).toBe(true);
+		expect(invalidationReaches(view(), "screen", label())).toBe(true);
+	});
+
+	it("reaches nobody without read in its area now, nor in an area that is not registered", () => {
+		expect(invalidationReaches(view("none"), "luis", label())).toBe(false);
+		expect(invalidationReaches(view("read"), "luis", label())).toBe(true);
+		expect(invalidationReaches(view(), "luis", label("gone"))).toBe(false);
+		expect(invalidationReaches(view(), "nadie", label())).toBe(false);
 	});
 });
 

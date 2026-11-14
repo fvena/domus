@@ -48,6 +48,7 @@ import { type DatabaseLock, takeSharedLock } from "./lock";
 import { migrations } from "./migrations";
 import { migrate } from "./migrator";
 import { createNotifications, type Notifications, PUSH_SERVICES } from "./notifications";
+import { notificationOperations } from "./notifications/operations";
 
 export interface PlatformOptions {
 	/** An absolute path to the SQLite file, or `":memory:"` for tests. */
@@ -352,7 +353,12 @@ export function openPlatform(
 		retention,
 		confirmations: createConfirmations(db, confirmationTimes),
 		proofs,
-		operations: [...platformOperations(db, areas, events), ...taskOperations(background)],
+		operations: [
+			...platformOperations(db, areas, events),
+			...taskOperations(background),
+			// Called only while a write runs, once the actions exist.
+			...notificationOperations((job) => actions.enqueueInWrite(job)),
+		],
 		references: createReferences(db, view),
 		...(files === undefined ? {} : { openContent: (hash: string) => files.open(hash) }),
 		outbox: background.outbox,

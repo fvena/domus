@@ -107,6 +107,10 @@ Una suscripción la registra la app desde la sesión que el aparato tiene habili
 - La `table` de siempre sigue existiendo y queda desconocida para la plataforma: no invalida y no admite avisos.
 - El tipo de registro es único dentro de un módulo entre sus tablas con dueño y de área; `start` rechaza un tipo repetido.
 - Término nuevo del glosario: **Tabla de área**.
+- Decidido al implementar (07):
+    - `start` rechaza también una tabla de área en un área `alwaysPrivate`: sus registros no tienen dueño para quien ser privados, así que la verían todos los que tienen `read` en ella;
+    - un registro tocado de un tipo de tabla de área tiene que llevar un `id` entero, un número, como su clave: otro `id` (también el texto `"1"`) es un error del manejador, y la escritura se revierte con un fallo interno;
+    - `module-sdk` ofrece `areaTableOf`, como `ownedTableOf`, para que la plataforma lea lo que declara una tabla de área; el error de un tipo repetido es `two tables have the record type "<tipo>"`, entre tablas con dueño y de área.
 
 ### El reparto de invalidaciones (Q1, Q12, Q15)
 
@@ -227,7 +231,13 @@ Una suscripción la registra la app desde la sesión que el aparato tiene habili
     - un endpoint que ya no está en la lista es un fallo definitivo, `PUSH_ENDPOINT_NOT_ALLOWED`, sin enviar; unas claves que `web-push` no puede usar para cifrar (la ruta solo exige textos no vacíos), un fallo definitivo, `PUSH_KEYS_INVALID`;
     - la plataforma recibe los orígenes en `PlatformOptions.origins`, que `apps/api` llena con `DOMUS_ORIGINS`; sin ningún `https`, `PUSH_NOT_CONFIGURED`;
     - `web-push` entra en la 3.6.7, con `@types/web-push`: la 4.0.0 tenía una semana, cambia a ESM y no trae tipos;
-    - mientras la 06 no clasifica las respuestas, cualquiera que no sea 2xx es un fallo pasajero `PushServiceError HTTP_<estado>`.
+- Decidido al implementar (06):
+    - la clasificación es `classifyAnswer` de `notifications/answers.ts`, pura, y `retryAfterInstant` lee `Retry-After`. Un 4xx que la tabla no nombra (405, 422…) es `PUSH_REJECTED`; un estado fuera de 2xx a 5xx, pasajero. `Retry-After` solo se lee en 429 y 503; la fecha HTTP se acepta solo en su forma actual (IMF-fixdate, `Sun, 06 Nov 1994 08:49:37 GMT`), no en las dos obsoletas, y una fecha que no existe es inválida. Un instante más allá del plazo se devuelve tal cual: lo decide la entrega;
+    - un fallo pasajero con estado es `PassingJobError HTTP_<estado>`, con `notBefore` si hay `Retry-After`; un error de red se relanza tal cual y guarda su nombre y su código. El mensaje de los definitivos es `the push service answered <estado>`;
+    - para saber si un reintento caería después del plazo, el motor da en `JobContext.retryAt(notBefore?)` el instante al que reintentaría un fallo pasajero de ese intento (el mayor de la espera creciente y `notBefore`), o nada en el último intento, que un fallo pasajero deja fallido. La entrega termina con `DELIVERY_EXPIRED` si ese instante pasa el plazo;
+    - un tiempo agotado se reintenta siempre (el motor no mira lo que lanza el trabajo cancelado), así que la comprobación antes de cada envío gana un paso: después de la decisión sobre el registro y antes del endpoint, una entrega ya pasada su plazo termina con `DELIVERY_EXPIRED` sin enviar. Cubre también la entrega que la Pi alcanza tarde;
+    - 404 y 410 borran la suscripción por su id: cualquier cambio de una suscripción le da otro id, así que es la misma a la que fue la petición;
+    - el servicio falso ofrece `neverAnswers`, una respuesta que queda pendiente hasta que se aborta la señal de la petición y entonces rechaza con su razón, como `fetch`.
 
 ### Suscripciones (Q3, Q4, Q8)
 
@@ -259,6 +269,10 @@ Una suscripción la registra la app desde la sesión que el aparato tiene habili
 - `platform/authorization`: solo una sesión de la app, sin `via`, de una cuenta de persona; sin nivel de ningún área y sin comprobante.
 - Deja un trabajo `notice` con `{ kind: "test", to: <el actor> }`. Su reparto se salta los pasos 3 y 4 y su entrega no comprueba registro. El destino en la app son los ajustes.
 - Sin suscripción habilitada, el aviso termina `distributed` sin entregas, y la escritura responde bien.
+- Decidido al implementar (09):
+    - la operación se llama `platform.testNotice` en el registro de acciones, no recibe entrada y su resultado es `{ to }`, la cuenta a la que va, siempre quien la pide;
+    - «sin nivel de ningún área» es una marca nueva, `personal`, de la operación y de la petición a `platform/authorization`: `decide` la atiende antes que cualquier nivel y solo deja pasar una cuenta de persona, sin `via` y desde el canal `app`. No pide comprobante; uno que traiga no le corresponde y responde `STEP_UP_REQUIRED`, como en cualquier operación que no es sensible. Pedir un comprobante para ella responde `BAD_REQUEST`;
+    - el reparto y la entrega del aviso de prueba solo comprueban que `to` sea una persona, con `testNoticeDecision(view, to)` de `authorization/notices.ts`, que da `deliver` o `not-member`.
 
 ### Restaurar (Q3, Q14)
 
@@ -283,6 +297,7 @@ Mismo formato que las rutas de archivos: el estado HTTP y, como cuerpo, el JSON 
 - Acciones nuevas: `listLabels` (lectura), `addLabel({ name, notify? })` (deshacible, con inversa `deleteLabel`) y `deleteLabel({ id })` (irreversible).
 - `addNote`, `editNote` y `addLabel` aceptan `notify`, una lista opcional de cuentas; dejan un aviso por cada una sobre el registro que escriben.
 - Las áreas de salud y secretas no envían avisos en `probe`.
+- Decidido al implementar (07): `probe` gana también `scraps`, una `table` sin dueño que no se declara de área y sin acciones; las pruebas la escriben desde un manejador envuelto para comprobar que no invalida ni admite avisos. `deleteLabel`, irreversible, no pide confirmación, como `deleteBoardNote`.
 
 ### La comprobación en la Pi (Q10)
 

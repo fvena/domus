@@ -37,11 +37,25 @@ export interface FakePushService {
 	readonly hosts: string[];
 	/** Every request that reached it, in order. */
 	readonly requests: readonly PushRequest[];
-	/** Answers the next requests with `answer`: `201 Created` until a test says otherwise. */
+	/**
+	 * Answers the next requests with `answer`: `201 Created` until a test says otherwise. Any status, headers such as
+	 * `Retry-After`, a rejection as a network error would be, or {@link neverAnswers}.
+	 */
 	answer(answer: PushAnswer): void;
 	/** The `fetch` the platform's deliveries use. */
 	readonly fetch: typeof fetch;
 }
+
+/**
+ * An answer that never comes: the request stays pending until its signal is aborted, and then rejects with the
+ * signal's reason, as `fetch` does.
+ */
+export const neverAnswers: PushAnswer = ({ signal }) =>
+	new Promise<Response>((_, reject) => {
+		if (!signal) return;
+		if (signal.aborted) reject(signal.reason);
+		signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+	});
 
 /** A fake push service that keeps every request and answers `201 Created`. */
 export function fakePushService(): FakePushService {

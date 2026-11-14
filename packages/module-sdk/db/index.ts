@@ -1,6 +1,6 @@
 // What a module needs to declare its tables (ADR 0021, ADR 0023). Modules never import drizzle-orm: they take it
 // from here. sqliteTable is not offered: every table comes from moduleTables, which puts the module's prefix on
-// it, and an owned table also gets its owner and visibility columns from it.
+// it, an owned table also gets its owner and visibility columns from it, and an area table its integer key.
 import { type BuildExtraConfigColumns, sql } from "drizzle-orm";
 import {
 	type AnySQLiteColumn,
@@ -61,6 +61,24 @@ function ownedColumns() {
 type OwnedColumns = ReturnType<typeof ownedColumns>;
 const RESERVED = ["id", "owner", "visibility"] as const;
 
+/** The column every area table has, added by `areaTable`: the integer key. */
+function areaColumns() {
+	return { id: id() };
+}
+
+type AreaColumns = ReturnType<typeof areaColumns>;
+
+/** What the platform knows of an area table: its record type and its area. */
+export interface AreaTableInfo {
+	/** The name of its records, as a write's touched records give it, such as `label`. Unique in its module. */
+	readonly type: string;
+	/** Its area's full id: whoever has `read` there sees all of it. */
+	readonly area: string;
+}
+
+/** Marks an area table, as {@link OWNED} marks an owned one. */
+const AREA: unique symbol = Symbol.for("domus.areaTable");
+
 /** The table functions of one module: each table it makes is named `<id>_<name>`. */
 export function moduleTables<
 	const TId extends string,
@@ -113,7 +131,39 @@ export function moduleTables<
 		return made as typeof made & { readonly [OWNED]: OwnedTableInfo };
 	}
 
-	return { table, ownedTable };
+	/**
+	 * A table of the household's records in an area (ADR 0029): no owner and no visibility, seen whole by whoever
+	 * has `read` in `area`. It adds the integer `id` key to `columns`, which must not name it; `type` names its
+	 * records. A write declares the records it changes among its touched ones, which then invalidate, and a notice
+	 * may be about them. Its key is always `id` alone, and its area is not `alwaysPrivate`: start rejects either.
+	 */
+	function areaTable<
+		TName extends string,
+		TColumns extends Record<string, SQLiteColumnBuilderBase>,
+	>(
+		name: TName,
+		{ type, area }: { readonly type: string; readonly area: TId | (keyof TAreas & string) },
+		columns: TColumns & { readonly id?: never },
+		extraConfig?: (
+			self: BuildExtraConfigColumns<TName, TColumns & AreaColumns, "sqlite">,
+		) => SQLiteTableExtraConfigValue[],
+	) {
+		if ("id" in columns)
+			throw new Error(
+				`area table "${moduleId}_${name}": "id" is a column every area table already has`,
+			);
+		const made = table(
+			name,
+			{ ...areaColumns(), ...columns } as TColumns & AreaColumns,
+			// The same columns; drizzle types the one it hands over by their final names.
+			(self) => extraConfig?.(self as never) ?? [],
+		);
+		const info: AreaTableInfo = { type, area };
+		Object.defineProperty(made, AREA, { value: info });
+		return made as typeof made & { readonly [AREA]: AreaTableInfo };
+	}
+
+	return { table, ownedTable, areaTable };
 }
 
 /** A table made by `ownedTable`: its `id`, `owner` and `visibility` columns, and its mark. */
@@ -128,6 +178,12 @@ export type OwnedTable = SQLiteTable & {
 export function ownedTableOf(value: unknown): OwnedTableInfo | undefined {
 	if (typeof value !== "object" || value === null || !(OWNED in value)) return undefined;
 	return (value as { readonly [OWNED]: OwnedTableInfo })[OWNED];
+}
+
+/** What an area table declares, or `undefined` for anything else. */
+export function areaTableOf(value: unknown): AreaTableInfo | undefined {
+	if (typeof value !== "object" || value === null || !(AREA in value)) return undefined;
+	return (value as { readonly [AREA]: AreaTableInfo })[AREA];
 }
 
 /**
