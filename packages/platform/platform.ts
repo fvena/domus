@@ -30,6 +30,7 @@ import {
 import { taskOperations } from "./background/operations";
 import { type BackupConfig, createBackups } from "./backups";
 import { refuseWhileRestorePending } from "./backups/restore";
+import { createEvents, type Events } from "./events";
 import {
 	createFiles,
 	createReferences,
@@ -42,6 +43,7 @@ import { accessView, registeredAreas } from "./identity/access";
 import { ensureDeviceAccount } from "./identity/accounts";
 import { platformOperations } from "./identity/operations";
 import type { ProofIssuer } from "./identity/proofs";
+import { sessionLives } from "./identity/sessions";
 import { type DatabaseLock, takeSharedLock } from "./lock";
 import { migrations } from "./migrations";
 import { migrate } from "./migrator";
@@ -133,6 +135,8 @@ export interface PlatformRuntime {
 	 * composes its own.
 	 */
 	readonly pushServices?: readonly string[];
+	/** Only from the testing entry: the most events a live channel holds unwritten, lower than production's. */
+	readonly channelQueue?: number;
 }
 
 const IN_MEMORY = ":memory:";
@@ -153,6 +157,7 @@ const internals = new WeakMap<
 		readonly files: Files | undefined;
 		readonly notifications: Notifications;
 		readonly interleave: Interleave | undefined;
+		readonly events: Events;
 	}
 >();
 
@@ -183,6 +188,7 @@ export function openPlatform(
 		freeSpace,
 		diskFull,
 		pushServices = PUSH_SERVICES,
+		channelQueue,
 	}: PlatformRuntime,
 ): Platform {
 	if (databaseFile !== IN_MEMORY && !isAbsolute(databaseFile)) {
@@ -222,6 +228,7 @@ export function openPlatform(
 	let files: Files | undefined;
 	let background: Background;
 	let notifications: Notifications;
+	let events: Events;
 	try {
 		if (databaseFile !== IN_MEMORY) {
 			const mode = db.pragma("journal_mode = WAL", { simple: true });
@@ -239,6 +246,14 @@ export function openPlatform(
 		view = accessView(db, areas);
 		// The VAPID keys are created the first time the platform opens.
 		notifications = createNotifications({ connection: db, clock, view, pushServices });
+		events = createEvents({
+			connection: db,
+			view,
+			clock,
+			timer,
+			sessionLives: sessionLives(db),
+			...(channelQueue === undefined ? {} : { queueLimit: channelQueue }),
+		});
 		const filesFolder =
 			databaseFile === IN_MEMORY
 				? filesDirectory
@@ -296,6 +311,7 @@ export function openPlatform(
 				throw new Error(
 					"stop the background before closing the platform: a job may still use it",
 				);
+			events.close();
 			files?.close();
 			if (db.open) db.close();
 			lock?.release();
@@ -319,6 +335,7 @@ export function openPlatform(
 		references: createReferences(db, view),
 		...(files === undefined ? {} : { openContent: (hash: string) => files.open(hash) }),
 		outbox: background.outbox,
+		invalidations: events,
 	});
 	internals.set(platform, {
 		db,
@@ -333,6 +350,7 @@ export function openPlatform(
 		files,
 		notifications,
 		interleave,
+		events,
 	});
 	return platform;
 }
@@ -415,4 +433,9 @@ export function notificationsOf(platform: Platform): Notifications {
  */
 export function interleaveOf(platform: Platform): Interleave | undefined {
 	return internalsOf(platform).interleave;
+}
+
+/** The live channels of a platform. Inside platform only: the door serves `GET /api/events`. */
+export function eventsOf(platform: Platform): Events {
+	return internalsOf(platform).events;
 }

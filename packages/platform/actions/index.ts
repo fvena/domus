@@ -49,12 +49,13 @@ import {
 	type VerifiedContext,
 	visibleTo,
 } from "../authorization";
+import type { RecordChange } from "../authorization/invalidations";
 import { checkTransition, editableTo, type RecordArea } from "../authorization/writes";
 import { markedFiles } from "../files/marked";
 import { FilesRefusal, type References, type WriteRun } from "../files/references";
 import type { OpenedContent } from "../files/store";
 import { answeringWith, type ConfirmationCall, type Download, openingDownload } from "./answering";
-import type { Capture, CapturedTransition } from "./capture";
+import { type Capture, type CapturedTransition, changesOf } from "./capture";
 import { type ConfirmationTimes, type Confirmations, type NewPending } from "./confirmations";
 import { conflict, internalError, notUndoable, stepUpRequired } from "./failures";
 import { type PlatformOperation, platformActions } from "./platform-operations";
@@ -216,6 +217,13 @@ export interface ActionsOptions {
 	readonly openContent?: (hash: string) => OpenedContent;
 	/** Where a write's jobs go. */
 	readonly outbox: Outbox;
+	/** Where a write leaves the records it changed, for the live channels once it commits (ADR 0029). */
+	readonly invalidations: Invalidations;
+}
+
+/** Where a write remembers what it changed, in its transaction: shared out only if it commits (ADR 0029). */
+export interface Invalidations {
+	remember(changes: readonly RecordChange[]): void;
 }
 
 export type { ConfirmationCall, ConfirmationTimes, Download, PlatformOperation };
@@ -238,6 +246,7 @@ export function createActions({
 	references,
 	openContent,
 	outbox,
+	invalidations,
 }: ActionsOptions): Actions {
 	const registry = new Map<string, RegisteredAction>();
 	/** The jobs the write whose handler is running leaves, while one runs. */
@@ -852,6 +861,8 @@ export function createActions({
 		// the same transaction.
 		references.linkReleased(run.released, entry);
 		for (const job of jobs) outbox.enqueue({ ...job, entry });
+		// Taken from the capture before it is emptied; an undo runs this same path.
+		invalidations.remember(changesOf(transitions));
 		capture.clear();
 		return { result: outcome.result, entry };
 	}

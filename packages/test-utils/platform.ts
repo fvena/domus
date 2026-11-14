@@ -192,6 +192,11 @@ export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	readonly freeSpace?: () => number;
 	/** Whether the next write of an upload's temporary file fails with `ENOSPC`, asked at each write. Only for tests. */
 	readonly diskFull?: () => boolean;
+	/**
+	 * The most events a live channel holds unwritten before it is cut, so a test reaches the limit without a hundred
+	 * writes. Unset: production's 100.
+	 */
+	readonly channelQueue?: number;
 }
 
 /** The backups of a test platform. */
@@ -466,6 +471,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 	interleave,
 	freeSpace,
 	diskFull,
+	channelQueue,
 }: TestPlatformOptions<TModules>): TestPlatform<TModules> {
 	let tempDir: string | undefined;
 	let databaseFile = file ?? ":memory:";
@@ -527,6 +533,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 				...(interleave === undefined ? {} : { interleave }),
 				...(freeSpace === undefined ? {} : { freeSpace }),
 				...(diskFull === undefined ? {} : { diskFull }),
+				...(channelQueue === undefined ? {} : { channelQueue }),
 			},
 		);
 	} catch (error) {

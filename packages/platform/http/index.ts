@@ -9,12 +9,12 @@
 // one's own annotations, undoing one's own entry). The sensitive ones (changing permissions and delegation,
 // revoking sessions and devices) are writes on that same path, and so are the settings of the scheduled tasks
 // (ADR 0025: listing them, a read; changing a time, pausing, resuming and launching, `manage` writes). A write's idempotency key and a sensitive operation's step-up proof come in headers.
-// Besides oRPC, routes of Hono only with a session: uploading and downloading files (ADR 0028), and the public key
+// Besides oRPC, routes of Hono only with a session: uploading and downloading files (ADR 0028), the live channel, the public key
 // of VAPID and the device's subscription to notices (ADR 0029).
 import type { ModuleDefinition } from "@domus/module-sdk";
 import { implement, ORPCError, os } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 
 import { READ_DELEGATION, READ_LOG } from "../actions";
 import { internalError } from "../actions/failures";
@@ -31,6 +31,7 @@ import {
 	backgroundOf,
 	clockOf,
 	connectionOf,
+	eventsOf,
 	filesOf,
 	interleaveOf,
 	notificationsOf,
@@ -57,6 +58,8 @@ const NOTIFICATIONS_KEY_PATH = "/api/notifications/key";
 
 /** The subscription of the session's device to notices (ADR 0029): put to subscribe, deleted to unsubscribe. */
 const SUBSCRIPTION_PATH = "/api/notifications/subscription";
+/** Where a session opens its live channel (ADR 0029): a route of Hono that streams server-sent events. */
+const EVENTS_PATH = "/api/events";
 
 /** Where RPC procedures live; @domus/api-client calls the same path. */
 const RPC_PREFIX = "/api/rpc";
@@ -329,19 +332,19 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	});
 
 	/**
-	 * A route of Hono only with a session, of files (ADR 0028) or notices (ADR 0029): what `answer` gives, or the
-	 * error of the spec's table as the JSON of ORPCError without the RPC envelope; either way with the cookies that
-	 * reading the session set.
+	 * A route of Hono only with a session, of files (ADR 0028), the live channel or notices (ADR 0029): what `answer`
+	 * gives, or the error of the spec's table as the JSON of ORPCError without the RPC envelope; either way with the
+	 * cookies that reading the session set.
 	 */
 	const sessionRoute =
-		(answer: (verified: VerifiedContext, request: Request) => Promise<Response>) =>
-		async (c: { readonly req: { readonly raw: Request } }): Promise<Response> => {
+		(answer: (verified: VerifiedContext, request: Request, c: Context) => Promise<Response>) =>
+		async (c: Context): Promise<Response> => {
 			const responseHeaders = new Headers();
 			let response: Response;
 			try {
 				const verified = await contextOf(c.req.raw, responseHeaders);
 				if (!verified?.session) throw new ORPCError("UNAUTHORIZED");
-				response = await answer(verified, c.req.raw);
+				response = await answer(verified, c.req.raw, c);
 			} catch (error) {
 				response = errorResponse(error);
 			}
@@ -421,6 +424,12 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 			notifications.unsubscribe(verified);
 			return new Response(null, { status: 204 });
 		}),
+	);
+
+	// The live channel of this session (ADR 0029): an `EventSource` of the app, only with a session that lives.
+	app.get(
+		EVENTS_PATH,
+		sessionRoute(async (verified, _request, c) => eventsOf(platform).open(c, verified)),
 	);
 
 	/**

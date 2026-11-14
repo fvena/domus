@@ -151,6 +151,8 @@ export interface TestBackgroundRuntime {
 	readonly freeSpace?: () => number;
 	/** Whether the next write of an upload's temporary file fails with `ENOSPC`. Only here. */
 	readonly diskFull?: () => boolean;
+	/** The most events a live channel holds unwritten before it is cut, lower than production's 100. Only here. */
+	readonly channelQueue?: number;
 }
 
 /**
@@ -169,6 +171,7 @@ export function createPlatformWithClock(
 		interleave,
 		freeSpace,
 		diskFull,
+		channelQueue,
 	}: TestBackgroundRuntime = {},
 ): Platform {
 	return openPlatform(options, {
@@ -181,6 +184,7 @@ export function createPlatformWithClock(
 		...(interleave === undefined ? {} : { interleave }),
 		...(freeSpace === undefined ? {} : { freeSpace }),
 		...(diskFull === undefined ? {} : { diskFull }),
+		...(channelQueue === undefined ? {} : { channelQueue }),
 	});
 }
 

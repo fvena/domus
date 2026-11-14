@@ -96,6 +96,7 @@ Una suscripción la registra la app desde la sesión que el aparato tiene habili
 ### Lo que la escritura recuerda (Q12, Q13)
 
 - Durante la transacción de una escritura, la plataforma conserva en memoria, por registro capturado, el área de su tabla, el primer «antes» (existía o no, dueño, visibilidad) y el último «después». Los estados intermedios no cuentan. Esto se toma de la captura antes de `capture.clear()` y no cambia lo que la captura comprueba.
+    - Decidido al implementar (02): la lista de cada escritura se guarda en una tabla temporal de la conexión, dentro de la transacción de la escritura, así que un rollback, de la escritura entera o de un savepoint, también la deshace. El reparto lee lo confirmado en orden en cuanto no queda ninguna transacción abierta (una microtarea), y también antes de cada latido y de abrir un canal, para que un latido nunca adelante a una escritura confirmada antes. El reparto a los canales sigue en memoria.
 - Los registros tocados que el manejador declara en una tabla de área entran con su área y sin dueño ni visibilidad.
 - Un tipo de registro de una tabla que no es con dueño ni de área no se recuerda: no invalida a nadie.
 - Al confirmar, la lista pasa al reparto de invalidaciones. Si la transacción se revierte, se descarta sin publicar nada. Deshacer recorre el mismo camino y publica lo suyo.
@@ -117,6 +118,7 @@ Una suscripción la registra la app desde la sesión que el aparato tiene habili
 - Las tablas de la plataforma (confirmaciones, registro de acciones, tareas, sesiones) no invalidan en esta fase.
 - Cambiar el permiso de una cuenta (`permissions/set`) manda, tras confirmar, `reset` a todos sus canales. Si con el cambio pierde `read` en algún área, además se cierra cada canal después del `reset`. Hoy no hay otra operación que cambie el perfil ni los permisos dentro de `api`.
 - La cola de cada canal tiene un tope de 100 eventos pendientes de escribir. Al superarlo, el canal se cierra sin `purge`, y el navegador reconecta. La cola nunca crece por encima del tope.
+    - Decidido al implementar (02): el canal que se corta, por el tope o por el séptimo canal, tira lo que tenía en cola; el latido también ocupa sitio en ella. Cada reparto comprueba además que la sesión de cada canal vive, y si no, le escribe `purge` y lo cierra, sin esperar al latido: una sesión caducada no recibe ni una invalidación más.
 
 ### El canal (Q16, Q20)
 
@@ -128,7 +130,7 @@ Una suscripción la registra la app desde la sesión que el aparato tiene habili
     - `reset`, `{}`;
     - `purge`, `{}`.
 - Sin `id:` de evento ni repetición de lo perdido.
-- Un latido cada 25 s, un comentario SSE, con el reloj y el temporizador de la plataforma. Cada latido comprueba que la sesión vive. Si no, escribe `purge` y cierra.
+- Un latido cada 25 s, un comentario SSE, con el reloj y el temporizador de la plataforma. Cada latido comprueba que la sesión vive. Si no, escribe `purge` y cierra. El comentario es `: heartbeat`.
 - Como mucho 6 canales por sesión. Abrir el séptimo cierra el más antiguo, sin `purge`.
 - Lo que hace la app (fase 2): abrir el canal antes de leer, volver a pedir todo lo que muestra tras cada `ready`, marcar como pendiente la lectura en curso que reciba una invalidación de lo que lee y repetirla al terminar, tirar y volver a pedir con `reset`, y con `purge` borrar lo que tiene y cerrar su `EventSource`.
 
