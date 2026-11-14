@@ -166,6 +166,8 @@ En la 1e no hay turnos de conversación, así que ninguna ruta, comando ni servi
 
 - `.gitleaks.toml` en la raíz extiende la configuración por defecto con una regla para `domus_<id>.<secreto>`. La usan el hook de pre-commit y la CI, que ya leen la configuración de la raíz del repositorio.
 - No hay ninguna llave literal en el repositorio. Las pruebas la construyen en tiempo de ejecución.
+- La regla es `domus-api-key`: `domus_`, 11 caracteres base64url, un punto y 43, sin formar parte de una tira base64url más larga. Así no caza otro prefijo (`xdomus_…`, `domux_…`) ni un secreto de otra longitud, y sí una llave dentro de una línea (`DOMUS_KIRA_KEY="…"`).
+- Su prueba (`tooling/scripts/gitleaks.test.ts`) usa el `gitleaks` del PATH o, si no, la imagen que fija `.githooks/pre-commit`, leída de allí para no repetir la versión. En la CI, el trabajo `unit` usa el Docker del runner. La exige la propia prueba, no un `globalSetup`: solo un archivo la necesita.
 
 ### La comprobación en la Pi (Q20)
 

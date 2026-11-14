@@ -1,6 +1,6 @@
 # 07. La regla de gitleaks
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: —
 
 Spec: [`../spec.md`](../spec.md), sección «Gitleaks». ADR 0030.
@@ -15,8 +15,8 @@ Una llave de Domus que se cuele en un commit la detiene gitleaks, en el hook de 
 
 ## Criterios de aceptación
 
-- [ ] gitleaks encuentra la llave de muestra y no la cadena parecida (otro prefijo, un secreto más corto).
-- [ ] Las reglas por defecto siguen activas: un secreto de otro tipo en la carpeta temporal, construido también en tiempo de ejecución, se encuentra.
-- [ ] Sin gitleaks ni Docker, la prueba falla con el mensaje de instalación.
-- [ ] El escaneo del repositorio entero, en el hook y en la CI, sigue sin encontrar nada.
-- [ ] `pnpm check` pasa.
+- [x] gitleaks encuentra la llave de muestra y no la cadena parecida (otro prefijo, un secreto más corto).
+- [x] Las reglas por defecto siguen activas: un secreto de otro tipo en la carpeta temporal, construido también en tiempo de ejecución, se encuentra.
+- [x] Sin gitleaks ni Docker, la prueba falla con el mensaje de instalación.
+- [x] El escaneo del repositorio entero, en el hook y en la CI, sigue sin encontrar nada.
+- [x] `pnpm check` pasa.
