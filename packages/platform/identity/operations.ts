@@ -12,17 +12,34 @@ import { z } from "zod";
 import { type PlatformOperation, platformOperation as operation } from "../actions";
 import { endConfirmationsOnDevice } from "../actions/confirmations";
 import { endProofsOnDevice } from "../actions/proofs";
-import { type AreaPolicy, reachesSettingsOf, type VerifiedContext } from "../authorization";
+import {
+	type AreaPolicy,
+	grantOf,
+	reachesSettingsOf,
+	type VerifiedContext,
+} from "../authorization";
+import { readLost } from "../authorization/invalidations";
 import { READ_DELEGATION_INPUT, SENSITIVE_INPUTS } from "../contracts";
 import { accessView } from "./access";
 import { setGrant } from "./accounts";
 import { delegationTable, setDelegation } from "./delegation";
-import { sessionLookup } from "./sessions";
+import { endSessions, sessionLookup, type SessionsEnded } from "./sessions";
 
-/** The platform's operations on `connection`, over the registered `areas`. */
+/**
+ * What identity tells the rest of the platform inside the transaction of an operation that ends sessions or
+ * changes an account's permissions: inside `api`, the live channel (ADR 0029).
+ */
+export interface IdentityChanges {
+	readonly sessionsEnded: SessionsEnded;
+	/** The account's permissions changed; `closes` when it lost `read` in an area with the change. */
+	accessChanged(account: string, closes: boolean): void;
+}
+
+/** The platform's operations on `connection`, over the registered `areas`, telling `changes` what they change. */
 export function platformOperations(
 	connection: Database.Database,
 	areas: ReadonlyMap<string, AreaPolicy>,
+	changes: IdentityChanges,
 ): readonly PlatformOperation[] {
 	const sessionById = sessionLookup(connection);
 	const view = accessView(connection, areas);
@@ -79,7 +96,9 @@ export function platformOperations(
 			),
 			subject: ({ account }) => account,
 			run: ({ account, area, level }) => {
+				const before = grantOf(view, account, area);
 				setGrant(connection, account, area, level);
+				changes.accessChanged(account, readLost(before, grantOf(view, account, area)));
 				return { account, area, level };
 			},
 		}),
@@ -106,7 +125,7 @@ export function platformOperations(
 						message: "the current session ends by signing out",
 					});
 				// Its pending confirmations and proofs end with it: their session becomes null.
-				connection.prepare("DELETE FROM platform_session WHERE id = ?").run(session);
+				endSessions(connection, { session }, changes.sessionsEnded);
 				return { session };
 			},
 		}),
@@ -121,9 +140,11 @@ export function platformOperations(
 				const found = deviceSession(input, context);
 				// Every session of that device, whoever's, and what was asked from it; then the device itself, so
 				// its cookie names none and a new sign-in there starts a new one.
-				const ended = connection
-					.prepare("DELETE FROM platform_session WHERE device_id = ?")
-					.run(found.device).changes;
+				const ended = endSessions(
+					connection,
+					{ device: found.device },
+					changes.sessionsEnded,
+				);
 				endProofsOnDevice(connection, found.device);
 				endConfirmationsOnDevice(connection, found.device);
 				connection.prepare("DELETE FROM platform_devices WHERE id = ?").run(found.device);

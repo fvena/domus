@@ -4,7 +4,7 @@
 // each free lane. Maintenance has no actor and no actions; module-sdk offers none of this.
 import type Database from "better-sqlite3";
 
-import type { Clock } from "../actions";
+import type { Clock, Outbox } from "../actions";
 import { CLEANUP_SCHEDULE, type CleanupSweep, cleanupTask } from "./cleanup";
 import { createEngine, type JobKind } from "./engine";
 import {
@@ -75,6 +75,8 @@ export interface BackgroundOptions {
 	readonly sweeps?: readonly CleanupSweep[];
 	/** Tasks a test declares besides the platform's own. Only the testing entry passes them. */
 	readonly extraTasks?: readonly ScheduledTask[];
+	/** The platform's own job kinds besides its tasks', by name, such as the notices' (ADR 0029). */
+	readonly kinds?: Readonly<Record<string, JobKind>>;
 	/** Synthetic job kinds a test declares, by name, to enqueue them itself. Only the testing entry passes them. */
 	readonly extraKinds?: Readonly<Record<string, JobKind>>;
 }
@@ -90,8 +92,13 @@ export interface Background {
 	readonly active: boolean;
 	/** Starts waking: recovers what a previous process left running, records the tasks' rows and runs what is due. Once only. */
 	start(): BackgroundStart;
-	/** Stores a job of `kind`, due now, and wakes. Returns its id. For the synthetic jobs of the testing entry. */
-	enqueue(kind: string): number;
+	/**
+	 * Stores a job of `kind`, due now, with its data if given, and wakes. Returns its id. For the synthetic jobs of the
+	 * testing entry.
+	 */
+	enqueue(kind: string, payload?: unknown): number;
+	/** Where a write leaves its jobs, in its transaction, and its undo cancels them (ADR 0029). */
+	readonly outbox: Outbox;
 	/** Stops waking and claiming, cancels the running jobs and waits until they ended. */
 	stop(): Promise<void>;
 	/** Wakes now, as a due instant would. */
@@ -126,6 +133,7 @@ export function createBackground({
 	backups,
 	sweeps = [],
 	extraTasks = [],
+	kinds: ownKinds = {},
 	extraKinds = {},
 }: BackgroundOptions): Background {
 	// The platform's own tasks first, in their order: the cleanup and, when they are on, the backups'.
@@ -140,7 +148,7 @@ export function createBackground({
 		ids.add(id);
 	}
 	const kinds = new Map<string, JobKind>(tasks.map((task) => [task.id, task.job]));
-	for (const [kind, job] of Object.entries(extraKinds)) {
+	for (const [kind, job] of [...Object.entries(ownKinds), ...Object.entries(extraKinds)]) {
 		if (kinds.has(kind)) throw new Error(`the job kind "${kind}" is declared twice`);
 		kinds.set(kind, job);
 	}
@@ -183,7 +191,7 @@ export function createBackground({
 	}
 
 	/**
-	 * Wakes after a change to a task. Inside an open transaction, such as an action's, it wakes once the
+	 * Wakes after a change to a task or a job left in a write. Inside an open transaction, such as an action's, it wakes once the
 	 * synchronous section that holds it has ended: a job must never start inside a transaction that may still roll
 	 * back, and a wake after a rollback only finds nothing new.
 	 */
@@ -206,10 +214,21 @@ export function createBackground({
 			return { recovered };
 		},
 
-		enqueue(kind) {
-			const id = engine.enqueue({ kind, runAt: clock() });
+		enqueue(kind, payload) {
+			const id = engine.enqueue({ kind, runAt: clock(), payload });
 			wake();
 			return id;
+		},
+
+		outbox: {
+			enqueue(job) {
+				const id = engine.enqueue({ ...job, runAt: clock() });
+				wakeAfterChange();
+				return id;
+			},
+			cancel: (entry) => {
+				engine.cancelPendingOf(entry);
+			},
 		},
 
 		async stop() {
@@ -299,9 +318,13 @@ export {
 } from "./scheduler";
 export {
 	discardUnfinishedJobs,
+	INVALID_PAYLOAD,
 	type JobContext,
 	type JobKind,
+	type JobResult,
 	type JobSnapshot,
+	PassingJobError,
 	PermanentJobError,
 	readJobs,
+	UNDONE,
 } from "./engine";

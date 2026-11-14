@@ -3,7 +3,7 @@
 import { fileRef, readAction, writeAction } from "@domus/module-sdk/contracts";
 import { z } from "zod";
 
-/** The id of a note or of a comment: SQLite gives positive integers. */
+/** The id of a note, a comment or a label: SQLite gives positive integers. */
 const recordId = z.number().int().positive();
 const note = z.object({ id: z.number().int(), body: z.string() });
 /** A note as the reads answer it: with its files, which a download takes from there. */
@@ -12,7 +12,12 @@ const comment = z.object({ id: z.number().int(), noteId: z.number().int(), body:
 /** A record of the always private areas: health and secret. */
 const entry = z.object({ id: z.number().int(), body: z.string() });
 
+/** A label of the household. */
+const label = z.object({ id: z.number().int(), name: z.string() });
+
 const visibility = z.enum(["private", "public"]);
+/** The accounts a write notifies about the record it writes, one notice each (ADR 0029). */
+const notify = z.array(z.string().min(1)).optional();
 
 const NOTE_NOT_FOUND = { message: "There is no note with this id." };
 const BOARD_NOTE_NOT_FOUND = { message: "There is no board note with this id." };
@@ -40,13 +45,16 @@ export const probeContract = {
 	/** Each comment with its note, by note and then comment. */
 	notesWithComments: readAction({ level: "read" }).output(z.array(z.object({ note, comment }))),
 
-	/** Adds a note. Undone by deleting it. */
+	/** Adds a note, notifying the accounts of `notify` about it. Undone by deleting it. */
 	addNote: writeAction({ undoable: true, level: "write" })
-		.input(z.object({ body: z.string().min(1) }))
+		.input(z.object({ body: z.string().min(1), notify }))
 		.output(note),
-	/** Changes the text of a note. Undone by editing it back to the previous text. */
+	/**
+	 * Changes the text of a note, notifying the accounts of `notify` about it. Undone by editing it back to the
+	 * previous text.
+	 */
 	editNote: writeAction({ undoable: true, level: "write" })
-		.input(z.object({ id: recordId, body: z.string().min(1) }))
+		.input(z.object({ id: recordId, body: z.string().min(1), notify }))
 		.output(note)
 		.errors({ NOTE_NOT_FOUND }),
 	/** Deletes a note without comments, releasing its files, and returns it. Undone by restoring it. */
@@ -108,6 +116,18 @@ export const probeContract = {
 		.input(z.object({ visibility }))
 		.output(z.object({ notes: z.number().int() }))
 		.errors({ NO_NOTES: { message: "There are no notes of one's own to configure." } }),
+
+	/** Every label of the household, oldest first. */
+	listLabels: readAction({ level: "read" }).output(z.array(label)),
+	/** Adds a label, notifying the accounts of `notify` about it. Undone by deleting it. */
+	addLabel: writeAction({ undoable: true, level: "write" })
+		.input(z.object({ name: z.string().min(1), notify }))
+		.output(label),
+	/** Deletes a label and returns it. It cannot be undone. */
+	deleteLabel: writeAction({ undoable: false, level: "write" })
+		.input(z.object({ id: recordId }))
+		.output(label)
+		.errors({ LABEL_NOT_FOUND: { message: "There is no label with this id." } }),
 
 	/** Every board note one sees, oldest first: public by default, so everyone's. */
 	listBoard: readAction({ area: "probe.board", level: "read" }).output(z.array(entry)),

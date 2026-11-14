@@ -9,6 +9,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type Database from "better-sqlite3";
 
 import type { VerifiedContext } from "../authorization";
+import { sessionLivesWhere } from "../identity/sessions";
 
 /** How long a proof is good for: five minutes. */
 export const PROOF_LIFETIME = 5 * 60 * 1000;
@@ -53,7 +54,7 @@ interface Row {
 	readonly expires_at: number;
 	readonly state: "issued" | "used" | "ended";
 	readonly entry: number | null;
-	/** 0 when it was bound to a session that is gone. */
+	/** 0 when it was bound to a session that no longer lives: gone, or past its expiry. */
 	readonly live: number;
 }
 
@@ -67,9 +68,9 @@ export function createProofs(connection: Database.Database): Proofs {
 		VALUES (@hash, @account, @session, @originSession, @bound, @device, @fingerprint, @createdAt, @expiresAt,
 			'issued')`,
 	);
-	const byHash = connection.prepare<[string], Row>(
+	const byHash = connection.prepare<[number, string], Row>(
 		`SELECT account, origin_session, device, fingerprint, expires_at, state, entry,
-			(bound = 0 OR session IS NOT NULL) AS live
+			(bound = 0 OR ${sessionLivesWhere("session", "account", "?")}) AS live
 		FROM platform_proofs WHERE hash = ?`,
 	);
 	const markUsed = connection.prepare<[string]>(
@@ -101,7 +102,7 @@ export function createProofs(connection: Database.Database): Proofs {
 		},
 		check: (proof, context, fingerprint, now, entry) => {
 			if (proof === undefined) return undefined;
-			const row = byHash.get(hashOf(proof));
+			const row = byHash.get(now, hashOf(proof));
 			const matches =
 				row !== undefined &&
 				row.live === 1 &&
@@ -122,8 +123,11 @@ export function createProofs(connection: Database.Database): Proofs {
 	};
 }
 
-/** Whether a session with this id exists. */
-export function sessionLives(connection: Database.Database, session: string): boolean {
+/**
+ * Whether a session with this id exists, live or past its expiry: a proof asked from it is bound to it. Whether it
+ * still lives is the one rule of `identity/sessions`.
+ */
+export function sessionExists(connection: Database.Database, session: string): boolean {
 	return (
 		connection.prepare("SELECT 1 FROM platform_session WHERE id = ?").get(session) !== undefined
 	);

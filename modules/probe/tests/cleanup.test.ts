@@ -225,8 +225,8 @@ describe("the cleanup of step-up proofs", () => {
 		test.prepare.account({ id: "paco", role: "admin" });
 		await test.prepare.password("paco", PASSWORD);
 		const phone = test.prepare.session("paco");
-		const laptop = test.prepare.session("paco");
-		const paco = test.context("paco", laptop);
+		// No real session: a prepared one would have expired by the cleanup, and ended its used proof with it.
+		const paco = test.context("paco");
 		const fromPhone = test.context("paco", phone);
 		test.invoke(paco, "probe.addNote", { body: "comprar pan" }, { idempotencyKey: "n1" });
 		const ask = async (context: typeof paco) =>

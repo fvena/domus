@@ -130,4 +130,38 @@ export const generatedMigrations: readonly ModuleMigration[] = [
 			"\nCREATE INDEX `platform_prepared_files_content` ON `platform_prepared_files` (`content`);",
 		],
 	},
+	{
+		tag: "0012_orange_unicorn",
+		position: 13,
+		hash: "02df43c645b39a01a1f90441f560cb302158b26734b8c98459ff0a2c20bac14e",
+		statements: [
+			"ALTER TABLE `platform_jobs` ADD `payload` text;",
+			"\nALTER TABLE `platform_jobs` ADD `entry` integer REFERENCES platform_action_log(entry);",
+			"\nALTER TABLE `platform_jobs` ADD `outcome` text;",
+			"\nCREATE INDEX `platform_jobs_entry` ON `platform_jobs` (`entry`);",
+		],
+	},
+	{
+		tag: "0013_lyrical_gideon",
+		position: 14,
+		hash: "2a8a726f15e517a0c4e48bbc4e29d3acdce235cc003a84705742e7342ceaa24c",
+		statements: [
+			'CREATE TABLE `platform_push_keys` (\n\t`id` integer PRIMARY KEY NOT NULL,\n\t`public_key` text NOT NULL,\n\t`private_key` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\tCONSTRAINT "platform_push_keys_one_row" CHECK("platform_push_keys"."id" = 1)\n);\n',
+			"\nCREATE TABLE `platform_push_subscriptions` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`device` text NOT NULL,\n\t`session` text NOT NULL,\n\t`endpoint` text NOT NULL,\n\t`p256dh` text NOT NULL,\n\t`auth` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\tFOREIGN KEY (`device`) REFERENCES `platform_devices`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`session`) REFERENCES `platform_session`(`id`) ON UPDATE no action ON DELETE cascade\n);\n",
+			"\nCREATE UNIQUE INDEX `platform_push_subscriptions_device_unique` ON `platform_push_subscriptions` (`device`);",
+			"\nCREATE UNIQUE INDEX `platform_push_subscriptions_endpoint_unique` ON `platform_push_subscriptions` (`endpoint`);",
+			"\nCREATE INDEX `platform_push_subscriptions_session` ON `platform_push_subscriptions` (`session`);",
+			"\nALTER TABLE `platform_devices` ADD `entry` text;",
+			"\nALTER TABLE `platform_session` ADD `device_entry` text;",
+		],
+	},
+	{
+		tag: "0014_far_shockwave",
+		position: 15,
+		hash: "ead08457369507da39529472a1b7b1ee27bf58af85ebb34d051138be883b209a",
+		statements: [
+			"CREATE TABLE `platform_deliveries` (\n\t`job` integer PRIMARY KEY NOT NULL,\n\t`notice` integer NOT NULL,\n\t`subscription` text NOT NULL,\n\t`deadline` integer NOT NULL,\n\tFOREIGN KEY (`job`) REFERENCES `platform_jobs`(`id`) ON UPDATE no action ON DELETE cascade,\n\tFOREIGN KEY (`notice`) REFERENCES `platform_jobs`(`id`) ON UPDATE no action ON DELETE cascade\n);\n",
+			"\nCREATE UNIQUE INDEX `platform_deliveries_notice_subscription` ON `platform_deliveries` (`notice`,`subscription`);",
+		],
+	},
 ];

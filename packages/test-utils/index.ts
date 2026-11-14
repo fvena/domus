@@ -14,13 +14,33 @@ export {
 	type PreparedAccount,
 	type SyntheticJob,
 	TEST_ORIGIN,
+	TEST_PUSH_SUBJECT,
 	TEST_START,
 	type TestPlatform,
 	type TestPlatformOptions,
 	type TestPreparation,
 	type WriteOptions,
 } from "./platform";
+export {
+	FAKE_PUSH_HOST,
+	type FakePushService,
+	fakePushService,
+	neverAnswers,
+	type PushAnswer,
+	pushClient,
+	type PushClient,
+	type PushRequest,
+	vapidClaims,
+	type VapidClaims,
+} from "./push";
 export { requireRestic } from "./restic";
+export {
+	type ChannelItem,
+	type EventReader,
+	type OpenChannel,
+	openChannel,
+	readEvents,
+} from "./sse";
 export {
 	type ChildTask,
 	contentPath,

@@ -20,6 +20,8 @@ import {
 	type Grant,
 	hasAccount,
 	hasSession,
+	sessionExpiresAt,
+	type SubscriptionRow,
 	invokeAction,
 	type IssuedProof,
 	type LogEntry,
@@ -35,6 +37,7 @@ import {
 	readDelegationOf,
 	readLog,
 	readPendingConfirmations,
+	readSubscriptions,
 	rejectPending,
 	requestProofOf,
 	sessionOfToken,
@@ -45,6 +48,7 @@ import {
 	changeTask,
 	controlledTimer,
 	STOP_MARGIN,
+	enqueueInWrite,
 	enqueueJob,
 	type JobKind,
 	type JobSnapshot,
@@ -69,6 +73,7 @@ import {
 } from "@domus/platform/testing";
 
 import { createTestBrowser, type TestBrowser } from "./browser";
+import type { FakePushService } from "./push";
 
 type AnyModule = ModuleDefinition;
 
@@ -176,8 +181,9 @@ export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	/**
 	 * Where the platform tells the test it got to a point, and waits until the promise the test returns settles:
 	 * `published`, a publication with its file in place and its rows not yet written; `claimed`, the cleanup with a
-	 * content marked claimed and its file not yet removed; `opened`, a download with its file open and no byte sent.
-	 * A rejected promise fails the work there. Only for tests.
+	 * content marked claimed and its file not yet removed; `opened`, a download with its file open and no byte sent;
+	 * `entering`, a sign-in that wrote its device's new entry and has not created its session yet. A rejected
+	 * promise, or a throw, fails the work there. Only for tests.
 	 */
 	readonly interleave?: (point: InterleavePoint) => Promise<void> | void;
 	/**
@@ -187,6 +193,21 @@ export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	readonly freeSpace?: () => number;
 	/** Whether the next write of an upload's temporary file fails with `ENOSPC`, asked at each write. Only for tests. */
 	readonly diskFull?: () => boolean;
+	/**
+	 * The most events a live channel holds unwritten before it is cut, so a test reaches the limit without a hundred
+	 * writes. Unset: production's 100.
+	 */
+	readonly channelQueue?: number;
+	/**
+	 * The fake push service of the notices: the hosts the platform admits and the `fetch` its deliveries use. Unset:
+	 * production's hosts, and a delivery that would send fails, so no test reaches a real service.
+	 */
+	readonly push?: FakePushService;
+	/**
+	 * The origins the platform is served from, whose first `https` one is the subject of VAPID: {@link TEST_ORIGIN}
+	 * and {@link TEST_PUSH_SUBJECT} unless given.
+	 */
+	readonly origins?: readonly string[];
 }
 
 /** The backups of a test platform. */
@@ -212,8 +233,17 @@ export interface TestBackground {
 	stop(): Promise<void>;
 	/** Wakes it now and settles once no job runs. */
 	runDue(): Promise<void>;
-	/** Stores a job of a synthetic kind of {@link TestPlatformOptions.jobs}, due now, and wakes. Returns its id. */
-	enqueue(kind: string): number;
+	/**
+	 * Stores a job of a synthetic kind of {@link TestPlatformOptions.jobs}, due now, with its data if given, and
+	 * wakes. Returns its id.
+	 */
+	enqueue(kind: string, payload?: unknown): number;
+	/**
+	 * Leaves a job of a synthetic kind with its data in the write whose handler is running, as the outbox does: stored
+	 * after that write's entry and with its number, only if the write commits, run once it committed, and cancelled
+	 * by its undo while pending. Called from a module's handler the test wraps; throws outside one.
+	 */
+	enqueueInWrite(kind: string, payload: unknown): void;
 	/**
 	 * Lets every job the test already ended record its end and starts what that frees, without waiting for the
 	 * jobs still held. No real time passes on the platform clock.
@@ -388,8 +418,24 @@ export interface TestPlatform<
 	 * ends, and so do the pending confirmations and proofs born there.
 	 */
 	revokeDevice(context: VerifiedContext, session: string, options: WriteOptions): WriteOutcome;
+	/**
+	 * Asks for a test notice to oneself through the platform's real operation: an irreversible write with its key,
+	 * of a person by itself, that leaves a notice to who asks about no record.
+	 */
+	testNotice(context: VerifiedContext, options: WriteOptions): WriteOutcome;
 	/** True while the session exists. */
 	hasSession(session: string): boolean;
+	/**
+	 * The instant the session's row says it expires, `undefined` when there is none. A session the browser signed
+	 * in has its expiry from the real time, as Better Auth sets it: the test moves the platform clock to it.
+	 */
+	sessionExpiresAt(session: string): number | undefined;
+	/**
+	 * A read-only snapshot of every subscription to notices, oldest first, each with its device, session and account
+	 * and whether it is enabled: its session lives on the platform clock and is the one its device has enabled. That
+	 * exception is only for tests; the app subscribes through the door.
+	 */
+	subscriptions(): readonly SubscriptionRow[];
 	/**
 	 * Reads the action log through the platform's real operation: the annotations of the represented account's
 	 * own entries, in order, never their input or inverse. Via Kira it needs the platform's read delegated: a
@@ -419,6 +465,15 @@ export const TEST_START = Date.UTC(2026, 0, 1);
 /** The origin the door of a test platform answers on. */
 export const TEST_ORIGIN = "http://domus.test";
 
+/** The `https` origin a test platform signs its VAPID tokens with, besides {@link TEST_ORIGIN}. */
+export const TEST_PUSH_SUBJECT = "https://domus.test";
+
+/** The `fetch` of a test platform without a push service: a delivery that would send fails. */
+const noPushService = (() =>
+	Promise.reject(
+		new Error("this test platform has no push service: give it the option push"),
+	)) as typeof fetch;
+
 /** The cookie of Better Auth that carries a browser's session over plain HTTP. */
 const SESSION_COOKIE = "better-auth.session_token";
 
@@ -441,6 +496,9 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 	interleave,
 	freeSpace,
 	diskFull,
+	channelQueue,
+	push,
+	origins = [TEST_ORIGIN, TEST_PUSH_SUBJECT],
 }: TestPlatformOptions<TModules>): TestPlatform<TModules> {
 	let tempDir: string | undefined;
 	let databaseFile = file ?? ":memory:";
@@ -483,6 +541,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 				retention,
 				confirmation,
 				filesDirectory,
+				origins,
 				...(backups === undefined
 					? {}
 					: {
@@ -502,6 +561,9 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 				...(interleave === undefined ? {} : { interleave }),
 				...(freeSpace === undefined ? {} : { freeSpace }),
 				...(diskFull === undefined ? {} : { diskFull }),
+				...(channelQueue === undefined ? {} : { channelQueue }),
+				...(push === undefined ? {} : { pushServices: push.hosts }),
+				fetch: push?.fetch ?? noPushService,
 			},
 		);
 	} catch (error) {
@@ -558,7 +620,8 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 			wakeBackground(platform);
 			return backgroundSettled(platform);
 		},
-		enqueue: (kind) => enqueueJob(platform, kind),
+		enqueue: (kind, payload) => enqueueJob(platform, kind, payload),
+		enqueueInWrite: (kind, payload) => enqueueInWrite(platform, kind, payload),
 		// A job's end is a chain of promises: once the macrotask queue turns, every one already ended has run it.
 		flush: () => new Promise((resolve) => setImmediate(resolve)),
 		settled: () => backgroundSettled(platform),
@@ -644,7 +707,10 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 			operate(context, "revokeSession", { session }, options),
 		revokeDevice: (context, session, options) =>
 			operate(context, "revokeDevice", { session }, options),
+		testNotice: (context, options) => operate(context, "testNotice", undefined, options),
 		hasSession: (session) => hasSession(platform, session),
+		sessionExpiresAt: (session) => sessionExpiresAt(platform, session),
+		subscriptions: () => readSubscriptions(platform),
 		readLog: (context) =>
 			invokeAction(platform, {
 				context,

@@ -10,6 +10,7 @@ import {
 	type Delegated,
 	type Grant,
 	isAllowed,
+	maySubscribe,
 	mayUpload,
 	type PermissionLevel,
 	type Role,
@@ -498,5 +499,62 @@ describe("who may upload a file", () => {
 		expect([uploads("ana"), uploads("paco"), uploads("kitchen")]).toEqual([true, true, false]);
 		expect(uploads("ana", "kira")).toBe(false);
 		expect(uploads("nobody")).toBe(false);
+	});
+});
+
+describe("who may subscribe to notices", () => {
+	const view = viewOf({ ana: "member", paco: "admin", kitchen: "device" });
+
+	it("is a person by itself, never the device account, Kira on a person's behalf nor an account without a role", () => {
+		const subscribes = (account: string, via?: string) =>
+			maySubscribe(view, request(account, "notes", "read", via).context);
+
+		expect([subscribes("ana"), subscribes("paco"), subscribes("kitchen")]).toEqual([
+			true,
+			true,
+			false,
+		]);
+		expect(subscribes("ana", "kira")).toBe(false);
+		expect(subscribes("nobody")).toBe(false);
+	});
+});
+
+describe("decide on a person's own operation, with no level of any area", () => {
+	const view = viewOf(
+		{ ana: "member", paco: "admin", kitchen: "device" },
+		{ "ana/platform": "none" },
+		{ "ana/platform/write": "yes" },
+	);
+	const platformView: AccessView = {
+		...view,
+		area: (id) => (id === "platform" ? policy({}) : AREAS[id]),
+	};
+	const personal = (
+		account: string,
+		options: { via?: string; proof?: "valid" | "invalid"; channel?: "contexto" } = {},
+	): AuthorizationRequest => {
+		const base = request(account, "platform", "write", options.via);
+		return {
+			...base,
+			context: sealContext({ ...base.context, channel: options.channel ?? "app" }),
+			personal: true,
+			...(options.proof === undefined ? {} : { proof: options.proof }),
+		};
+	};
+
+	it("allows a person by itself from the app, whatever its level in the platform's area", () => {
+		expect(decide(personal("ana"), platformView)).toBe("allow");
+		expect(decide(personal("paco"), platformView)).toBe("allow");
+	});
+
+	it("denies the device account, an account without a role, Kira and the channel in context", () => {
+		expect(decide(personal("kitchen"), platformView)).toBe("deny");
+		expect(decide(personal("nobody"), platformView)).toBe("deny");
+		expect(decide(personal("ana", { via: "kira" }), platformView)).toBe("deny");
+		expect(decide(personal("ana", { channel: "contexto" }), platformView)).toBe("deny");
+	});
+
+	it("asks for no proof, and one it brings does not match it", () => {
+		expect(decide(personal("ana", { proof: "valid" }), platformView)).toBe("step-up");
 	});
 });

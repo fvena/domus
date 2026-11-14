@@ -4,11 +4,11 @@
 // is on, so the row a REPLACE deletes is noted too. What it does not cover is rejected: a handler that changes
 // the schema (dropping a trigger or a table among others), turns `recursive_triggers` off or erases rows of the
 // capture. Tables without an owner are not captured: they rely on the records their handlers declare.
-import { type ModuleDefinition, ownedTableOf } from "@domus/module-sdk";
+import { type ModuleDefinition, recordTablesOf, type Visibility } from "@domus/module-sdk";
 import type Database from "better-sqlite3";
-import { getTableName } from "drizzle-orm";
 
 import type { AreaPolicy } from "../authorization";
+import type { OwnedRecordChange, RecordChange } from "../authorization/invalidations";
 import type { RecordArea, RowTransition } from "../authorization/writes";
 
 /** An owned table as the capture knows it: its module, its record type and its area. */
@@ -49,8 +49,9 @@ interface CaptureRow {
 	readonly new_id: number | null;
 	readonly old_owner: string | null;
 	readonly new_owner: string | null;
-	readonly old_visibility: string | null;
-	readonly new_visibility: string | null;
+	// The `CHECK` of every owned table keeps it one of the visibilities.
+	readonly old_visibility: Visibility | null;
+	readonly new_visibility: Visibility | null;
 }
 
 /** Creates the capture table and the triggers of every owned table of `modules`, on `connection`. */
@@ -61,15 +62,10 @@ export function installCapture(
 ): Capture {
 	const tables = new Map<string, CapturedTable>();
 	for (const module of modules)
-		for (const value of Object.values(module.schema)) {
-			const info = ownedTableOf(value);
-			const policy = info && areas.get(info.area);
-			if (!info || !policy) continue;
-			tables.set(getTableName(value as Parameters<typeof getTableName>[0]), {
-				module: module.id,
-				type: info.type,
-				area: { id: info.area, policy },
-			});
+		for (const { kind, name, type, area } of recordTablesOf(module)) {
+			const policy = areas.get(area);
+			if (kind !== "owned" || !policy) continue;
+			tables.set(name, { module: module.id, type, area: { id: area, policy } });
 		}
 
 	connection.pragma("recursive_triggers = ON");
@@ -139,6 +135,55 @@ export function installCapture(
 	};
 }
 
-function quoted(identifier: string): string {
+/**
+ * What a write remembers of the records it changed (ADR 0029): per record, in the order first seen, its area, its
+ * first state before the write and its last after it. The states in between never count, so a note made public
+ * and private again in one write was never public. `files` are the records whose files the write changed (ADR
+ * 0028), with their state then: each one the capture did not see follows, once, as it was.
+ */
+export function changesOf(
+	transitions: readonly CapturedTransition[],
+	files: readonly OwnedRecordChange[] = [],
+): RecordChange[] {
+	const changes = new Map<string, RecordChange>();
+	for (const transition of transitions) {
+		const { table, operation } = transition;
+		const id = operation === "insert" ? transition.newId : transition.oldId;
+		if (id === null) continue;
+		const after =
+			operation === "delete"
+				? null
+				: { owner: transition.newOwner, visibility: transition.newVisibility };
+		const key = JSON.stringify([table.module, table.type, id]);
+		const first = changes.get(key);
+		changes.set(
+			key,
+			first === undefined
+				? {
+						module: table.module,
+						type: table.type,
+						id,
+						area: table.area.id,
+						before:
+							operation === "insert"
+								? null
+								: {
+										owner: transition.oldOwner,
+										visibility: transition.oldVisibility,
+									},
+						after,
+					}
+				: { ...first, after },
+		);
+	}
+	for (const change of files) {
+		const key = JSON.stringify([change.module, change.type, change.id]);
+		if (!changes.has(key)) changes.set(key, change);
+	}
+	return [...changes.values()];
+}
+
+/** `identifier` as an SQL identifier between double quotes, for a name that comes from a module's code. */
+export function quoted(identifier: string): string {
 	return `"${identifier.replace(/"/g, '""')}"`;
 }

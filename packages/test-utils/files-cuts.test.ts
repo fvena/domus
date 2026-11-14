@@ -96,10 +96,12 @@ async function cleanOn(test: ReturnType<typeof openOver>, day: number): Promise<
 async function cutWhilePublishing(dataDirectory: string): Promise<void> {
 	const before = await household(dataDirectory);
 	const { session } = before.prepare.session("ana");
+	const now = before.clock.now();
 	before.close();
 	const child = await startChild({
 		hold: "publish",
 		dataDirectory,
+		now,
 		account: "ana",
 		session,
 		content: Buffer.from(JPEG).toString("base64"),

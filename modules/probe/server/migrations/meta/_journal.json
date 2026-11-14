@@ -15,6 +15,13 @@
       "when": 1794486653054,
       "tag": "0001_broad_namor",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794668284833,
+      "tag": "0002_yellow_zodiak",
+      "breakpoints": true
     }
   ]
 }

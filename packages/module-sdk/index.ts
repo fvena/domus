@@ -16,11 +16,19 @@ export type {
 	ModuleFiles,
 	ModuleSchema,
 	NewOwnership,
+	Notice,
 	RecordOf,
 	TouchedRecord,
 	WriteOutcome,
 } from "./actions";
-export { type OwnedTable, type OwnedTableInfo, ownedTableOf, type Visibility } from "./db";
+export {
+	type AreaTableInfo,
+	areaTableOf,
+	type OwnedTable,
+	type OwnedTableInfo,
+	ownedTableOf,
+	type Visibility,
+} from "./db";
 export {
 	type AreaDefinition,
 	areaIds,
@@ -29,4 +37,6 @@ export {
 	type ModuleDefinition,
 	type ModuleMigration,
 	PLATFORM_ID,
+	type RecordTable,
+	recordTablesOf,
 } from "./module";

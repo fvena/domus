@@ -52,6 +52,10 @@ _Evitar_: contexto de usuario, identidad declarada.
 Una tabla de un módulo cuyos registros son de una cuenta: cada uno guarda su dueño y su visibilidad, y su clave es solo el `id` entero. Pertenece a un área, de la que toma la visibilidad por defecto.
 _Evitar_: tabla privada, tabla protegida.
 
+**Tabla de área** (`area table`):
+Una tabla de un módulo sin dueño cuyos registros son de la casa: los ve quien tiene permiso de ver su área, sin visibilidad por registro. Lo declara al crearse; una tabla sin dueño que no lo declara no avisa a nadie de sus cambios.
+_Evitar_: tabla pública, tabla compartida.
+
 **Visibilidad** (`visibility`):
 Si un registro con dueño lo ve solo su dueño (privado) o toda la casa (público). Ser público deja verlo, no editarlo.
 _Evitar_: compartido, nivel de acceso.
@@ -151,6 +155,14 @@ _Evitar_: evento de datos, sincronización.
 **Aviso** (`notification`):
 Un mensaje al móvil de una persona, a la aplicación instalada, con un texto genérico en la pantalla bloqueada. Nunca va a un aparato con la cuenta `device`.
 _Evitar_: notificación, alerta.
+
+**Suscripción** (`push subscription`):
+El vínculo de un aparato y una de sus sesiones con el servicio de avisos de su navegador. Cada aparato tiene como mucho una habilitada; deja de estarlo cuando entra otra sesión en el aparato o termina la suya, y no vuelve a habilitarse sola. Nunca recibe avisos de la cuenta `device`.
+_Evitar_: registro de push, token.
+
+**Entrega** (`delivery`):
+El envío de un aviso a una suscripción concreta, con su resultado y sus reintentos.
+_Evitar_: envío (a secas), push.
 
 **Archivo** (`file`):
 Lo que una persona ve colgado de un registro de un módulo, como una foto o un PDF: un contenido de archivo con el nombre que le dio quien lo subió. Se ve solo si ese registro se ve y no tiene permisos propios. Un registro puede tener varios.

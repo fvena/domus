@@ -30,6 +30,7 @@ import {
 import { taskOperations } from "./background/operations";
 import { type BackupConfig, createBackups } from "./backups";
 import { refuseWhileRestorePending } from "./backups/restore";
+import { createEvents, type Events } from "./events";
 import {
 	createFiles,
 	createReferences,
@@ -42,9 +43,12 @@ import { accessView, registeredAreas } from "./identity/access";
 import { ensureDeviceAccount } from "./identity/accounts";
 import { platformOperations } from "./identity/operations";
 import type { ProofIssuer } from "./identity/proofs";
+import { sessionLives } from "./identity/sessions";
 import { type DatabaseLock, takeSharedLock } from "./lock";
 import { migrations } from "./migrations";
 import { migrate } from "./migrator";
+import { createNotifications, type Notifications, PUSH_SERVICES } from "./notifications";
+import { notificationOperations } from "./notifications/operations";
 
 export interface PlatformOptions {
 	/** An absolute path to the SQLite file, or `":memory:"` for tests. */
@@ -73,6 +77,11 @@ export interface PlatformOptions {
 	 * Unset, `files` in the folder of the database; in memory there is none, and an upload fails.
 	 */
 	readonly filesDirectory?: string;
+	/**
+	 * The origins the app is served from (`DOMUS_ORIGINS`), whose first `https` one is the subject of VAPID (ADR
+	 * 0029). Without one, no notice goes out: each delivery fails with `PUSH_NOT_CONFIGURED`.
+	 */
+	readonly origins?: readonly string[];
 }
 
 /** The retention of the action log's content unless one is given: 30 days. */
@@ -127,6 +136,15 @@ export interface PlatformRuntime {
 	readonly freeSpace?: FreeSpace;
 	/** Only from the testing entry: whether the next write of an upload's temporary file fails with `ENOSPC`. */
 	readonly diskFull?: () => boolean;
+	/**
+	 * The hosts of the push services a subscription's endpoint may be of: {@link PUSH_SERVICES} unless a test
+	 * composes its own.
+	 */
+	readonly pushServices?: readonly string[];
+	/** Only from the testing entry: the most events a live channel holds unwritten, lower than production's. */
+	readonly channelQueue?: number;
+	/** Only from the testing entry: how the deliveries reach the push service, the global `fetch` unless given. */
+	readonly fetch?: typeof fetch;
 }
 
 const IN_MEMORY = ":memory:";
@@ -145,6 +163,9 @@ const internals = new WeakMap<
 		readonly proofs: Proofs;
 		readonly background: Background;
 		readonly files: Files | undefined;
+		readonly notifications: Notifications;
+		readonly interleave: Interleave | undefined;
+		readonly events: Events;
 	}
 >();
 
@@ -162,6 +183,7 @@ export function openPlatform(
 		confirmation = {},
 		backups: backupConfig,
 		filesDirectory,
+		origins = [],
 	}: PlatformOptions,
 	{
 		clock,
@@ -174,6 +196,9 @@ export function openPlatform(
 		interleave,
 		freeSpace,
 		diskFull,
+		pushServices = PUSH_SERVICES,
+		channelQueue,
+		fetch = globalThis.fetch,
 	}: PlatformRuntime,
 ): Platform {
 	if (databaseFile !== IN_MEMORY && !isAbsolute(databaseFile)) {
@@ -212,6 +237,8 @@ export function openPlatform(
 	let view: AccessView;
 	let files: Files | undefined;
 	let background: Background;
+	let notifications: Notifications;
+	let events: Events;
 	try {
 		if (databaseFile !== IN_MEMORY) {
 			const mode = db.pragma("journal_mode = WAL", { simple: true });
@@ -227,6 +254,27 @@ export function openPlatform(
 		// After the migrations, which its triggers would stop from dropping a column, and before any action.
 		capture = installCapture(db, modules, areas);
 		view = accessView(db, areas);
+		// The VAPID keys are created the first time the platform opens.
+		notifications = createNotifications({
+			connection: db,
+			clock,
+			view,
+			pushServices,
+			modules,
+			origins,
+			fetch,
+			// The background exists before any job runs, and a notice's job is what enqueues.
+			enqueue: (job) => background.outbox.enqueue(job),
+			...(interleave === undefined ? {} : { interleave }),
+		});
+		events = createEvents({
+			connection: db,
+			view,
+			clock,
+			timer,
+			sessionLives: sessionLives(db),
+			...(channelQueue === undefined ? {} : { queueLimit: channelQueue }),
+		});
 		const filesFolder =
 			databaseFile === IN_MEMORY
 				? filesDirectory
@@ -265,6 +313,7 @@ export function openPlatform(
 							...(node === undefined ? {} : { node }),
 						}),
 					}),
+			kinds: notifications.jobs,
 			...(tasks === undefined ? {} : { extraTasks: tasks }),
 			...(jobs === undefined ? {} : { extraKinds: jobs }),
 		});
@@ -284,6 +333,7 @@ export function openPlatform(
 				throw new Error(
 					"stop the background before closing the platform: a job may still use it",
 				);
+			events.close();
 			files?.close();
 			if (db.open) db.close();
 			lock?.release();
@@ -303,9 +353,16 @@ export function openPlatform(
 		retention,
 		confirmations: createConfirmations(db, confirmationTimes),
 		proofs,
-		operations: [...platformOperations(db, areas), ...taskOperations(background)],
+		operations: [
+			...platformOperations(db, areas, events),
+			...taskOperations(background),
+			// Called only while a write runs, once the actions exist.
+			...notificationOperations((job) => actions.enqueueInWrite(job)),
+		],
 		references: createReferences(db, view),
 		...(files === undefined ? {} : { openContent: (hash: string) => files.open(hash) }),
+		outbox: background.outbox,
+		invalidations: events,
 	});
 	internals.set(platform, {
 		db,
@@ -318,6 +375,9 @@ export function openPlatform(
 		proofs,
 		background,
 		files,
+		notifications,
+		interleave,
+		events,
 	});
 	return platform;
 }
@@ -387,4 +447,22 @@ export function clockOf(platform: Platform): Clock {
 /** The files of a platform, when it has a folder for them. Inside platform only: the door serves their routes. */
 export function filesOf(platform: Platform): Files | undefined {
 	return internalsOf(platform).files;
+}
+
+/** The subscriptions and keys of a platform's notices. Inside platform only: the door serves their routes. */
+export function notificationsOf(platform: Platform): Notifications {
+	return internalsOf(platform).notifications;
+}
+
+/**
+ * Where the platform tells a test it got to a point, when the testing entry gave one. Inside platform only: the door
+ * hands it to signing in, for `entering`.
+ */
+export function interleaveOf(platform: Platform): Interleave | undefined {
+	return internalsOf(platform).interleave;
+}
+
+/** The live channels of a platform. Inside platform only: the door serves `GET /api/events`. */
+export function eventsOf(platform: Platform): Events {
+	return internalsOf(platform).events;
 }

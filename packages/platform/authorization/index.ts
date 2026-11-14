@@ -66,6 +66,11 @@ export interface AuthorizationRequest {
 	 */
 	readonly sensitive?: SensitiveOperation;
 	/**
+	 * An operation of the platform a person asks for themselves, with no level of any area, such as the test notice
+	 * (ADR 0029): only a person's account, from the app and by itself. It needs no proof.
+	 */
+	readonly personal?: true;
+	/**
 	 * The step-up proof the request brings, as the path of the actions found it: `valid` when it was issued for
 	 * this account, session, device and exact operation and is still usable; `invalid` otherwise. Absent when
 	 * it brings none. The proof itself never reaches here.
@@ -177,6 +182,11 @@ export function delegationOf(
 /** The decision, in the order of ADR 0023. Pure: everything it reads comes in `request` and `view`. */
 export function decide(request: AuthorizationRequest, view: AccessView): Decision {
 	const { context, permission, subject, sensitive } = request;
+	// A person's own operation asks for no level: who asks is all that counts. A proof does not match it.
+	if (request.personal === true) {
+		if (context.channel !== "app" || !personByItself(view, context)) return "deny";
+		return request.proof === undefined ? "allow" : "step-up";
+	}
 	// Permissions: only the admin, on another account. An account's own settings: only that account, or the
 	// admin for the device account.
 	if (sensitive === "permissions") {
@@ -255,7 +265,25 @@ export function decisionOf(authorizer: Authorizer, request: AuthorizationRequest
  * its key (phase 1e).
  */
 export function mayUpload(view: AccessView, context: VerifiedContext): boolean {
-	if (context.via !== undefined) return false;
-	const role = view.roleOf(context.account);
+	return personByItself(view, context);
+}
+
+/**
+ * Whether the context may subscribe its device to notices (ADR 0029, «La suscripción no es una acción»): a person's
+ * account, by itself. Never the device account, which is shared and has nobody to tell, nor Kira, nor an account
+ * without a role.
+ */
+export function maySubscribe(view: AccessView, context: VerifiedContext): boolean {
+	return personByItself(view, context);
+}
+
+/** A person's account, admin or member, asking by itself: no via. */
+function personByItself(view: AccessView, context: VerifiedContext): boolean {
+	return context.via === undefined && isPerson(view, context.account);
+}
+
+/** Whether `account` is a person's: admin or member, never the device account nor one without a role. */
+export function isPerson(view: AccessView, account: string): boolean {
+	const role = view.roleOf(account);
 	return role === "admin" || role === "member";
 }

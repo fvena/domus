@@ -66,3 +66,5 @@ En un aparato con la cuenta `device`, leer la salud de un miembro reconocido pid
 **Migraciones de la plataforma.** Desde `platform/0002` se generan con `drizzle-kit`, a partir de un esquema que declara también las tablas de `0000` y `0001`. Una base generada representa esas dos tablas. Su SQL solo sirve para comparar y nunca se ejecuta, y la posición en que se aplica cada migración va separada del nombre generado. `0000` y `0001` siguen escritas a mano, con su hash y su posición intactos. `audit` sigue con sentencias preparadas.
 
 Fecha: 2026-11-12. Preguntas del grilling: Q1–Q32 de la fase 1c.
+
+Precisado por el ADR 0029: una sesión caducada ha terminado aunque su fila siga ahí, en toda la plataforma; las cinco formas de terminar una sesión pasan por un solo camino; y el aparato anota qué sesión suya recibe avisos, que cambia cada vez que entra otra y nunca vuelve a una anterior.

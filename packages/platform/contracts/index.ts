@@ -275,6 +275,14 @@ export const launchTaskContract = oc
 	.output(writeOutcome(scheduledTask.extend({ run: z.number().int() })));
 
 /**
+ * Asking for a test notice to oneself (ADR 0029, «El aviso de prueba»): an irreversible write with its key, only
+ * from a person's session of the app, by itself, with no level of any area and no proof; the device account and
+ * Kira answer `FORBIDDEN`. Its result names who it goes to: always who asks. Without an enabled subscription it
+ * reaches nobody, and still answers well.
+ */
+export const testNoticeContract = oc.output(writeOutcome(z.object({ to: z.string() })));
+
+/**
  * The platform's operations. Each sensitive one (permissions, delegation, revoking sessions and devices) is a
  * write: it takes its idempotency key and its step-up proof in headers, and answers `STEP_UP_REQUIRED` (403)
  * without a proof that matches it.
@@ -289,6 +297,7 @@ export const platformContract = {
 	delegation: { read: readDelegationContract, set: setDelegationContract },
 	devices: { revoke: revokeDeviceContract },
 	log: { read: readLogContract, undo: undoContract },
+	notifications: { test: testNoticeContract },
 	tasks: {
 		list: listTasksContract,
 		setTime: setTaskTimeContract,

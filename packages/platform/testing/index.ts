@@ -57,6 +57,7 @@ import {
 	requestProof,
 	WrongPasswordError,
 } from "../identity/proofs";
+import { sessionEnabledWhere, sessionLivesWhere } from "../identity/sessions";
 import {
 	actionLogOf,
 	actionsOf,
@@ -90,12 +91,13 @@ export { controlledTimer, type ControlledTimer } from "../background";
 export type {
 	JobContext,
 	JobKind,
+	JobResult,
 	JobSnapshot,
 	ScheduledTask,
 	TaskRun,
 	TaskState,
 } from "../background";
-export { PermanentJobError } from "../background";
+export { INVALID_PAYLOAD, PassingJobError, PermanentJobError, UNDONE } from "../background";
 export { STOP_MARGIN } from "../background/engine";
 export type { BackupMarks } from "../backups";
 export type { Interleave, InterleavePoint } from "../files";
@@ -149,6 +151,12 @@ export interface TestBackgroundRuntime {
 	readonly freeSpace?: () => number;
 	/** Whether the next write of an upload's temporary file fails with `ENOSPC`. Only here. */
 	readonly diskFull?: () => boolean;
+	/** The most events a live channel holds unwritten before it is cut, lower than production's 100. Only here. */
+	readonly channelQueue?: number;
+	/** The hosts of the push services a subscription's endpoint may be of, such as a fake one's. Only here. */
+	readonly pushServices?: readonly string[];
+	/** How the deliveries reach the push service, such as a fake one that keeps each request. Only here. */
+	readonly fetch?: typeof fetch;
 }
 
 /**
@@ -167,6 +175,9 @@ export function createPlatformWithClock(
 		interleave,
 		freeSpace,
 		diskFull,
+		channelQueue,
+		pushServices,
+		fetch,
 	}: TestBackgroundRuntime = {},
 ): Platform {
 	return openPlatform(options, {
@@ -179,6 +190,9 @@ export function createPlatformWithClock(
 		...(interleave === undefined ? {} : { interleave }),
 		...(freeSpace === undefined ? {} : { freeSpace }),
 		...(diskFull === undefined ? {} : { diskFull }),
+		...(channelQueue === undefined ? {} : { channelQueue }),
+		...(pushServices === undefined ? {} : { pushServices }),
+		...(fetch === undefined ? {} : { fetch }),
 	});
 }
 
@@ -192,9 +206,18 @@ export function backgroundSettled(platform: Platform): Promise<void> {
 	return backgroundOf(platform).settled();
 }
 
-/** Stores a job of a synthetic kind, due now, and wakes the background. Returns its id. */
-export function enqueueJob(platform: Platform, kind: string): number {
-	return backgroundOf(platform).enqueue(kind);
+/** Stores a job of a synthetic kind, due now, with its data if given, and wakes the background. Returns its id. */
+export function enqueueJob(platform: Platform, kind: string, payload?: unknown): number {
+	return backgroundOf(platform).enqueue(kind, payload);
+}
+
+/**
+ * Leaves a job of a synthetic kind with its data in the write whose handler is running, as the outbox does (ADR
+ * 0029): stored after that write's entry, in its transaction, and cancelled by its undo while pending. For a test
+ * that wraps a module's handler; throws outside one.
+ */
+export function enqueueInWrite(platform: Platform, kind: string, payload: unknown): void {
+	actionsOf(platform).enqueueInWrite({ kind, payload });
 }
 
 /** Every job of the background, oldest first. Plain data: changing it changes nothing. */
@@ -402,6 +425,43 @@ export function hasSession(platform: Platform, session: string): boolean {
 			.prepare("SELECT 1 FROM platform_session WHERE id = ?")
 			.get(session) !== undefined
 	);
+}
+
+/** The instant the session with this id expires, as its row says; `undefined` when there is none. */
+export function sessionExpiresAt(platform: Platform, session: string): number | undefined {
+	return connectionOf(platform)
+		.prepare<[string], { expiresAt: number }>(
+			"SELECT expires_at AS expiresAt FROM platform_session WHERE id = ?",
+		)
+		.get(session)?.expiresAt;
+}
+
+/** A subscription to notices as the platform keeps it, with whether its session is the enabled one and lives. */
+export interface SubscriptionRow {
+	readonly id: string;
+	readonly device: string;
+	readonly session: string;
+	readonly account: string;
+	readonly endpoint: string;
+	readonly p256dh: string;
+	readonly auth: string;
+	readonly createdAt: number;
+	/** Its session lives on the platform clock and is the one its device has enabled for notices. */
+	readonly enabled: boolean;
+}
+
+/** Every subscription to notices, oldest first. Plain data: changing it changes nothing. */
+export function readSubscriptions(platform: Platform): readonly SubscriptionRow[] {
+	return connectionOf(platform)
+		.prepare<[number], Omit<SubscriptionRow, "enabled"> & { enabled: number }>(
+			`SELECT p.id, p.device, p.session, s.user_id AS account, p.endpoint, p.p256dh, p.auth,
+				p.created_at AS createdAt,
+				(${sessionEnabledWhere("p.session")} AND ${sessionLivesWhere("p.session", "s.user_id", "?")}) AS enabled
+			FROM platform_push_subscriptions p JOIN platform_session s ON s.id = p.session
+			ORDER BY p.created_at, p.id`,
+		)
+		.all(clockOf(platform)())
+		.map((row) => ({ ...row, enabled: row.enabled === 1 }));
 }
 
 /** The id of the one device account, which the platform created at start. */

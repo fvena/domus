@@ -20,6 +20,8 @@ export interface RegisteredAction {
 	readonly outputSchema: AnySchema | undefined;
 	/** For a sensitive operation of the platform: which one. */
 	readonly sensitive?: SensitiveOperation;
+	/** For an operation of the platform a person asks for themselves, with no level of any area. */
+	readonly personal?: true;
 	/** For an operation of the platform on one account's own settings or data: that account. */
 	readonly subject?: (input: unknown, context: VerifiedContext) => string | undefined;
 	/** For a write of the platform: what its input names must exist for who asks, else `NOT_FOUND`. */

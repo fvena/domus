@@ -61,9 +61,21 @@ export interface PreparedFile extends FileDescription {
  * entry gives one. `published`: the content's file is in its place, renamed or reused, and its rows are not yet
  * written. `claimed`: the cleanup marked a content claimed and let its lock go, and its file is not yet removed.
  * `removed`: the cleanup removed the file of a claimed content and synced its folder, and its row is not yet deleted.
- * `opened`: a download has its file open and its transaction ended, and no byte is sent yet.
+ * `opened`: a download has its file open and its transaction ended, and no byte is sent yet. `entering`: a session
+ * being created wrote the new `entry` of its device, with no transaction open, and is not yet created (ADR 0029).
+ * `distributing`: a notice's job is claimed and its transaction of sharing out has not begun. `distributed`: that
+ * transaction committed its deliveries and the engine has not recorded the job's end. `delivering`: a delivery's job
+ * runs and has not checked whether it may send, in every attempt.
  */
-export type InterleavePoint = "published" | "claimed" | "removed" | "opened";
+export type InterleavePoint =
+	| "published"
+	| "claimed"
+	| "removed"
+	| "opened"
+	| "entering"
+	| "distributing"
+	| "distributed"
+	| "delivering";
 
 export type Interleave = (point: InterleavePoint) => Promise<void> | void;
 
@@ -203,7 +215,8 @@ export function createFiles({
 				).finally(disarm);
 				if (upload.stopped !== undefined) throw upload.stopped;
 				if (chunk.done) break;
-				if (!lives(owner.account, owner.session)) throw new ORPCError("UNAUTHORIZED");
+				if (!lives(owner.account, owner.session, clock()))
+					throw new ORPCError("UNAUTHORIZED");
 				size += chunk.value.length;
 				// Not a byte past the declared size reaches the disk: the reservation holds no more.
 				if (size > declared) throw fileError("BODY_MISMATCH");
@@ -253,9 +266,9 @@ export function createFiles({
 			}
 			await interleave?.("published");
 			return connection.transaction(() => {
-				if (!lives(owner.account, owner.session)) throw new ORPCError("UNAUTHORIZED");
-				if (!mayUpload(view, owner.context)) throw new ORPCError("FORBIDDEN");
 				const now = clock();
+				if (!lives(owner.account, owner.session, now)) throw new ORPCError("UNAUTHORIZED");
+				if (!mayUpload(view, owner.context)) throw new ORPCError("FORBIDDEN");
 				const current = contentState.get(hash)?.state;
 				if (current === "claimed") throw fileError("CONTENT_BUSY");
 				if (current === undefined) insertContent.run(hash, size, type, now);

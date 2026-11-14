@@ -26,7 +26,8 @@ import {
 	type ModuleDefinition,
 	type ModuleSchema,
 	type OwnedTable,
-	ownedTableOf,
+	type RecordTable,
+	recordTablesOf,
 	type TouchedRecord,
 } from "@domus/module-sdk";
 import type { ActionContract } from "@domus/module-sdk/contracts";
@@ -49,12 +50,13 @@ import {
 	type VerifiedContext,
 	visibleTo,
 } from "../authorization";
+import type { AreaRecordChange, RecordChange, RecordKey } from "../authorization/invalidations";
 import { checkTransition, editableTo, type RecordArea } from "../authorization/writes";
 import { markedFiles } from "../files/marked";
 import { FilesRefusal, type References, type WriteRun } from "../files/references";
 import type { OpenedContent } from "../files/store";
 import { answeringWith, type ConfirmationCall, type Download, openingDownload } from "./answering";
-import type { Capture, CapturedTransition } from "./capture";
+import { type Capture, type CapturedTransition, changesOf } from "./capture";
 import { type ConfirmationTimes, type Confirmations, type NewPending } from "./confirmations";
 import { conflict, internalError, notUndoable, stepUpRequired } from "./failures";
 import { type PlatformOperation, platformActions } from "./platform-operations";
@@ -139,6 +141,42 @@ export interface Actions {
 	 * `confirm`, "not found" for a pending operation that is not a download, and like the download.
 	 */
 	confirmDownload(call: ConfirmationCall): Download;
+	/**
+	 * Leaves a job of `kind` with its data in the write whose handler is running: it is stored after that write's
+	 * entry, in its transaction and with its number, so it exists only if the write commits, and its undo cancels it
+	 * while it is pending. Throws outside a write's handler, and for data that does not survive JSON.
+	 */
+	enqueueInWrite(job: WriteJob): void;
+}
+
+/**
+ * The kind of a notice's job (ADR 0029), which `ctx.notify` leaves in its write with the recipient and the record
+ * as its data, never text. Its work belongs to platform/notifications.
+ */
+export const NOTICE = "notice";
+
+/** The data `ctx.notify` leaves in a {@link NOTICE} job: its recipient and the record it is about. */
+export interface NoticePayload extends RecordKey {
+	readonly to: string;
+}
+
+/** A job a write leaves: its kind and its data. */
+export interface WriteJob {
+	readonly kind: string;
+	readonly payload: unknown;
+}
+
+/** A job of the outbox, as a write leaves it: with the log entry of that write. */
+export interface OutboxJob extends WriteJob {
+	readonly entry: number;
+}
+
+/** Where writes leave their jobs and undos cancel them, in the caller's transaction (ADR 0029). */
+export interface Outbox {
+	/** Stores a job due now and returns its id; it runs only once the transaction that holds it has ended. */
+	enqueue(job: OutboxJob): number;
+	/** Cancels the jobs of `entry` still pending, with the reason `undone`; one already claimed goes on. */
+	cancel(entry: number): void;
 }
 
 /** A download: who asks, the read that returns the file and its input, and the file's id. */
@@ -189,6 +227,15 @@ export interface ActionsOptions {
 	readonly references: References;
 	/** Opens a content for a download: unset when the platform has no folder for files. */
 	readonly openContent?: (hash: string) => OpenedContent;
+	/** Where a write's jobs go. */
+	readonly outbox: Outbox;
+	/** Where a write leaves the records it changed, for the live channels once it commits (ADR 0029). */
+	readonly invalidations: Invalidations;
+}
+
+/** Where a write remembers what it changed, in its transaction: shared out only if it commits (ADR 0029). */
+export interface Invalidations {
+	remember(changes: readonly RecordChange[]): void;
 }
 
 export type { ConfirmationCall, ConfirmationTimes, Download, PlatformOperation };
@@ -210,16 +257,32 @@ export function createActions({
 	operations = [],
 	references,
 	openContent,
+	outbox,
+	invalidations,
 }: ActionsOptions): Actions {
 	const registry = new Map<string, RegisteredAction>();
+	/** The jobs the write whose handler is running leaves, while one runs. */
+	let leaving: WriteJob[] | undefined;
+	/** Per module, the area of each record type of its area tables. */
+	const areaTables = new Map<string, ReadonlyMap<string, string>>();
 	for (const module of modules) {
 		const db = drizzle({ client: connection, schema: module.schema });
-		const ownedTables = ownedTablesOf(module, areas);
+		const recordTables = recordTablesOf(module);
+		const ownedTables = ownedTablesOf(recordTables, areas);
+		areaTables.set(module.id, areaTablesOf(recordTables));
+		const recordTypes = new Set(recordTables.map(({ type }) => type));
 		for (const [name, contract] of Object.entries(module.contract ?? {})) {
 			const handler = module.actions?.[name];
 			if (!handler) continue;
 			const { meta, inputSchema, outputSchema, errorMap } = contract["~orpc"];
-			const parts: ModuleParts = { module: module.id, handler, db, errorMap, ownedTables };
+			const parts: ModuleParts = {
+				module: module.id,
+				handler,
+				db,
+				errorMap,
+				ownedTables,
+				recordTypes,
+			};
 			registry.set(`${module.id}.${name}`, {
 				module: module.id,
 				name,
@@ -262,7 +325,16 @@ export function createActions({
 		fingerprintOf: (operation) => guarded(() => fingerprintOf(operation)),
 		download: (call) => guarded(() => download(call)),
 		confirmDownload: (call) => guarded(() => answering.confirmDownload(call)),
+		enqueueInWrite: leave,
 	};
+
+	/** Leaves a job with its data in the write whose handler is running. */
+	function leave(job: WriteJob): void {
+		if (!leaving) throw new Error("a job is left only inside a write's handler");
+		if (job.payload === undefined || !isLosslessJson(job.payload))
+			throw new Error("the data of a job must survive JSON");
+		leaving.push(job);
+	}
 
 	function download({ context, action, input, file, proof }: DownloadCall): Download {
 		if (!isVerified(context)) throw internalError();
@@ -340,15 +412,19 @@ export function createActions({
 		return operationFingerprint(operation.action, value);
 	}
 
-	/** What authorization needs to know of an operation of the platform: whether it is sensitive, and its subject. */
+	/**
+	 * What authorization needs to know of an operation of the platform: whether it is sensitive or a person's own,
+	 * and its subject.
+	 */
 	function sensitivityOf(
 		found: RegisteredAction,
 		input: unknown,
 		context: VerifiedContext,
-	): Pick<AuthorizationRequest, "sensitive" | "subject"> {
+	): Pick<AuthorizationRequest, "sensitive" | "personal" | "subject"> {
 		const subject = found.subject?.(input, context);
 		return {
 			...(found.sensitive === undefined ? {} : { sensitive: found.sensitive }),
+			...(found.personal === true ? { personal: true } : {}),
 			...(subject === undefined ? {} : { subject }),
 		};
 	}
@@ -435,6 +511,23 @@ export function createActions({
 				ownership: (table) =>
 					newOwnership(actor.account, areaOf(table).policy.defaultVisibility),
 				files,
+				// A mistake of the module, a read's, a type of no owned or area table of its own or an id that is not
+				// an integer, which those tables key on, rolls the write back.
+				notify: ({ to, about }) => {
+					if (!write) throw new Error("only a write leaves a notice");
+					if (!parts.recordTypes.has(about.type))
+						throw new Error(
+							`"${about.type}" is no record type of an owned or area table of the module`,
+						);
+					if (!isRecordId(about.id)) throw new Error("a record's id is an integer");
+					const payload: NoticePayload = {
+						to,
+						module: parts.module,
+						type: about.type,
+						id: about.id,
+					};
+					leave({ kind: NOTICE, payload });
+				},
 			});
 		} catch (error) {
 			if (error instanceof HandlerForbidden || error instanceof FilesRefusal) throw error;
@@ -693,6 +786,8 @@ export function createActions({
 								}),
 						);
 						actionLog.markUndone(number, receipt.entry);
+						// What the entry left in the outbox and has not started does not go out.
+						outbox.cancel(number);
 						return receipt;
 					},
 				),
@@ -783,12 +878,22 @@ export function createActions({
 			undoable: found.undoable,
 			undoes: logged.undoes,
 			touched: [],
+			changed: [],
 			released: new Set(),
 		};
-		const { value, transitions } = capture.watch(() => found.execute(context, input, now, run));
+		const jobs: WriteJob[] = [];
+		leaving = jobs;
+		let watched;
+		try {
+			watched = capture.watch(() => found.execute(context, input, now, run));
+		} finally {
+			leaving = undefined;
+		}
+		const { value, transitions } = watched;
 		// The records `ctx.files` changed count as touched without the handler declaring them.
 		const outcome = checkOutcome(found, value, run.touched);
 		checkTransitions(found, actor.account, transitions, outcome.touched);
+		const declared = areaChangesOf(found.module, outcome.touched);
 		const entry = actionLog.record({
 			module: found.module,
 			action: found.name,
@@ -802,8 +907,13 @@ export function createActions({
 			touched: outcome.touched,
 			undoes: logged.undoes,
 		});
-		// Its entry exists only now: each reference it released is linked to it, in the same transaction.
+		// Its entry exists only now: each reference it released is linked to it, and each job it left carries it, in
+		// the same transaction.
 		references.linkReleased(run.released, entry);
+		for (const job of jobs) outbox.enqueue({ ...job, entry });
+		// Taken from the capture before it is emptied, with the records whose files alone changed and the area tables'
+		// records it declared; an undo runs this same path.
+		invalidations.remember([...changesOf(transitions, run.changed), ...declared]);
 		capture.clear();
 		return { result: outcome.result, entry };
 	}
@@ -831,6 +941,22 @@ export function createActions({
 			)
 				throw internalError();
 		}
+	}
+
+	/**
+	 * The records of its module's area tables a write declares among its touched ones, each once, in the order
+	 * declared (ADR 0029). Their tables key on an integer `id`: any other id of their type is the handler's mistake.
+	 */
+	function areaChangesOf(module: string, touched: readonly TouchedRecord[]): AreaRecordChange[] {
+		const tables = areaTables.get(module);
+		const changes = new Map<string, AreaRecordChange>();
+		for (const { type, id } of touched) {
+			const area = tables?.get(type);
+			if (area === undefined) continue;
+			if (!isRecordId(id)) throw internalError();
+			changes.set(JSON.stringify([type, id]), { module, type, id, area });
+		}
+		return [...changes.values()];
 	}
 
 	/**
@@ -905,20 +1031,34 @@ interface ModuleParts {
 	readonly errorMap: ErrorMap;
 	/** The owned tables of its module, with each one's area. */
 	readonly ownedTables: ReadonlyMap<OwnedTable, RecordArea>;
+	/** The record types of those tables and of its area tables: what a notice may be about. */
+	readonly recordTypes: ReadonlySet<string>;
 }
 
-/** The owned tables of a module, which `checkModules` has accepted, each with its area. */
+/** The owned tables among a module's record tables, which `checkModules` has accepted, each with its area. */
 function ownedTablesOf(
-	module: ModuleDefinition,
+	recordTables: readonly RecordTable[],
 	areas: ReadonlyMap<string, AreaPolicy>,
 ): ReadonlyMap<OwnedTable, RecordArea> {
 	const owned = new Map<OwnedTable, RecordArea>();
-	for (const value of Object.values(module.schema)) {
-		const info = ownedTableOf(value);
-		const policy = info && areas.get(info.area);
-		if (info && policy) owned.set(value as OwnedTable, { id: info.area, policy });
+	for (const declared of recordTables) {
+		const policy = areas.get(declared.area);
+		if (declared.kind === "owned" && policy)
+			owned.set(declared.table, { id: declared.area, policy });
 	}
 	return owned;
+}
+
+/** The area tables among a module's record tables: the area of each one's record type. */
+function areaTablesOf(recordTables: readonly RecordTable[]): ReadonlyMap<string, string> {
+	const shared = new Map<string, string>();
+	for (const { kind, type, area } of recordTables) if (kind === "area") shared.set(type, area);
+	return shared;
+}
+
+/** Whether `id` can name a record of an owned or area table, which key on an integer `id`: not `"1"` nor `1.5`. */
+function isRecordId(id: unknown): id is number {
+	return typeof id === "number" && Number.isSafeInteger(id);
 }
 
 /**

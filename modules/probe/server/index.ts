@@ -1,7 +1,8 @@
 // probe, the test module of phase 1 (ADR 0021, ADR 0022, ADR 0023). testOnly keeps it out of the module list of
 // apps/api: tests import it and hand it to test-utils. It stores owned notes and comments and offers actions on
-// them, and one owned table in each of its other areas. Every query on an owned table carries its visibility
-// predicate, so a record the account does not see answers as one that does not exist.
+// them, one owned table in each of its other areas, and the household's labels, an area table. Every query on an
+// owned table carries its visibility predicate, so a record the account does not see answers as one that does not
+// exist; a label is seen by whoever reads probe, which the action's permission already checked.
 import { type ActionContext, defineModule, type ModuleDatabase } from "@domus/module-sdk";
 import { and, asc, count, eq, sql } from "@domus/module-sdk/db";
 
@@ -15,6 +16,7 @@ type Files = ActionContext<unknown, typeof schema>["files"];
 
 const note = { id: schema.notes.id, body: schema.notes.body };
 const boardNote = { id: schema.board.id, body: schema.board.body };
+const label = { id: schema.labels.id, name: schema.labels.name };
 const comment = {
 	id: schema.comments.id,
 	noteId: schema.comments.noteId,
@@ -41,6 +43,16 @@ function noteById(
 ) {
 	const found = findNote(context, context.input.id);
 	return found ? withFiles(context.files, found) : null;
+}
+
+/** Leaves one notice about the record of `type` and `id` to each account of `accounts`. */
+function notifyAbout(
+	notify: ActionContext<unknown, typeof schema>["notify"],
+	accounts: readonly string[] | undefined,
+	type: "note" | "label",
+	id: number,
+): void {
+	for (const to of accounts ?? []) notify({ to, about: { type, id } });
 }
 
 /** The records the account sees of a table with only a body, oldest first. */
@@ -97,12 +109,13 @@ export default defineModule({
 				.orderBy(asc(schema.notes.id), asc(schema.comments.id))
 				.all(),
 
-		addNote: ({ db, input, ownership }) => {
+		addNote: ({ db, input, ownership, notify }) => {
 			const added = db
 				.insert(schema.notes)
 				.values({ ...ownership(schema.notes), body: input.body })
 				.returning(note)
 				.get();
+			notifyAbout(notify, input.notify, "note", added.id);
 			return {
 				result: added,
 				touched: [{ type: "note", id: added.id }],
@@ -110,13 +123,14 @@ export default defineModule({
 			};
 		},
 		editNote: (context) => {
-			const { db, input, errors, visible } = context;
+			const { db, input, errors, visible, notify } = context;
 			const before = findNote(context, input.id);
 			if (!before) throw errors.NOTE_NOT_FOUND();
 			db.update(schema.notes)
 				.set({ body: input.body })
 				.where(and(eq(schema.notes.id, input.id), visible(schema.notes)))
 				.run();
+			notifyAbout(notify, input.notify, "note", before.id);
 			return {
 				result: { id: before.id, body: input.body },
 				touched: [{ type: "note", id: before.id }],
@@ -257,6 +271,31 @@ export default defineModule({
 				result: { notes: mine.length },
 				touched: mine.map(({ id }) => ({ type: "note", id })),
 			};
+		},
+
+		listLabels: ({ db }) =>
+			db.select(label).from(schema.labels).orderBy(schema.labels.id).all(),
+		addLabel: ({ db, input, notify }) => {
+			const added = db
+				.insert(schema.labels)
+				.values({ name: input.name })
+				.returning(label)
+				.get();
+			notifyAbout(notify, input.notify, "label", added.id);
+			return {
+				result: added,
+				touched: [{ type: "label", id: added.id }],
+				inverse: { action: "probe.deleteLabel", input: { id: added.id } },
+			};
+		},
+		deleteLabel: ({ db, input, errors }) => {
+			const deleted = db
+				.delete(schema.labels)
+				.where(eq(schema.labels.id, input.id))
+				.returning(label)
+				.get();
+			if (!deleted) throw errors.LABEL_NOT_FOUND();
+			return { result: deleted, touched: [{ type: "label", id: deleted.id }] };
 		},
 
 		listBoard: ({ db, visible }) => entriesOf(db, visible, schema.board),

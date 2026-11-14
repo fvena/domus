@@ -11,7 +11,7 @@ import { endProofsOf } from "../actions/proofs";
 import type { AreaPolicy, Role } from "../authorization";
 import { PASSWORD_LENGTH } from "../contracts";
 import { insertAccount, setPasswordHash } from "./accounts";
-import { sessionLives } from "./sessions";
+import { endSessions, sessionLives, type SessionsEnded } from "./sessions";
 
 /** Why a password is not accepted, or `undefined` when it is. Never repeats the password. */
 export function passwordProblem(password: string): string | undefined {
@@ -54,31 +54,40 @@ export async function createAccountWithPassword(
 	return id;
 }
 
+/** What else a change of password does with the account's sessions. */
+export interface ReplacingPassword {
+	/** The session that changes it, which goes on: it must still live, else {@link SessionGoneError}. */
+	readonly keep?: string;
+	/** Told which sessions ended, inside the transaction. */
+	readonly ended?: SessionsEnded;
+}
+
 /**
- * Sets a new password and ends the account's sessions, all but `keep` when it is given, in one transaction.
- * Returns how many sessions ended.
+ * Sets a new password and ends the account's sessions, all but `keep` when it is given, in one transaction,
+ * telling `ended` which ones. It reads `clock` inside that transaction, so a session to keep that expired while
+ * the password was hashed changes nothing. Returns how many sessions ended.
  */
 export async function replacePassword(
 	connection: Database.Database,
 	account: string,
 	password: string,
-	now: number,
-	keep?: string,
+	clock: () => number,
+	{ keep, ended }: ReplacingPassword = {},
 ): Promise<number> {
 	const lives = sessionLives(connection);
 	const hash = await hashPassword(password);
 	return connection.transaction(() => {
-		if (keep !== undefined && !lives(account, keep)) throw new SessionGoneError();
+		// Read on the platform clock here, after the hash: the session must still live when the change commits.
+		const now = clock();
+		if (keep !== undefined && !lives(account, keep, now)) throw new SessionGoneError();
 		setPasswordHash(connection, account, hash, now);
 		endConfirmationsOf(connection, account);
 		endProofsOf(connection, account);
-		return connection
-			.prepare("DELETE FROM platform_session WHERE user_id = ? AND id IS NOT ?")
-			.run(account, keep ?? null).changes;
+		return endSessions(connection, keep === undefined ? { account } : { account, keep }, ended);
 	})();
 }
 
-/** The session to keep was revoked while the new password was being hashed. */
+/** The session to keep was revoked, or expired, while the new password was being hashed. */
 export class SessionGoneError extends Error {
 	constructor() {
 		super("the session ended while its password was being changed");

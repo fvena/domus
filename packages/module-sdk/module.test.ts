@@ -2,7 +2,7 @@ import { oc } from "@orpc/contract";
 import { describe, expect, it } from "vitest";
 
 import { type ActionContract, type ActionMeta, readAction, writeAction } from "./contracts";
-import { moduleTables, primaryKey, text } from "./db";
+import { areaTableOf, moduleTables, primaryKey, text } from "./db";
 import { type AreaDefinition, checkModules, defineModule } from "./index";
 
 function moduleWithId(id: string) {
@@ -222,7 +222,94 @@ describe("checkModules on owned tables", () => {
 		};
 
 		expect(() => checkModules([notesWithTables(schema)])).toThrow(
-			'module "notes": two owned tables have the record type "item"',
+			'module "notes": two tables have the record type "item"',
+		);
+	});
+});
+
+describe("checkModules on area tables", () => {
+	const areas = {
+		notes: {},
+		"notes.shared": {},
+		"notes.health": { alwaysPrivate: true },
+	} satisfies Record<string, AreaDefinition>;
+	const { areaTable, ownedTable } = moduleTables("notes", areas);
+
+	function notesWithTables(schema: Record<string, unknown>) {
+		return defineModule({ id: "notes", areas, schema, migrations: [] });
+	}
+
+	it("declares its record type and area, with the integer id as its only key", () => {
+		const labels = areaTable(
+			"labels",
+			{ type: "label", area: "notes.shared" },
+			{ name: text() },
+		);
+
+		expect(areaTableOf(labels)).toEqual({ type: "label", area: "notes.shared" });
+		expect(Object.keys(labels)).toEqual(expect.arrayContaining(["id", "name"]));
+		expect(areaTableOf(moduleTables("notes").table("plain", { name: text() }))).toBeUndefined();
+		expect(() => checkModules([notesWithTables({ labels })])).not.toThrow();
+	});
+
+	it("rejects an area table that names its own id", () => {
+		expect(() =>
+			areaTable("labels", { type: "label", area: "notes" }, { id: text() } as never),
+		).toThrow('area table "notes_labels": "id" is a column every area table already has');
+	});
+
+	it("rejects an area table with a composite key", () => {
+		const labels = areaTable(
+			"labels",
+			{ type: "label", area: "notes" },
+			{ name: text().notNull() },
+			(self) => [primaryKey({ columns: [self.id, self.name] })],
+		);
+
+		expect(() => checkModules([notesWithTables({ labels })])).toThrow(
+			'module "notes": area table "notes_labels" must have the integer "id" as its only key',
+		);
+	});
+
+	it("rejects an area table whose area the module does not declare", () => {
+		const labels = moduleTables("notes", { "notes.garden": {} }).areaTable(
+			"labels",
+			{ type: "label", area: "notes.garden" },
+			{},
+		);
+
+		expect(() => checkModules([notesWithTables({ labels })])).toThrow(
+			'module "notes": area table "notes_labels" is in area "notes.garden", which the module does not declare',
+		);
+	});
+
+	it("rejects an area table in an always private area, whose records have no owner to be private to", () => {
+		const labels = areaTable("labels", { type: "label", area: "notes.health" }, {});
+
+		expect(() => checkModules([notesWithTables({ labels })])).toThrow(
+			'module "notes": area table "notes_labels" is in area "notes.health", which is always private',
+		);
+	});
+
+	it("rejects an area table and an owned table with the same record type", () => {
+		const schema = {
+			items: ownedTable("items", { type: "item", area: "notes" }, {}),
+			labels: areaTable("labels", { type: "item", area: "notes.shared" }, {}),
+		};
+
+		expect(() => checkModules([notesWithTables(schema)])).toThrow(
+			'module "notes": two tables have the record type "item"',
+		);
+	});
+
+	it("rejects two area tables with the same record type", () => {
+		const schema = {
+			labels: areaTable("labels", { type: "label", area: "notes" }, {}),
+			tags: areaTable("tags", { type: "label", area: "notes.shared" }, {}),
+		};
+
+		expect(() => checkModules([notesWithTables(schema)])).toThrow(
+			'module "notes": two tables have the record type "label"',
 		);
 	});
 });

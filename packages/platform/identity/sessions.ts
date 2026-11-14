@@ -23,22 +23,36 @@ export function sessionLookup(connection: Database.Database): SessionLookup {
 }
 
 /**
- * The SQL condition that a session still lives: one with the id of the expression `session` exists and is the
- * account's of the expression `account`. The one form of that rule, for statements and for {@link sessionLives}.
+ * The SQL condition that a session still lives: one with the id of the expression `session` exists, is the
+ * account's of the expression `account` and has not expired by the instant of the expression `now`, the platform
+ * clock's. A session past its expiry has ended though its row is still there. The one form of that rule, for
+ * statements and for {@link sessionLives}.
  */
-export function sessionLivesWhere(session: string, account: string): string {
-	return `EXISTS (SELECT 1 FROM platform_session WHERE id = ${session} AND user_id = ${account})`;
+export function sessionLivesWhere(session: string, account: string, now: string): string {
+	return `EXISTS (SELECT 1 FROM platform_session
+		WHERE id = ${session} AND user_id = ${account} AND expires_at > ${now})`;
 }
 
-/** Whether a session still lives: it exists and is the account's. */
-export type SessionLives = (account: string, session: string) => boolean;
+/**
+ * The SQL condition that the session of the expression `session` is the one its device has enabled for notices
+ * (ADR 0029): its `deviceEntry` equals its device's `entry`. Every session entering a device writes a new `entry`
+ * before it is created, so at most one session of a device matches, an earlier one never again, and none when the
+ * creation failed after writing it. It says nothing of whether the session lives: {@link sessionLivesWhere} does.
+ */
+export function sessionEnabledWhere(session: string): string {
+	return `EXISTS (SELECT 1 FROM platform_session s JOIN platform_devices d ON d.id = s.device_id
+		WHERE s.id = ${session} AND s.device_entry = d.entry)`;
+}
+
+/** Whether a session still lives at the instant `now`: it exists, is the account's and has not expired. */
+export type SessionLives = (account: string, session: string, now: number) => boolean;
 
 /** The check that a session still lives, prepared on `connection`. */
 export function sessionLives(connection: Database.Database): SessionLives {
-	const statement = connection.prepare<[string, string], { lives: number }>(
-		`SELECT ${sessionLivesWhere("?", "?")} AS lives`,
+	const statement = connection.prepare<[string, string, number], { lives: number }>(
+		`SELECT ${sessionLivesWhere("?", "?", "?")} AS lives`,
 	);
-	return (account, session) => statement.get(session, account)?.lives === 1;
+	return (account, session, now) => statement.get(session, account, now)?.lives === 1;
 }
 
 /** One of an account's sessions, as its owner sees it: never its token, and its device by an opaque id. */
@@ -96,9 +110,43 @@ export function sessionsOf(
 		}));
 }
 
-/** Ends every session of every account inside the caller's transaction: restoring does it. */
-export function endEverySession(connection: Database.Database): void {
-	connection.prepare("DELETE FROM platform_session").run();
+/**
+ * Told which sessions ended, inside the transaction that ends them when there is one: inside `api`, the live
+ * channel writes `purge` on theirs once it commits, never before.
+ */
+export type SessionsEnded = (sessions: readonly string[]) => void;
+
+/** Which sessions end: one, every one of a device, an account's but `keep`, or every one there is. */
+export type EndingSessions =
+	| { readonly session: string }
+	| { readonly device: string }
+	| { readonly account: string; readonly keep?: string }
+	| { readonly every: true };
+
+/**
+ * The one path that ends sessions (ADR 0029), inside the caller's transaction: deletes their rows, which takes
+ * their subscriptions to notices with them, and tells `ended` which ones. Signing out, which Better Auth deletes
+ * itself, reaches `ended` through its hook. Returns how many ended.
+ */
+export function endSessions(
+	connection: Database.Database,
+	which: EndingSessions,
+	ended?: SessionsEnded,
+): number {
+	const [where, parameters]: [string, (string | null)[]] =
+		"session" in which
+			? ["WHERE id = ?", [which.session]]
+			: "device" in which
+				? ["WHERE device_id = ?", [which.device]]
+				: "account" in which
+					? ["WHERE user_id = ? AND id IS NOT ?", [which.account, which.keep ?? null]]
+					: ["", []];
+	const sessions = connection
+		.prepare<(string | null)[], string>(`DELETE FROM platform_session ${where} RETURNING id`)
+		.pluck()
+		.all(...parameters);
+	if (sessions.length > 0) ended?.(sessions);
+	return sessions.length;
 }
 
 /**

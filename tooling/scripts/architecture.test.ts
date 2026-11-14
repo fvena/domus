@@ -63,6 +63,8 @@ describe("dependency rules", () => {
 			"contracts-are-pure: modules/lists/contracts/node.ts -> path",
 			"contracts-are-pure: packages/module-sdk/contracts/bad.ts -> crypto",
 			"contracts-are-pure: packages/platform/contracts/bad.ts -> fs",
+			"events-stay-in-platform: modules/lists/server/events.ts -> packages/platform/events/index.ts",
+			"events-stay-in-platform: packages/module-sdk/src/events.ts -> packages/platform/events/index.ts",
 			"files-stay-in-platform: modules/lists/server/files.ts -> packages/platform/files/index.ts",
 			"files-stay-in-platform: packages/module-sdk/src/files.ts -> packages/platform/files/index.ts",
 			"module-contracts-reach-only-sdk-contracts: modules/lists/contracts/bad.ts -> packages/module-sdk/src/index.ts",
@@ -77,13 +79,17 @@ describe("dependency rules", () => {
 			"module-tests-use-only-test-utils: modules/lists/tests/bad.test.ts -> packages/platform/src/index.ts",
 			"module-uses-only-module-sdk: modules/lists/server/backups.ts -> packages/platform/backups/index.ts",
 			"module-uses-only-module-sdk: modules/lists/server/bad.ts -> packages/platform/src/index.ts",
+			"module-uses-only-module-sdk: modules/lists/server/events.ts -> packages/platform/events/index.ts",
 			"module-uses-only-module-sdk: modules/lists/server/files.ts -> packages/platform/files/index.ts",
 			"module-uses-only-module-sdk: modules/lists/server/maintenance.ts -> packages/platform/background/index.ts",
+			"module-uses-only-module-sdk: modules/lists/server/notices.ts -> packages/platform/notifications/index.ts",
 			"module-web-uses-only-ui-and-api-client: modules/lists/web/sdk.ts -> packages/module-sdk/src/index.ts",
 			"no-cycles: packages/i18n/cycle-a.ts -> packages/i18n/cycle-b.ts",
 			"no-unresolvable: apps/web/src/undeclared.ts -> @domus/not-declared",
 			"nothing-imports-an-app: apps/assistant/src/bad.ts -> apps/api/src/main.ts",
 			"nothing-imports-an-app: packages/platform/src/bad.ts -> apps/api/src/main.ts",
+			"notifications-stay-in-platform: modules/lists/server/notices.ts -> packages/platform/notifications/index.ts",
+			"notifications-stay-in-platform: packages/module-sdk/src/notices.ts -> packages/platform/notifications/index.ts",
 			"only-package-exports: apps/api/src/bad.ts -> modules/lists/server/internal.ts",
 			"only-package-exports: apps/api/src/bad.ts -> packages/platform/src/internal.ts",
 			"only-package-exports: apps/api/src/modules.ts -> modules/lists/server/internal.ts",
@@ -142,9 +148,11 @@ describe("module-sdk", () => {
 		expect(await names("index.ts")).toEqual([
 			"PLATFORM_ID",
 			"areaIds",
+			"areaTableOf",
 			"checkModules",
 			"defineModule",
 			"ownedTableOf",
+			"recordTablesOf",
 		]);
 		expect(await names("contracts/index.ts")).toEqual([
 			"fileRef",
@@ -155,6 +163,7 @@ describe("module-sdk", () => {
 		// Table declarations and query helpers; no drizzle() and no connection.
 		expect(await names("db/index.ts")).toEqual([
 			"and",
+			"areaTableOf",
 			"asc",
 			"blob",
 			"check",

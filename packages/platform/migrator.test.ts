@@ -6,7 +6,10 @@ import { defineModule, type ModuleDefinition, type ModuleMigration } from "@domu
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readJobs } from "./background";
+import { sessionEnabledWhere } from "./identity/sessions";
 import { migrations as platformMigrations } from "./migrations";
+import { migrate } from "./migrator";
 import { connectionOf, createPlatform, type Platform } from "./platform";
 
 /** A migration written by hand, as `pnpm db:generate` would carry it. */
@@ -212,6 +215,66 @@ describe("migrations at start", () => {
 				.get(),
 		).toBe(4);
 		second.close();
+	});
+
+	it("adds the outbox's columns to the jobs of a database of phase 1d3, each job kept without data or entry", () => {
+		// Phase 1d3 ended with the platform's migration 0011.
+		const phase1d3 = platformMigrations.filter(({ position }) => position <= 11);
+		const before = new Database(databaseFile);
+		migrate(before, [{ module: "platform", migrations: phase1d3 }]);
+		before
+			.prepare(
+				`INSERT INTO platform_jobs (kind, lane, state, attempts, run_at, created_at, finished_at)
+					VALUES ('cleanup', 'maintenance', 'done', 1, 0, 0, 0)`,
+			)
+			.run();
+		before.close();
+
+		const after = createPlatform({ databaseFile, modules: [] });
+		expect(after.appliedMigrations).toBe(platformMigrations.length - phase1d3.length);
+		expect(readJobs(connectionOf(after))).toEqual([
+			{
+				id: 1,
+				kind: "cleanup",
+				lane: "maintenance",
+				state: "done",
+				attempts: 1,
+				runAt: 0,
+				error: null,
+				payload: null,
+				entry: null,
+				outcome: null,
+			},
+		]);
+		after.close();
+	});
+
+	it("brings the subscriptions and the VAPID keys to a database of phase 1d3, its sessions kept and none enabled", () => {
+		const phase1d3 = platformMigrations.filter(({ position }) => position <= 11);
+		const before = new Database(databaseFile);
+		migrate(before, [{ module: "platform", migrations: phase1d3 }]);
+		before.exec(`
+			INSERT INTO platform_user (id, name, email, created_at, updated_at) VALUES ('ana', 'Ana', 'ana@domus.test', 0, 0);
+			INSERT INTO platform_devices (id, created_at) VALUES ('phone', 0);
+			INSERT INTO platform_session (id, user_id, device_id, token, expires_at, created_at, updated_at)
+				VALUES ('s1', 'ana', 'phone', 't1', 9999999999999, 0, 0);
+		`);
+		before.close();
+
+		const after = createPlatform({ databaseFile, modules: [] });
+		const connection = connectionOf(after);
+		expect(
+			connection
+				.prepare(
+					`SELECT s.id, ${sessionEnabledWhere("s.id")} AS enabled FROM platform_session s`,
+				)
+				.all(),
+		).toEqual([{ id: "s1", enabled: 0 }]);
+		expect(connection.prepare("SELECT count(*) FROM platform_push_keys").pluck().get()).toBe(1);
+		expect(
+			connection.prepare("SELECT count(*) FROM platform_push_subscriptions").pluck().get(),
+		).toBe(0);
+		after.close();
 	});
 
 	describe("when a start fails", () => {
