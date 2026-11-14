@@ -509,13 +509,15 @@ export function createActions({
 				ownership: (table) =>
 					newOwnership(actor.account, areaOf(table).policy.defaultVisibility),
 				files,
-				// A mistake of the module, a read's or a type of no owned or area table of its own, rolls the write back.
+				// A mistake of the module, a read's, a type of no owned or area table of its own or an id that is not
+				// an integer, which those tables key on, rolls the write back.
 				notify: ({ to, about }) => {
 					if (!write) throw new Error("only a write leaves a notice");
 					if (!parts.recordTypes.has(about.type))
 						throw new Error(
 							`"${about.type}" is no record type of an owned or area table of the module`,
 						);
+					if (!isRecordId(about.id)) throw new Error("a record's id is an integer");
 					leave({
 						kind: NOTICE,
 						payload: { to, module: parts.module, type: about.type, id: about.id },
@@ -945,7 +947,7 @@ export function createActions({
 		for (const { type, id } of touched) {
 			const area = tables?.get(type);
 			if (area === undefined) continue;
-			if (typeof id !== "number" || !Number.isSafeInteger(id)) throw internalError();
+			if (!isRecordId(id)) throw internalError();
 			changes.set(JSON.stringify([type, id]), { module, type, id, area });
 		}
 		return [...changes.values()];
@@ -1049,6 +1051,11 @@ function areaTablesOf(module: ModuleDefinition): ReadonlyMap<string, string> {
 		if (info) shared.set(info.type, info.area);
 	}
 	return shared;
+}
+
+/** Whether `id` can name a record of an owned or area table, which key on an integer `id`: not `"1"` nor `1.5`. */
+function isRecordId(id: unknown): id is number {
+	return typeof id === "number" && Number.isSafeInteger(id);
 }
 
 /**

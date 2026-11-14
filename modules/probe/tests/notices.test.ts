@@ -284,7 +284,7 @@ afterEach(() => {
  * Makes `action` also leave a notice to Paco about `about` from its handler, before the platform registers it: the
  * mistake a module could make.
  */
-function alsoNotifies(action: "addNote" | "countNotes", about: { type: string; id: number }) {
+function alsoNotifies(action: "addNote" | "countNotes", about: { type: string; id: unknown }) {
 	const actions = probe.actions as Record<string, (context: never) => unknown>;
 	const original = actions[action];
 	if (!original) throw new Error(`probe has no ${action}`);
@@ -350,6 +350,25 @@ describe("leaving a notice", () => {
 		expect(test.log()).toEqual([]);
 		expect(test.background.jobs()).toEqual([]);
 	});
+
+	it.each([
+		["the text", "1"],
+		["a fraction", 1.5],
+	])(
+		"about a record by an id that is not an integer, %s, rolls the write back as internal",
+		async (_name, id) => {
+			alsoNotifies("addNote", { type: "note", id });
+			const { test, rocio } = await household();
+			await using _ = test;
+
+			expect(() =>
+				test.invoke(rocio, "probe.addNote", { body: "pan" }, { idempotencyKey: "add" }),
+			).toThrow(expect.objectContaining({ code: "INTERNAL_SERVER_ERROR" }));
+			expect(test.invoke(rocio, "probe.countNotes")).toBe(0);
+			expect(test.log()).toEqual([]);
+			expect(test.background.jobs()).toEqual([]);
+		},
+	);
 
 	it("from a read fails it as internal and leaves nothing", async () => {
 		alsoNotifies("countNotes", { type: "note", id: 1 });
