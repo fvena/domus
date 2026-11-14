@@ -30,6 +30,7 @@ import {
 import { taskOperations } from "./background/operations";
 import { type BackupConfig, createBackups } from "./backups";
 import { refuseWhileRestorePending } from "./backups/restore";
+import { createEvents, type Events } from "./events";
 import {
 	createFiles,
 	createReferences,
@@ -42,6 +43,7 @@ import { accessView, registeredAreas } from "./identity/access";
 import { ensureDeviceAccount } from "./identity/accounts";
 import { platformOperations } from "./identity/operations";
 import type { ProofIssuer } from "./identity/proofs";
+import { sessionLives } from "./identity/sessions";
 import { type DatabaseLock, takeSharedLock } from "./lock";
 import { migrations } from "./migrations";
 import { migrate } from "./migrator";
@@ -127,6 +129,8 @@ export interface PlatformRuntime {
 	readonly freeSpace?: FreeSpace;
 	/** Only from the testing entry: whether the next write of an upload's temporary file fails with `ENOSPC`. */
 	readonly diskFull?: () => boolean;
+	/** Only from the testing entry: the most events a live channel holds unwritten, lower than production's. */
+	readonly channelQueue?: number;
 }
 
 const IN_MEMORY = ":memory:";
@@ -145,6 +149,7 @@ const internals = new WeakMap<
 		readonly proofs: Proofs;
 		readonly background: Background;
 		readonly files: Files | undefined;
+		readonly events: Events;
 	}
 >();
 
@@ -174,6 +179,7 @@ export function openPlatform(
 		interleave,
 		freeSpace,
 		diskFull,
+		channelQueue,
 	}: PlatformRuntime,
 ): Platform {
 	if (databaseFile !== IN_MEMORY && !isAbsolute(databaseFile)) {
@@ -212,6 +218,7 @@ export function openPlatform(
 	let view: AccessView;
 	let files: Files | undefined;
 	let background: Background;
+	let events: Events;
 	try {
 		if (databaseFile !== IN_MEMORY) {
 			const mode = db.pragma("journal_mode = WAL", { simple: true });
@@ -227,6 +234,14 @@ export function openPlatform(
 		// After the migrations, which its triggers would stop from dropping a column, and before any action.
 		capture = installCapture(db, modules, areas);
 		view = accessView(db, areas);
+		events = createEvents({
+			connection: db,
+			view,
+			clock,
+			timer,
+			sessionLives: sessionLives(db),
+			...(channelQueue === undefined ? {} : { queueLimit: channelQueue }),
+		});
 		const filesFolder =
 			databaseFile === IN_MEMORY
 				? filesDirectory
@@ -284,6 +299,7 @@ export function openPlatform(
 				throw new Error(
 					"stop the background before closing the platform: a job may still use it",
 				);
+			events.close();
 			files?.close();
 			if (db.open) db.close();
 			lock?.release();
@@ -307,6 +323,7 @@ export function openPlatform(
 		references: createReferences(db, view),
 		...(files === undefined ? {} : { openContent: (hash: string) => files.open(hash) }),
 		outbox: background.outbox,
+		invalidations: events,
 	});
 	internals.set(platform, {
 		db,
@@ -319,6 +336,7 @@ export function openPlatform(
 		proofs,
 		background,
 		files,
+		events,
 	});
 	return platform;
 }
@@ -388,4 +406,9 @@ export function clockOf(platform: Platform): Clock {
 /** The files of a platform, when it has a folder for them. Inside platform only: the door serves their routes. */
 export function filesOf(platform: Platform): Files | undefined {
 	return internalsOf(platform).files;
+}
+
+/** The live channels of a platform. Inside platform only: the door serves `GET /api/events`. */
+export function eventsOf(platform: Platform): Events {
+	return internalsOf(platform).events;
 }

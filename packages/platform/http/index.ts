@@ -12,7 +12,7 @@
 import type { ModuleDefinition } from "@domus/module-sdk";
 import { implement, ORPCError, os } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 
 import { READ_DELEGATION, READ_LOG } from "../actions";
 import { internalError } from "../actions/failures";
@@ -29,6 +29,7 @@ import {
 	backgroundOf,
 	clockOf,
 	connectionOf,
+	eventsOf,
 	filesOf,
 	type Platform,
 	proofIssuerOf,
@@ -47,6 +48,9 @@ const FILES_PATH = "/api/files";
 
 /** Where a file is downloaded through the read that returns it (ADR 0028). */
 const DOWNLOAD_PATH = "/api/files/download";
+
+/** Where a session opens its live channel (ADR 0029): a route of Hono that streams server-sent events. */
+const EVENTS_PATH = "/api/events";
 
 /** Where RPC procedures live; @domus/api-client calls the same path. */
 const RPC_PREFIX = "/api/rpc";
@@ -314,18 +318,19 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 	});
 
 	/**
-	 * A route of files (ADR 0028), only with a session: what `answer` gives, or the error of the spec's table as the
-	 * JSON of ORPCError without the RPC envelope; either way with the cookies that reading the session set.
+	 * A route of files (ADR 0028) or of the live channel (ADR 0029), only with a session: what `answer` gives, or the
+	 * error of the spec's table as the JSON of ORPCError without the RPC envelope; either way with the cookies that
+	 * reading the session set.
 	 */
 	const fileRoute =
-		(answer: (verified: VerifiedContext, request: Request) => Promise<Response>) =>
-		async (c: { readonly req: { readonly raw: Request } }): Promise<Response> => {
+		(answer: (verified: VerifiedContext, request: Request, c: Context) => Promise<Response>) =>
+		async (c: Context): Promise<Response> => {
 			const responseHeaders = new Headers();
 			let response: Response;
 			try {
 				const verified = await contextOf(c.req.raw, responseHeaders);
 				if (!verified?.session) throw new ORPCError("UNAUTHORIZED");
-				response = await answer(verified, c.req.raw);
+				response = await answer(verified, c.req.raw, c);
 			} catch (error) {
 				response = errorResponse(error);
 			}
@@ -380,6 +385,12 @@ export function createHttpHandler({ platform, modules, auth }: HttpHandlerOption
 				},
 			});
 		}),
+	);
+
+	// The live channel of this session (ADR 0029): an `EventSource` of the app, only with a session that lives.
+	app.get(
+		EVENTS_PATH,
+		fileRoute(async (verified, _request, c) => eventsOf(platform).open(c, verified)),
 	);
 
 	/**
