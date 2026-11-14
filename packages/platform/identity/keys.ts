@@ -2,20 +2,31 @@
 // `domus_<id>.<secret>`, a public id of 8 random bytes and a secret of 32, both in base64url; the prefix lets
 // gitleaks catch one that slipped into a commit. The database keeps only the SHA-256 of the secret. Keys are not
 // actions (ADR 0008): only `keys`, the command of the api container, creates, lists and revokes them.
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 
 import type Database from "better-sqlite3";
+
+import { KEY_SCHEME, KIRA } from "../contracts";
+import { encodesBytes, sha256Hex } from "./credentials";
 
 /** A program that talks to Domus through the API with its own key. Being one gives no permission. */
 export interface ConnectedApp {
 	/** Its name, the `via` of what it does on someone's behalf. */
 	readonly name: string;
 	/** Whether it may receive mandates: adding another app that may is an express decision (ADR 0030). */
-	readonly mandates: boolean;
+	readonly receivesMandates: boolean;
 }
 
 /** The connected apps of production, a fixed list like the modules': Kira alone, which may receive mandates. */
-export const CONNECTED_APPS: readonly ConnectedApp[] = [{ name: "kira", mandates: true }];
+export const CONNECTED_APPS: readonly ConnectedApp[] = [{ name: KIRA, receivesMandates: true }];
+
+/** The connected app named `name` among `apps`, `undefined` when it is not one of them. */
+export function connectedApp(
+	apps: readonly ConnectedApp[],
+	name: string,
+): ConnectedApp | undefined {
+	return apps.find((app) => app.name === name);
+}
 
 /** The id and the secret of a key, as {@link parseKey} reads them. */
 export interface KeyParts {
@@ -38,8 +49,13 @@ export function parseKey(key: string): KeyParts | undefined {
 	const id = match?.[1];
 	const secret = match?.[2];
 	if (id === undefined || secret === undefined) return undefined;
-	if (!encodes(id, ID_BYTES) || !encodes(secret, SECRET_BYTES)) return undefined;
+	if (!isKeyId(id) || !encodesBytes(secret, SECRET_BYTES)) return undefined;
 	return { id, secret };
+}
+
+/** Whether `text` has the form of a key's public id: the exact base64url of its random bytes. */
+export function isKeyId(text: string): boolean {
+	return encodesBytes(text, ID_BYTES);
 }
 
 /**
@@ -60,17 +76,11 @@ export function readAuthorization(value: string | null): AuthorizationRead {
 	if (value === null) return { kind: "none" };
 	const [scheme, ...rest] = value.split(" ").filter((part) => part !== "");
 	if (scheme === undefined) return { kind: "bad", reason: "empty" };
-	if (scheme.toLowerCase() !== "bearer") return { kind: "bad", reason: "scheme" };
+	if (scheme.toLowerCase() !== KEY_SCHEME.toLowerCase()) return { kind: "bad", reason: "scheme" };
 	const [key, ...more] = rest;
 	if (key === undefined) return { kind: "bad", reason: "empty" };
 	if (more.length > 0 || parseKey(key) === undefined) return { kind: "bad", reason: "malformed" };
 	return { kind: "key", key };
-}
-
-/** Whether `text` is the one base64url form of exactly `bytes` bytes. */
-function encodes(text: string, bytes: number): boolean {
-	const decoded = Buffer.from(text, "base64url");
-	return decoded.length === bytes && decoded.toString("base64url") === text;
 }
 
 /**
@@ -83,12 +93,12 @@ export function createKey(
 	app: string,
 	now: number,
 ): string {
-	if (!apps.some(({ name }) => name === app)) throw new UnknownAppError();
+	if (!connectedApp(apps, app)) throw new UnknownAppError();
 	const id = randomBytes(ID_BYTES).toString("base64url");
 	const secret = randomBytes(SECRET_BYTES).toString("base64url");
 	connection
 		.prepare("INSERT INTO platform_keys (id, app, secret_hash, created_at) VALUES (?, ?, ?, ?)")
-		.run(id, app, hashOf(secret), now);
+		.run(id, app, sha256Hex(secret), now);
 	return `domus_${id}.${secret}`;
 }
 
@@ -177,12 +187,12 @@ export function checkKey(
 		)
 		.get(parts.id);
 	if (!row) return { ok: false, reason: "unknown" };
-	const given = Buffer.from(hashOf(parts.secret), "hex");
+	const given = Buffer.from(sha256Hex(parts.secret), "hex");
 	const kept = Buffer.from(row.secretHash, "hex");
 	if (given.length !== kept.length || !timingSafeEqual(given, kept))
 		return { ok: false, reason: "wrong-secret" };
 	if (row.revokedAt !== null) return { ok: false, reason: "revoked" };
-	if (!apps.some(({ name }) => name === row.app)) return { ok: false, reason: "unknown-app" };
+	if (!connectedApp(apps, row.app)) return { ok: false, reason: "unknown-app" };
 	return { ok: true, id: parts.id, app: row.app };
 }
 
@@ -199,9 +209,4 @@ export function noteKeyUse(connection: Database.Database, id: string, now: numbe
 			"UPDATE platform_keys SET last_used_at = ? WHERE id = ? AND (last_used_at IS NULL OR last_used_at <= ?)",
 		)
 		.run(now, id, now - LAST_USE_INTERVAL);
-}
-
-/** The SHA-256 of a key's secret, in hex: what the database keeps. */
-function hashOf(secret: string): string {
-	return createHash("sha256").update(secret).digest("hex");
 }

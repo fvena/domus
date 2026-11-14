@@ -142,12 +142,13 @@ En la 1e no hay turnos de conversación, así que ninguna ruta, comando ni servi
 
 - La llave llega en `Authorization: Bearer` y el mandato en `domus-mandate`. Si llega `Authorization` con otro esquema o sin valor, es una llave mala.
 - Si una petición trae a la vez una llave y la cookie de sesión de Better Auth, se rechaza con `UNAUTHORIZED`. La cookie del aparato y cualquier otra no cuentan.
+- Un mandato sin llave, `domus-mandate` sin `Authorization`, se rechaza con `UNAUTHORIZED` en todas las rutas, `status` y las de Hono y Better Auth incluidas, también junto a una sesión viva: una credencial que no se resuelve nunca cae a otra, ni al anonimato ni a la sesión. El log de quien opera dice `mandate refused: without-key`. Lo fijó la revisión de la fase.
 - Cada ruta declara qué autoridad admite:
-    - `status`: sin credencial es público. Con una llave válida responde además `app`. Con una llave mala, `UNAUTHORIZED`. Un mandato aquí no cuenta.
+    - `status`: sin credencial es público. Con una llave válida responde además `app`. Con una llave mala, `UNAUTHORIZED`. Un mandato junto a la llave aquí no cuenta; sin ella, se rechaza.
     - Las acciones de los módulos (`<módulo>/<acción>`): con sesión, como hoy, o con llave y mandato.
     - `log/read` y `log/undo`: con sesión o con llave y mandato.
     - Todas las demás operaciones de la plataforma, también una que se añada mañana, solo con sesión. Eso incluye `confirmations/confirm` y `/reject`, `delegation/read`, contraseña, sesiones, comprobantes, permisos, delegación, aparatos, tareas y el aviso de prueba.
-    - Las rutas de Hono (subir y descargar archivos, el canal en directo, la clave VAPID y las suscripciones) y las de Better Auth (iniciar y cerrar sesión): una petición con llave responde `UNAUTHORIZED`, con el formato de errores que ya usa cada una.
+    - Las rutas de Hono (subir y descargar archivos, el canal en directo, la clave VAPID y las suscripciones) y las de Better Auth (iniciar y cerrar sesión): una petición con llave, o con un mandato, responde `UNAUTHORIZED`, con el formato de errores que ya usa cada una.
 - Llave válida sin mandato, o con un mandato que no resuelve, en una ruta que pide cuenta: `UNAUTHORIZED`. Llave y mandato válidos que la autorización niega: `FORBIDDEN`. Un registro privado ajeno: `NOT_FOUND`, como en cualquier llamada.
 - Ni los valores de `Authorization` ni los de `domus-mandate` aparecen en mensajes de error ni en logs.
 - Detalles que fijó la tarea 02:

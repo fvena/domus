@@ -296,6 +296,54 @@ describe("keys at the door", () => {
 			}
 		});
 
+		it("answers unauthorized to a mandate without its key, also next to a session that lives, on every route", async () => {
+			await using test = await probeWithAna();
+			const browser = test.browser();
+			await browser.signIn("ana@domus.test", PASSWORD);
+			const session = test.contextOf(browser).session ?? "";
+			const mandate = test.mandate(browser);
+			const client = clientFor(
+				{ ...platformContract, probe: probeContract },
+				{ baseUrl: TEST_ORIGIN, fetch: browser.fetch },
+			);
+			expect(await client.probe.listNotes()).toEqual([]);
+			const withMandate = carrying(browser, { "domus-mandate": mandate });
+			const mandated = clientFor(
+				{ ...platformContract, probe: probeContract },
+				{ baseUrl: TEST_ORIGIN, fetch: withMandate.fetch },
+			);
+
+			// A credential that cannot be resolved never falls back, to anonymous or to the session.
+			await expect(
+				appClient(test, { "domus-mandate": mandate }).status(),
+			).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+			await expect(mandated.status()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+			await expect(mandated.probe.listNotes()).rejects.toMatchObject({
+				code: "UNAUTHORIZED",
+			});
+			await expect(
+				mandated.probe.addNote({ body: "leche" }, { context: { idempotencyKey: "k1" } }),
+			).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+			await expect(mandated.log.read()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+			await expect(mandated.sessions.list()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+
+			for (const request of [route("/api/notifications/key"), route("/api/events")]) {
+				const response = await withMandate.fetch(request);
+				expect({ path: new URL(request.url).pathname, status: response.status }).toEqual({
+					path: new URL(request.url).pathname,
+					status: 401,
+				});
+				expect(await response.json()).toMatchObject({ code: "UNAUTHORIZED" });
+			}
+			const signOut = await withMandate.fetch(route("/api/auth/sign-out", "POST", {}));
+			expect(signOut.status).toBe(401);
+			expect(await signOut.json()).toMatchObject({ code: "UNAUTHORIZED" });
+			expect(test.hasSession(session)).toBe(true);
+
+			expect(test.log()).toEqual([]);
+			for (const text of withMandate.answers) expect(text).not.toContain(mandate);
+		});
+
 		it("signs nobody in with a key, in Better Auth's own form of errors", async () => {
 			await using test = await probeWithAna();
 			const key = test.prepare.key("kira");

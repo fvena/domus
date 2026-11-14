@@ -13,7 +13,7 @@ touches:
 ---
 
 ## Decided
-The door decides whether a platform operation takes a mandate in one place: verifiedSession(call) in packages/platform/http/index.ts asks admitsMandate (authorization/mandates.ts) with the path oRPC gives the handler it routed to, path.join('/'), never the URL the client wrote. Every platform handler passes its whole call ({ context, path, input }) to verifiedSession, signedIn or platformWrite, so a new operation written with them is closed to mandates until its path enters the list (only log/read and log/undo in 1e).
+The door decides whether a platform operation takes a mandate in one place: sessionOrMandateContext(call) in packages/platform/http/index.ts asks admitsMandate (authorization/mandates.ts) with the path oRPC gives the handler it routed to, path.join('/'), never the URL the client wrote. Every platform handler passes its whole call ({ context, path, input }) to sessionOrMandateContext, signedIn or platformWrite, so a new operation written with them is closed to mandates until its path enters the list (only log/read and log/undo in 1e).
 
 ## Tried and ruled out
 Passing { mandate: true } by hand in the log/read and log/undo handlers, as ticket 03 suggested: it works, but then the handler, not the list, decides, and a copied handler could open an operation silently. Deriving the operation from the request URL: a percent-encoded or normalized path could differ from the procedure oRPC actually dispatches.

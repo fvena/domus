@@ -18,6 +18,7 @@
 // context the mandate keeps, with `via` the key's app and the channel `contexto`. Of the platform's operations, only
 // those the list of authorization admits a mandate for (`admitsMandate`: `log/read` and `log/undo`), by the path
 // oRPC routed to; every other one, also one added tomorrow, and every route of Hono and of Better Auth refuse a key.
+// A mandate without a key is refused on every route too, `status` included: it never falls back to the session.
 import type { ModuleDefinition } from "@domus/module-sdk";
 import { implement, ORPCError, os } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
@@ -28,7 +29,7 @@ import { READ_DELEGATION, READ_LOG } from "../actions";
 import { internalError } from "../actions/failures";
 import { admitsMandate, sealContext, type VerifiedContext } from "../authorization";
 import { LIST_TASKS } from "../background/operations";
-import { PROTOCOL, platformContract } from "../contracts";
+import { AUTHORIZATION_HEADER, MANDATE_HEADER, PROTOCOL, platformContract } from "../contracts";
 import { contentDisposition, errorResponse } from "../files";
 import { AUTH_PREFIX, type AuthOptions, createAuth } from "../identity/auth";
 import { checkKey, noteKeyUse, readAuthorization } from "../identity/keys";
@@ -78,12 +79,6 @@ const RPC_PREFIX = "/api/rpc";
 
 /** The header that carries a write's idempotency key; @domus/api-client sends it from the call's context. */
 const IDEMPOTENCY_KEY_HEADER = "idempotency-key";
-
-/** The header that carries the key of a connected app, as `Bearer <key>` (ADR 0030). */
-const AUTHORIZATION_HEADER = "authorization";
-
-/** The header that carries the id of a mandate, next to the key of the app it was issued for (ADR 0030). */
-const MANDATE_HEADER = "domus-mandate";
 
 /** The header that carries a sensitive operation's step-up proof; @domus/api-client sends it from the call's context. */
 const PROOF_HEADER = "step-up-proof";
@@ -157,7 +152,7 @@ export function createHttpHandler({
 		call: OperationCall & { readonly input?: unknown },
 	): Promise<never> {
 		return actions.invoke({
-			context: await verifiedSession(call),
+			context: await sessionOrMandateContext(call),
 			action: `platform.${name}`,
 			input: call.input,
 			idempotencyKey: call.context.idempotencyKey,
@@ -169,7 +164,10 @@ export function createHttpHandler({
 	 * The verified context of the platform operation at `path`: a session's, or a mandate's only for an operation that
 	 * authorization's list admits one for (ADR 0030). Every other one, also one added tomorrow, needs a session.
 	 */
-	async function verifiedSession({ context, path }: OperationCall): Promise<VerifiedContext> {
+	async function sessionOrMandateContext({
+		context,
+		path,
+	}: OperationCall): Promise<VerifiedContext> {
 		const verified = await context.verify({ mandate: admitsMandate(path.join("/")) });
 		if (!verified?.session) throw new ORPCError("UNAUTHORIZED");
 		return verified;
@@ -179,7 +177,7 @@ export function createHttpHandler({
 	async function signedIn(
 		call: OperationCall,
 	): Promise<{ readonly account: string; readonly session: string }> {
-		const { account, session = "" } = await verifiedSession(call);
+		const { account, session = "" } = await sessionOrMandateContext(call);
 		return { account, session };
 	}
 
@@ -263,7 +261,7 @@ export function createHttpHandler({
 			read: platformProcedures.delegation.read.handler(
 				async (call) =>
 					actions.invoke({
-						context: await verifiedSession(call),
+						context: await sessionOrMandateContext(call),
 						action: READ_DELEGATION,
 						input: call.input,
 					}) as never,
@@ -277,7 +275,7 @@ export function createHttpHandler({
 				try {
 					return await requestProof(
 						proofIssuerOf(platform),
-						await verifiedSession(call),
+						await sessionOrMandateContext(call),
 						call.input,
 					);
 				} catch (error) {
@@ -293,13 +291,13 @@ export function createHttpHandler({
 			read: platformProcedures.log.read.handler(
 				async (call) =>
 					actions.invoke({
-						context: await verifiedSession(call),
+						context: await sessionOrMandateContext(call),
 						action: READ_LOG,
 					}) as never,
 			),
 			undo: platformProcedures.log.undo.handler(async (call) =>
 				actions.undo({
-					context: await verifiedSession(call),
+					context: await sessionOrMandateContext(call),
 					entry: call.input.entry,
 					idempotencyKey: call.context.idempotencyKey ?? "",
 					...(call.context.proof === undefined ? {} : { proof: call.context.proof }),
@@ -315,7 +313,7 @@ export function createHttpHandler({
 			list: platformProcedures.tasks.list.handler(
 				async (call) =>
 					actions.invoke({
-						context: await verifiedSession(call),
+						context: await sessionOrMandateContext(call),
 						action: LIST_TASKS,
 					}) as never,
 			),
@@ -336,14 +334,14 @@ export function createHttpHandler({
 		confirmations: {
 			confirm: platformProcedures.confirmations.confirm.handler(async (call) =>
 				actions.confirm({
-					context: await verifiedSession(call),
+					context: await sessionOrMandateContext(call),
 					confirmation: call.input.id,
 					...(call.context.proof === undefined ? {} : { proof: call.context.proof }),
 				}),
 			),
 			reject: platformProcedures.confirmations.reject.handler(async (call) => {
 				actions.reject({
-					context: await verifiedSession(call),
+					context: await sessionOrMandateContext(call),
 					confirmation: call.input.id,
 				});
 			}),
@@ -498,12 +496,16 @@ export function createHttpHandler({
 
 	/**
 	 * The connected app whose key the request carries in `Authorization: Bearer`, `undefined` without the header. A
-	 * bad key, of any form, and a key next to the session cookie of Better Auth are refused with `UNAUTHORIZED`, never
-	 * taken as no key (ADR 0030).
+	 * bad key, of any form, a key next to the session cookie of Better Auth and a mandate without a key are refused
+	 * with `UNAUTHORIZED`, never taken as no credential (ADR 0030).
 	 */
 	function appOf(request: Request): string | undefined {
 		const read = readAuthorization(request.headers.get(AUTHORIZATION_HEADER));
-		if (read.kind === "none") return undefined;
+		if (read.kind === "none") {
+			if (!request.headers.has(MANDATE_HEADER)) return undefined;
+			log("mandate refused: without-key");
+			throw new ORPCError("UNAUTHORIZED");
+		}
 		/** The same answer to every failure; only the operator's log tells them apart. */
 		const refuse = (reason: string): never => {
 			log(`key refused: ${reason}`);
@@ -527,8 +529,8 @@ export function createHttpHandler({
 		{ mandate = false }: { readonly mandate?: boolean } = {},
 	): Promise<VerifiedContext | null> {
 		// A key, good or bad, admits nothing that needs an account but with a mandate, not even next to a session
-		// that lives.
-		if (request.headers.has(AUTHORIZATION_HEADER))
+		// that lives; nor does a mandate, with its key or without.
+		if (request.headers.has(AUTHORIZATION_HEADER) || request.headers.has(MANDATE_HEADER))
 			return mandate ? mandateContextOf(request) : null;
 		const session = await identity.sessionOf(request, responseHeaders);
 		if (!session) return null;

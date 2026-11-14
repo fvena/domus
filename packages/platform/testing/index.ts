@@ -89,7 +89,7 @@ export type {
 	VerifiedContext,
 } from "../authorization";
 export { type ModuleDatabase, moduleDatabase } from "./module-database";
-export { issueMandate, type MandateIssue } from "./mandates";
+export { issueMandate, type MandateIssue, type MandateRow, readMandates } from "./mandates";
 export { type ChildTask, startChild, type TestChild } from "./children";
 export { type FakeNode, fakeNode, type FakeNodeOptions } from "./fake-node";
 export { controlledTimer, type ControlledTimer } from "../background";
@@ -201,7 +201,9 @@ export function createPlatformWithClock(
 		...(channelQueue === undefined ? {} : { channelQueue }),
 		...(pushServices === undefined ? {} : { pushServices }),
 		...(fetch === undefined ? {} : { fetch }),
-		...(apps === undefined ? {} : { apps: apps.map((name) => ({ name, mandates: false })) }),
+		...(apps === undefined
+			? {}
+			: { apps: apps.map((name) => ({ name, receivesMandates: false })) }),
 	});
 }
 
@@ -492,7 +494,7 @@ export function readKeys(platform: Platform): readonly ListedKey[] {
 }
 
 /** Revokes the key `id` at the instant of the platform's clock, as `keys revoke` does. An unknown id throws. */
-export function revokeKeyOf(platform: Platform, id: string): void {
+export function revokeKeyNow(platform: Platform, id: string): void {
 	if (revokeKey(connectionOf(platform), id, clockOf(platform)()).kind === "unknown")
 		throw new Error(`no key ${id}`);
 }

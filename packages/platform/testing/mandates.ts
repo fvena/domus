@@ -4,7 +4,10 @@
 // it. Phase 5a moves it into `identity`, beside resolving one, when the door issues mandates from real interactions.
 import { randomBytes } from "node:crypto";
 
-import { MANDATE_BYTES, mandateHash } from "../identity/mandates";
+import type { IdentityProof } from "../authorization";
+import { sha256Hex } from "../identity/credentials";
+import { connectedApp } from "../identity/keys";
+import { MANDATE_BYTES } from "../identity/mandates";
 import { originOf, sessionLives, sessionLookup } from "../identity/sessions";
 import { appsOf, clockOf, connectionOf, mandateLifeOf, type Platform } from "../platform";
 
@@ -27,7 +30,7 @@ export function issueMandate(
 ): string {
 	const connection = connectionOf(platform);
 	const now = clockOf(platform)();
-	if (!appsOf(platform).some(({ name, mandates }) => name === app && mandates))
+	if (!connectedApp(appsOf(platform), app)?.receivesMandates)
 		throw new Error(`connected app "${app}" receives no mandates`);
 	const owner = sessionLookup(connection)(session);
 	if (!owner || !sessionLives(connection)(owner.account, session, now))
@@ -41,7 +44,7 @@ export function issueMandate(
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 		.run(
-			mandateHash(id),
+			sha256Hex(id),
 			app,
 			origin.account,
 			origin.device,
@@ -53,4 +56,28 @@ export function issueMandate(
 			now + mandateLifeOf(platform),
 		);
 	return id;
+}
+
+/** A mandate as its row keeps it, without the hash of its id. */
+export interface MandateRow {
+	readonly app: string;
+	readonly account: string;
+	readonly device: string;
+	readonly session: string;
+	readonly deviceAccount: string;
+	readonly identity: IdentityProof;
+	readonly conversation: string | null;
+	readonly issuedAt: number;
+	readonly expiresAt: number;
+}
+
+/** Every mandate row, oldest first, expired ones and those of an ended session included. Plain data: changing it changes nothing. */
+export function readMandates(platform: Platform): readonly MandateRow[] {
+	return connectionOf(platform)
+		.prepare<[], MandateRow>(
+			`SELECT app, account, device, session, device_account AS deviceAccount, identity, conversation,
+				issued_at AS issuedAt, expires_at AS expiresAt
+			FROM platform_mandates ORDER BY issued_at, rowid`,
+		)
+		.all();
 }

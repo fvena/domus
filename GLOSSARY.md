@@ -28,7 +28,7 @@ _Evitar_: usuario.
 Un programa que habla con Domus por la API con su propia llave, como Kira. Solo puede hacer lo que se le concede de forma expresa; ser una app conectada no da ningún permiso por sí mismo.
 _Evitar_: integración, cliente (para esto), servicio.
 
-**Llave** (`api key`):
+**Llave** (`key`):
 La credencial de una app conectada: dice qué app es, nunca de parte de quién actúa. Se crea, se cambia y se revoca fuera de las acciones.
 _Evitar_: token, API key (en el texto en español).
 

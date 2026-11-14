@@ -22,6 +22,23 @@ export const statusContract = oc.output(
 	}),
 );
 
+/** The connected app Kira is: its name in `via` and in the `app` of {@link statusContract} (ADR 0030). */
+export const KIRA = "kira";
+
+/** The header that carries the key of a connected app, as {@link bearerOf} writes it (ADR 0030). */
+export const AUTHORIZATION_HEADER = "authorization";
+
+/** The scheme of a key in {@link AUTHORIZATION_HEADER}, which the door reads in any case. */
+export const KEY_SCHEME = "Bearer";
+
+/** The header that carries the id of a mandate, next to the key of the app it was issued for (ADR 0030). */
+export const MANDATE_HEADER = "domus-mandate";
+
+/** The value of {@link AUTHORIZATION_HEADER} that carries `key`. */
+export function bearerOf(key: string): string {
+	return `${KEY_SCHEME} ${key}`;
+}
+
 /** How long a password may be, in characters: Better Auth's own bounds, applied by every way of setting one. */
 export const PASSWORD_LENGTH = { min: 8, max: 128 } as const;
 

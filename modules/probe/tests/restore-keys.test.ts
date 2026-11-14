@@ -123,6 +123,9 @@ describe("restoring a backup", { timeout: RESTIC_TIMEOUT }, () => {
 			);
 			later = test.prepare.key("kira");
 			expect(await answersTo(test, later, mandate)).toEqual({ status: "ok", read: "ok" });
+			expect(test.mandates()).toEqual([
+				expect.objectContaining({ account: "ana", app: "kira" }),
+			]);
 		}
 
 		await restoreBackup({
@@ -134,6 +137,8 @@ describe("restoring a backup", { timeout: RESTIC_TIMEOUT }, () => {
 
 		await using test = open(target);
 		test.clock.set(AFTER_BACKUP, { wake: false });
+		// Ending every session already left none that resolves; restoring also deletes their rows.
+		expect(test.mandates()).toEqual([]);
 		for (const key of [live, revoked, later])
 			expect(await answersTo(test, key, mandate)).toEqual({
 				status: "UNAUTHORIZED",

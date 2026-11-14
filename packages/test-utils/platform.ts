@@ -27,6 +27,7 @@ import {
 	type IssuedProof,
 	type ListedKey,
 	type LogEntry,
+	type MandateRow,
 	type ModuleDatabase,
 	moduleDatabase,
 	type PermissionLevel,
@@ -40,8 +41,9 @@ import {
 	readDelegationOf,
 	readKeys,
 	readLog,
-	revokeKeyOf,
+	readMandates,
 	readPendingConfirmations,
+	revokeKeyNow,
 	readSubscriptions,
 	rejectPending,
 	requestProofOf,
@@ -489,6 +491,11 @@ export interface TestPlatform<
 	 */
 	mandate(browser: TestBrowser, options?: MandateOptions): string;
 	/**
+	 * A read-only snapshot of every mandate row, expired ones and those of an ended session included, without the
+	 * hash of its id: what is stored, such as that restoring leaves none.
+	 */
+	mandates(): readonly MandateRow[];
+	/**
 	 * Closes the platform and removes the temporary folder it created. Safe to call more than once. Throws while
 	 * the background is active; disposing stops it first.
 	 */
@@ -767,13 +774,14 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		log: () => readLog(platform),
 		pendingConfirmations: () => readPendingConfirmations(platform),
 		keys: () => readKeys(platform),
-		revokeKey: (id) => revokeKeyOf(platform, id),
+		revokeKey: (id) => revokeKeyNow(platform, id),
 		mandate: (browser, { app = "kira", conversation } = {}) =>
 			issueMandate(platform, {
 				session: sessionOfBrowser(browser).session,
 				app,
 				...(conversation === undefined ? {} : { conversation }),
 			}),
+		mandates: () => readMandates(platform),
 		close,
 		// A job the test left held, often by a failed assertion before its release, would keep the stop waiting on
 		// a clock that only the test moves: disposing moves it past the stop margin, so the platform closes and the

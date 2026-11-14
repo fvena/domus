@@ -260,7 +260,7 @@ describe("http handler", () => {
 			log: (line) => lines.push(line),
 		});
 		const connection = connectionOf(platform);
-		const tester = [...CONNECTED_APPS, { name: "tester", mandates: false }];
+		const tester = [...CONNECTED_APPS, { name: "tester", receivesMandates: false }];
 		const key = createKey(connection, CONNECTED_APPS, "kira", 0);
 		const other = createKey(connection, CONNECTED_APPS, "kira", 0);
 		const revoked = createKey(connection, CONNECTED_APPS, "kira", 0);
@@ -311,7 +311,7 @@ describe("http handler", () => {
 				log: (line) => lines.push(line),
 			});
 			const connection = connectionOf(clocked);
-			const apps = [...CONNECTED_APPS, { name: "tester", mandates: false }];
+			const apps = [...CONNECTED_APPS, { name: "tester", receivesMandates: false }];
 			const key = createKey(connection, apps, "kira", now);
 			const tester = createKey(connection, apps, "tester", now);
 			prepareAccount(clocked, {
@@ -343,6 +343,7 @@ describe("http handler", () => {
 				[withKey("A".repeat(43)), "unknown"],
 				[withKey(good, tester), "other-app"],
 				[withKey(ending), "session-ended"],
+				[{ "domus-mandate": good }, "without-key"],
 			];
 			for (const [headers, reason] of cases) {
 				lines.length = 0;

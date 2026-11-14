@@ -5,7 +5,16 @@
 // line carries a secret but the new key.
 
 import { clockOf, connectionOf, type Platform } from "../platform";
-import { CONNECTED_APPS, createKey, type ListedKey, listKeys, revokeKey } from "./keys";
+import {
+	CONNECTED_APPS,
+	connectedApp,
+	createKey,
+	isKeyId,
+	type ListedKey,
+	listKeys,
+	parseKey,
+	revokeKey,
+} from "./keys";
 
 /** How the command talks to the operator. */
 export interface KeysTerminal {
@@ -26,10 +35,13 @@ export type KeysCommand =
 /** The arguments read, or why they were refused. An error never repeats an argument. */
 export type ParsedKeysArguments = { readonly command: KeysCommand } | { readonly error: string };
 
+/** The names of the connected apps, for the operator. */
+const APP_NAMES = CONNECTED_APPS.map(({ name }) => name).join(", ");
+
 /** How the command is called, for the operator. */
 export const KEYS_USAGE = [
 	"usage:",
-	`  keys create <app>    app: ${CONNECTED_APPS.map(({ name }) => name).join(", ")}; writes only the key to stdout`,
+	`  keys create <app>    app: ${APP_NAMES}; writes only the key to stdout`,
 	"  keys list",
 	"  keys revoke <id>     the id as list shows it",
 ].join("\n");
@@ -51,18 +63,12 @@ export function parseKeysArguments(args: readonly string[]): ParsedKeysArguments
 	if (subcommand === "revoke") {
 		if (rest.length > 0) return { error: "revoke takes one id" };
 		// A whole key given instead of its id is refused without being repeated.
-		if (argument === undefined || !KEY_ID.test(argument))
+		if (argument === undefined || !isKeyId(argument))
 			return { error: "revoke needs the id of a key, as list shows it" };
 		return { command: { kind: "revoke", id: argument } };
 	}
 	return { error: "unknown subcommand: use create, list or revoke" };
 }
-
-/** The names of the connected apps, for the operator. */
-const APP_NAMES = CONNECTED_APPS.map(({ name }) => name).join(", ");
-
-/** The form of a key's id: 8 bytes in base64url. */
-const KEY_ID = /^[A-Za-z0-9_-]{11}$/;
 
 /**
  * The form of an app's name, which neither a key nor its secret, of 43 characters, ever has: an argument of another
@@ -79,12 +85,14 @@ export function runKeys(platform: Platform, command: KeysCommand, terminal: Keys
 		const connection = connectionOf(platform);
 		const now = clockOf(platform);
 		if (command.kind === "create") {
-			if (!CONNECTED_APPS.some(({ name }) => name === command.app)) {
+			if (!connectedApp(CONNECTED_APPS, command.app)) {
 				const which = APP_NAME.test(command.app) ? command.app : "that";
 				return refuse(terminal, `${which} is not a connected app: use ${APP_NAMES}`);
 			}
 			const key = createKey(connection, CONNECTED_APPS, command.app, now());
 			terminal.print(key);
+			// Whoever redirects stdout to the secret's file learns here that it went well, and which key it is.
+			terminal.inform(`created the key ${parseKey(key)?.id ?? ""} of ${command.app}`);
 			return 0;
 		}
 

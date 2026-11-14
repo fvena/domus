@@ -18,7 +18,7 @@ describe("checkKey", () => {
 	});
 	afterEach(() => platform.close());
 
-	const apps = [...CONNECTED_APPS, { name: "tester", mandates: false }];
+	const apps = [...CONNECTED_APPS, { name: "tester", receivesMandates: false }];
 	const connection = () => connectionOf(platform);
 
 	it("finds the app of a good key, also of another app of the list", () => {

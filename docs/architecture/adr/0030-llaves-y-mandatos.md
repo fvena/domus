@@ -1,6 +1,6 @@
 # Llaves y mandatos
 
-Precisa los ADR 0004, 0020, 0023, 0028 y 0029: cómo se autentica una app conectada, cómo dice de parte de quién actúa sin que la puerta se crea lo que declara, qué acepta la puerta de ella y cómo se confirma lo que pide.
+Precisa los ADR 0004, 0020, 0023, 0026, 0028 y 0029: cómo se autentica una app conectada, cómo dice de parte de quién actúa sin que la puerta se crea lo que declara, qué acepta la puerta de ella y cómo se confirma lo que pide.
 
 **Cuatro responsabilidades separadas.** La llave autentica a la app. La puerta atribuye la identidad. El mandato lleva esa atribución a la app. La autorización decide con la delegación vigente. La llave nunca dice de parte de quién: que Kira «en cada petición dice de parte de quién habla» (ADR 0004) se cumple presentando un mandato, no declarando una cuenta. Una cuenta declarada convertiría la llave en una credencial para actuar como cualquiera dentro de su delegación, y contradiría que nada de lo que declara el cliente vale como identidad (ADR 0023).
 
@@ -19,9 +19,9 @@ Las llaves no caducan. Puede haber varias vivas por app, para rotar sin cortar e
 3. sustituir el fichero y recrear `assistant`, porque un reinicio no ve un fichero nuevo;
 4. revocar la vieja solo cuando la nueva funciona, y si no funciona, volver a la vieja.
 
-Una llave comprometida se revoca en el momento. Restaurar revoca todas las llaves, por la misma razón por la que cierra todas las sesiones (ADR 0026): una llave revocada después de la copia volvería a valer. Tras restaurar se crea una nueva para Kira.
+Una llave comprometida se revoca en el momento. `keys` toma el cerrojo compartido de la base, como `api` y `accounts` (ADR 0026), así que no corre durante una restauración. Restaurar revoca todas las llaves y borra los mandatos, por la misma razón por la que cierra todas las sesiones (ADR 0026): una llave revocada después de la copia volvería a valer. Tras restaurar se crea una nueva para Kira.
 
-**Cómo viajan.** La llave va en `Authorization: Bearer` y el mandato en `domus-mandate`. Una petición que trae a la vez una cookie de sesión y una llave se rechaza, en vez de elegir entre las dos; las demás cookies no cuentan. Una credencial mala nunca baja a anónima. Las respuestas son estas:
+**Cómo viajan.** La llave va en `Authorization: Bearer` y el mandato en `domus-mandate`. Una petición que trae a la vez una cookie de sesión y una llave se rechaza, en vez de elegir entre las dos; las demás cookies no cuentan. Un mandato sin su llave también se rechaza en todas las rutas, aunque venga junto a una sesión viva. Una credencial mala nunca baja a anónima. Las respuestas son estas:
 
 - una llave desconocida, revocada o con el secreto equivocado: `UNAUTHORIZED` en todas las rutas, también en `status`;
 - sin credencial, `status` sigue siendo público, y con una llave válida responde además el nombre de la app;

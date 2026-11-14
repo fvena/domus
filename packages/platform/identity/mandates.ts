@@ -3,17 +3,14 @@
 // that interaction, kept under the SHA-256 of its id, and it lives until it expires or its session ends. Here the
 // door reads it from a request and resolves it. Issuing one lives in `platform/testing` alone until phase 5a, so no
 // production code reaches it.
-import { createHash } from "node:crypto";
-
 import type Database from "better-sqlite3";
 
 import type { IdentityProof } from "../authorization";
+import { encodesBytes, sha256Hex } from "./credentials";
 import { type SessionOrigin, sessionLivesWhere } from "./sessions";
 
 /** How many random bytes the id of a mandate carries. */
 export const MANDATE_BYTES = 32;
-
-const MANDATE = /^[A-Za-z0-9_-]{43}$/;
 
 /** What a request's `domus-mandate` header carries: none, the id of a mandate, or a bad one. */
 export type MandateRead =
@@ -28,14 +25,8 @@ export type MandateRead =
 export function readMandate(value: string | null): MandateRead {
 	if (value === null) return { kind: "none" };
 	const id = value.trim();
-	if (!MANDATE.test(id) || Buffer.from(id, "base64url").toString("base64url") !== id)
-		return { kind: "bad" };
+	if (!encodesBytes(id, MANDATE_BYTES)) return { kind: "bad" };
 	return { kind: "mandate", id };
-}
-
-/** The SHA-256 of a mandate's id, in hex: what the database keeps, so a copy of it holds no usable mandate. */
-export function mandateHash(id: string): string {
-	return createHash("sha256").update(id).digest("hex");
 }
 
 /**
@@ -92,7 +83,7 @@ export function resolveMandate(
 				expires_at AS expiresAt, ${sessionLivesWhere("m.session", "m.account", "?")} AS lives
 			FROM platform_mandates m WHERE hash = ?`,
 		)
-		.get(now, mandateHash(id));
+		.get(now, sha256Hex(id));
 	if (!row) return { ok: false, reason: "unknown" };
 	if (now >= row.expiresAt) return { ok: false, reason: "expired" };
 	if (row.app !== app) return { ok: false, reason: "other-app" };

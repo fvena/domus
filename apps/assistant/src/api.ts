@@ -1,11 +1,18 @@
 import { type CallContext, clientFor } from "@domus/api-client";
-import { PROTOCOL, platformContract } from "@domus/platform/contracts";
+import {
+	AUTHORIZATION_HEADER,
+	bearerOf,
+	KIRA,
+	MANDATE_HEADER,
+	PROTOCOL,
+	platformContract,
+} from "@domus/platform/contracts";
 import type { CheckResult } from "@domus/utils/connection";
 import { ORPCError } from "@orpc/client";
 import type { AnyContractRouter, ContractRouterClient } from "@orpc/contract";
 
 /** The connected app this program is, as the api names it when it accepts its key (ADR 0030). */
-export const APP = "kira";
+export const APP = KIRA;
 
 /** How this program reaches the api: where it listens, the `fetch` to use and its key, if it has one. */
 export interface ApiAccess {
@@ -28,8 +35,8 @@ export function apiClient<T extends AnyContractRouter>(
 		baseUrl: access.baseUrl,
 		fetch: access.fetch,
 		headers: {
-			...(access.key !== undefined && { authorization: `Bearer ${access.key}` }),
-			...(mandate !== undefined && { "domus-mandate": mandate }),
+			...(access.key !== undefined && { [AUTHORIZATION_HEADER]: bearerOf(access.key) }),
+			...(mandate !== undefined && { [MANDATE_HEADER]: mandate }),
 		},
 	});
 }

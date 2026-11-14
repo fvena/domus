@@ -40,12 +40,14 @@ describe("runKeys", () => {
 	afterEach(() => platform.close());
 
 	describe("create", () => {
-		it("writes to stdout the new key of kira alone, with its line break, and the key works", () => {
-			const { code, stdout } = run(platform, "create", "kira");
+		it("writes to stdout the new key of kira alone, with its line break, says on stderr its id, and the key works", () => {
+			const { code, stdout, stderr } = run(platform, "create", "kira");
 			expect(code).toBe(0);
 			expect(stdout).toMatch(/^domus_[A-Za-z0-9_-]{11}\.[A-Za-z0-9_-]{43}\n$/);
 			const key = stdout.trimEnd();
 			expect(parseKey(key)).toBeDefined();
+			expect(stderr).toBe(`created the key ${parseKey(key)?.id} of kira\n`);
+			expect(stderr).not.toContain(parseKey(key)?.secret);
 			expect(checkKey(connectionOf(platform), CONNECTED_APPS, key)).toEqual({
 				ok: true,
 				id: parseKey(key)?.id,
