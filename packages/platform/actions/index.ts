@@ -139,6 +139,31 @@ export interface Actions {
 	 * `confirm`, "not found" for a pending operation that is not a download, and like the download.
 	 */
 	confirmDownload(call: ConfirmationCall): Download;
+	/**
+	 * Leaves a job of `kind` with its data in the write whose handler is running: it is stored after that write's
+	 * entry, in its transaction and with its number, so it exists only if the write commits, and its undo cancels it
+	 * while it is pending. Throws outside a write's handler, and for data that does not survive JSON.
+	 */
+	enqueueInWrite(job: WriteJob): void;
+}
+
+/** A job a write leaves: its kind and its data. */
+export interface WriteJob {
+	readonly kind: string;
+	readonly payload: unknown;
+}
+
+/** A job of the outbox, as a write leaves it: with the log entry of that write. */
+export interface OutboxJob extends WriteJob {
+	readonly entry: number;
+}
+
+/** Where writes leave their jobs and undos cancel them, in the caller's transaction (ADR 0029). */
+export interface Outbox {
+	/** Stores a job due now; it runs only once the transaction that holds it has ended. */
+	enqueue(job: OutboxJob): void;
+	/** Cancels the jobs of `entry` still pending, with the reason `undone`; one already claimed goes on. */
+	cancel(entry: number): void;
 }
 
 /** A download: who asks, the read that returns the file and its input, and the file's id. */
@@ -189,6 +214,8 @@ export interface ActionsOptions {
 	readonly references: References;
 	/** Opens a content for a download: unset when the platform has no folder for files. */
 	readonly openContent?: (hash: string) => OpenedContent;
+	/** Where a write's jobs go. */
+	readonly outbox: Outbox;
 }
 
 export type { ConfirmationCall, ConfirmationTimes, Download, PlatformOperation };
@@ -210,8 +237,11 @@ export function createActions({
 	operations = [],
 	references,
 	openContent,
+	outbox,
 }: ActionsOptions): Actions {
 	const registry = new Map<string, RegisteredAction>();
+	/** The jobs the write whose handler is running leaves, while one runs. */
+	let leaving: WriteJob[] | undefined;
 	for (const module of modules) {
 		const db = drizzle({ client: connection, schema: module.schema });
 		const ownedTables = ownedTablesOf(module, areas);
@@ -262,6 +292,12 @@ export function createActions({
 		fingerprintOf: (operation) => guarded(() => fingerprintOf(operation)),
 		download: (call) => guarded(() => download(call)),
 		confirmDownload: (call) => guarded(() => answering.confirmDownload(call)),
+		enqueueInWrite(job) {
+			if (!leaving) throw new Error("a job is left only inside a write's handler");
+			if (job.payload === undefined || !isLosslessJson(job.payload))
+				throw new Error("the data of a job must survive JSON");
+			leaving.push(job);
+		},
 	};
 
 	function download({ context, action, input, file, proof }: DownloadCall): Download {
@@ -693,6 +729,8 @@ export function createActions({
 								}),
 						);
 						actionLog.markUndone(number, receipt.entry);
+						// What the entry left in the outbox and has not started does not go out.
+						outbox.cancel(number);
 						return receipt;
 					},
 				),
@@ -785,7 +823,15 @@ export function createActions({
 			touched: [],
 			released: new Set(),
 		};
-		const { value, transitions } = capture.watch(() => found.execute(context, input, now, run));
+		const jobs: WriteJob[] = [];
+		leaving = jobs;
+		let watched;
+		try {
+			watched = capture.watch(() => found.execute(context, input, now, run));
+		} finally {
+			leaving = undefined;
+		}
+		const { value, transitions } = watched;
 		// The records `ctx.files` changed count as touched without the handler declaring them.
 		const outcome = checkOutcome(found, value, run.touched);
 		checkTransitions(found, actor.account, transitions, outcome.touched);
@@ -802,8 +848,10 @@ export function createActions({
 			touched: outcome.touched,
 			undoes: logged.undoes,
 		});
-		// Its entry exists only now: each reference it released is linked to it, in the same transaction.
+		// Its entry exists only now: each reference it released is linked to it, and each job it left carries it, in
+		// the same transaction.
 		references.linkReleased(run.released, entry);
+		for (const job of jobs) outbox.enqueue({ ...job, entry });
 		capture.clear();
 		return { result: outcome.result, entry };
 	}

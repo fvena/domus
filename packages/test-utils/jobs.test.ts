@@ -2,8 +2,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { PermanentJobError } from "@domus/platform/testing";
+import { INVALID_PAYLOAD, PassingJobError, PermanentJobError } from "@domus/platform/testing";
 import { describe, expect, it, onTestFinished } from "vitest";
+import { z } from "zod";
 
 import { createTestPlatform, type SyntheticJob } from "./platform";
 
@@ -308,5 +309,180 @@ describe("the failed hook of a job kind", () => {
 
 		expect(test.background.jobs()).toEqual([expect.objectContaining({ state: "cancelled" })]);
 		expect(cancelled.failures).toEqual([]);
+	});
+});
+
+describe("a job with data", () => {
+	/** A kind whose jobs carry `{ to }` and note the data each attempt receives. */
+	function mailJob() {
+		const received: unknown[] = [];
+		const job: SyntheticJob = {
+			lane: "short",
+			payload: z.object({ to: z.string() }),
+			run: ({ payload }) => void received.push(payload),
+		};
+		return { job, received };
+	}
+
+	it("receives its data as the schema of its kind gives it back, and keeps it in its row", async () => {
+		const mail = mailJob();
+		await using test = createTestPlatform({ modules: [], jobs: { mail: mail.job } });
+		test.background.start();
+
+		test.background.enqueue("mail", { to: "paco", extra: true });
+		await test.background.settled();
+
+		expect(mail.received).toEqual([{ to: "paco" }]);
+		expect(test.background.jobs()).toEqual([
+			expect.objectContaining({
+				state: "done",
+				payload: { to: "paco", extra: true },
+				entry: null,
+			}),
+		]);
+	});
+
+	it("fails for good at once, with its code, when its data does not match the schema of its kind", async () => {
+		const mail = mailJob();
+		await using test = createTestPlatform({ modules: [], jobs: { mail: mail.job } });
+		test.background.start();
+
+		test.background.enqueue("mail", { to: 3 });
+		await test.background.settled();
+		// Two hours, before the cleanup of 04:30: no retry.
+		test.clock.advance(2 * 60 * 60 * SECOND);
+		await test.background.settled();
+
+		expect(mail.received).toEqual([]);
+		expect(test.background.jobs()).toEqual([
+			expect.objectContaining({
+				state: "failed",
+				attempts: 1,
+				error: `PermanentJobError ${INVALID_PAYLOAD}: the data of the job does not match the schema of "mail"`,
+			}),
+		]);
+	});
+
+	it("fails for good when a kind with a schema gets no data", async () => {
+		const mail = mailJob();
+		await using test = createTestPlatform({ modules: [], jobs: { mail: mail.job } });
+		test.background.start();
+
+		test.background.enqueue("mail");
+		await test.background.settled();
+
+		expect(mail.received).toEqual([]);
+		expect(test.background.jobs()).toEqual([
+			expect.objectContaining({
+				state: "failed",
+				error: expect.stringContaining(INVALID_PAYLOAD),
+			}),
+		]);
+	});
+
+	it("cannot be stored for a kind that declares no schema for its data", async () => {
+		await using test = createTestPlatform({
+			modules: [],
+			jobs: { plain: { lane: "short", run: () => {} } },
+		});
+
+		expect(() => test.background.enqueue("plain", { to: "paco" })).toThrow(
+			'the job kind "plain" declares no schema for its data',
+		);
+		expect(test.background.jobs()).toEqual([]);
+	});
+});
+
+describe("the outcome of a job", () => {
+	it("keeps what a job's work ends with when it says more than done, and nothing when it does not", async () => {
+		await using test = createTestPlatform({
+			modules: [],
+			jobs: {
+				skipped: { lane: "short", run: () => "not-member" },
+				plain: { lane: "short", run: () => {} },
+			},
+		});
+		test.background.start();
+
+		test.background.enqueue("skipped");
+		test.background.enqueue("plain");
+		await test.background.settled();
+
+		expect(test.background.jobs()).toEqual([
+			expect.objectContaining({ kind: "skipped", state: "done", outcome: "not-member" }),
+			expect.objectContaining({ kind: "plain", state: "done", outcome: null }),
+		]);
+	});
+});
+
+describe("a passing error with the earliest instant of its retry", () => {
+	it("is retried at that instant when it comes after the growing wait", async () => {
+		const flaky = heldJob("short");
+		await using test = createTestPlatform({ modules: [], jobs: { flaky: flaky.job } });
+		test.background.start();
+		test.background.enqueue("flaky");
+		await test.background.flush();
+
+		flaky.current.fail(
+			new PassingJobError("slow down", { notBefore: test.clock.now() + 90 * SECOND }),
+		);
+		await test.background.flush();
+		test.clock.advance(90 * SECOND - 1);
+		await test.background.flush();
+		expect(flaky.started).toBe(1);
+		test.clock.advance(1);
+		await test.background.flush();
+		expect(flaky.started).toBe(2);
+		flaky.current.succeed();
+	});
+
+	it("is retried after the growing wait when that instant comes before it", async () => {
+		const flaky = heldJob("short");
+		await using test = createTestPlatform({ modules: [], jobs: { flaky: flaky.job } });
+		test.background.start();
+		test.background.enqueue("flaky");
+		await test.background.flush();
+
+		flaky.current.fail(
+			new PassingJobError("slow down", { notBefore: test.clock.now() + 10 * SECOND }),
+		);
+		await test.background.flush();
+		test.clock.advance(30 * SECOND - 1);
+		await test.background.flush();
+		expect(flaky.started).toBe(1);
+		test.clock.advance(1);
+		await test.background.flush();
+		expect(flaky.started).toBe(2);
+		flaky.current.succeed();
+	});
+
+	it("keeps the maximum of attempts, and only its name and code", async () => {
+		const flaky = heldJob("short");
+		await using test = createTestPlatform({ modules: [], jobs: { flaky: flaky.job } });
+		test.background.start();
+		test.background.enqueue("flaky");
+		await test.background.flush();
+
+		for (let attempt = 1; attempt < 5; attempt++) {
+			const notBefore = test.clock.now() + 60 * 60 * SECOND;
+			flaky.current.fail(
+				new PassingJobError("for ana@example.com", { code: "BUSY", notBefore }),
+			);
+			await test.background.flush();
+			test.clock.set(notBefore);
+			await test.background.flush();
+		}
+		expect(flaky.started).toBe(5);
+
+		flaky.current.fail(new PassingJobError("for ana@example.com", { code: "BUSY" }));
+		await test.background.settled();
+		// Four hours went by: the cleanup of 04:30 ran too.
+		expect(test.background.jobs().filter(({ kind }) => kind === "flaky")).toEqual([
+			expect.objectContaining({
+				state: "failed",
+				attempts: 5,
+				error: "PassingJobError BUSY",
+			}),
+		]);
 	});
 });
