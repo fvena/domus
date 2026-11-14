@@ -7,7 +7,7 @@ import { existsSync, mkdtempSync, readdirSync, rmSync, utimesSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { startChild } from "@domus/platform/testing";
+import { contentPath, startChild } from "@domus/platform/testing";
 import { describe, expect, it } from "vitest";
 
 import { TEST_ORIGIN, TEST_START, type TestBrowser } from "./index";
@@ -123,7 +123,7 @@ describe("a cut while publishing, after the rename and before the rows", () => {
 	it("leaves the file without a row, which the cleanup collects an hour later", async () => {
 		await using folder = dataFolder();
 		await cutWhilePublishing(folder.path);
-		const path = join(folder.path, "files", "contents", HASH.slice(0, 2), HASH);
+		const path = contentPath(join(folder.path, "files"), HASH);
 		// Left by a cut at the start of the test's day, more than an hour before its night.
 		utimesSync(path, new Date(TEST_START), new Date(TEST_START));
 

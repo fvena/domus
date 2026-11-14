@@ -17,7 +17,7 @@ import { type AccessView, visibleTo } from "../authorization";
 import { editableTo, type RecordArea } from "../authorization/writes";
 import { randomId } from "../identity/accounts";
 import { sessionLives } from "../identity/sessions";
-import type { FileType } from "./type";
+import type { FileDescription } from "./type";
 
 /**
  * What `ctx.files` refuses to a handler: "not found", "forbidden" or a conflict with its reason. The one error of
@@ -56,11 +56,8 @@ export interface FilesOfRun {
 }
 
 /** A live reference as a download needs it: its content's hash and what its answer says of it. */
-export interface LiveReference {
-	readonly content: string;
-	readonly name: string;
-	readonly type: FileType;
-	readonly size: number;
+export interface LiveReference extends FileDescription {
+	readonly hash: string;
 }
 
 export interface References {
@@ -72,24 +69,19 @@ export interface References {
 	live(module: string, id: string): LiveReference | undefined;
 }
 
-interface ReferenceRow {
+interface ReferenceRow extends FileDescription {
 	readonly id: string;
-	readonly name: string;
-	readonly type: FileType;
-	readonly size: number;
 	readonly releasedBy: number | null;
 	/** 1 while its content is present: 0 once the cleanup claimed it to delete it. */
 	readonly present: number;
 }
 
-interface PreparedRow {
-	readonly content: string;
-	readonly name: string;
+interface PreparedRow extends FileDescription {
+	/** The hash of its content. */
+	readonly hash: string;
 	readonly session: string;
 	readonly expiresAt: number;
 	readonly consumed: number;
-	readonly type: FileType;
-	readonly size: number;
 	/** 1 while its content is present: 0 once the cleanup claimed it to delete it. */
 	readonly present: number;
 }
@@ -108,7 +100,7 @@ export function createReferences(connection: Database.Database, view: AccessView
 		`${REFERENCE} WHERE r.id = ? AND r.module = ? AND r.record_table = ? AND r.record_id = ?`,
 	);
 	const preparedFile = connection.prepare<[string], PreparedRow>(
-		`SELECT p.content, p.name, p.session, p.expires_at AS expiresAt, p.consumed, c.type, c.size,
+		`SELECT p.content AS hash, p.name, p.session, p.expires_at AS expiresAt, p.consumed, c.type, c.size,
 			c.state = 'present' AS present
 		FROM platform_prepared_files p JOIN platform_file_contents c ON c.hash = p.content WHERE p.id = ?`,
 	);
@@ -129,7 +121,7 @@ export function createReferences(connection: Database.Database, view: AccessView
 		"DELETE FROM platform_file_references WHERE id = ?",
 	);
 	const liveOfModule = connection.prepare<[string, string], LiveReference>(
-		`SELECT r.content, r.name, c.type, c.size
+		`SELECT r.content AS hash, r.name, c.type, c.size
 		FROM platform_file_references r JOIN platform_file_contents c ON c.hash = r.content
 		WHERE r.id = ? AND r.module = ? AND r.released_by IS NULL`,
 	);
@@ -195,14 +187,7 @@ export function createReferences(connection: Database.Database, view: AccessView
 					if (now >= found.expiresAt) throw refusalOf(conflict("prepared-file-expired"));
 					consume.run(prepared);
 					const id = randomId();
-					insertReference.run(
-						id,
-						found.content,
-						found.name,
-						module,
-						tableName,
-						record.id,
-					);
+					insertReference.run(id, found.hash, found.name, module, tableName, record.id);
 					touch();
 					return { id, name: found.name, type: found.type, size: found.size };
 				},

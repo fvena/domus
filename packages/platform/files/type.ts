@@ -1,11 +1,15 @@
-/** The six classes of content a file may have, by the type it is served with. */
-export type FileType =
-	| "image/jpeg"
-	| "image/png"
-	| "image/webp"
-	| "image/heic"
-	| "application/pdf"
-	| "text/plain";
+import type { FILE_TYPES } from "../schema";
+
+/** The six classes of content a file may have, by the type it is served with: those the schema admits. */
+export type FileType = (typeof FILE_TYPES)[number];
+
+/** What an answer says of a file: the name its uploader gave it, the type detected from its bytes and its size. */
+export interface FileDescription {
+	readonly name: string;
+	/** Detected from the bytes, never the one the client declared. */
+	readonly type: FileType;
+	readonly size: number;
+}
 
 /** The first bytes the detector keeps: enough for every header it reads, an `ftyp` box included. */
 const HEAD_LIMIT = 4096;

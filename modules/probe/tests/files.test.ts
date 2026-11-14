@@ -235,6 +235,8 @@ describe("attaching and downloading a file", () => {
 			["probe.getNote", { id: 2 }, "no-such-file"],
 			["probe.countNotes", undefined, photo],
 			["probe.attachFile", { noteId: 2, prepared: "x" }, photo],
+			// A write is not a read whatever its input: no input it rejects answers first.
+			["probe.attachFile", { noteId: "two" }, photo],
 			["probe.nothing", undefined, photo],
 		] as const) {
 			const response = await download(phone, action, input, file);
@@ -487,7 +489,7 @@ describe("undoing with files", () => {
 		expect(() =>
 			test.invoke(
 				ana,
-				"probe.restoreFile",
+				"probe.reattachFile",
 				{ noteId: 1, file: photo },
 				{ idempotencyKey: "r1" },
 			),
@@ -499,9 +501,9 @@ describe("undoing with files", () => {
 			{ action: "probe.addNote", undoes: null },
 			{ action: "probe.attachFile", undoes: null },
 			{ action: "probe.detachFile", undoes: null },
-			{ action: "probe.restoreFile", undoes: detached.entry },
+			{ action: "probe.reattachFile", undoes: detached.entry },
 			{ action: "probe.detachFile", undoes: undone.entry },
-			{ action: "probe.restoreFile", undoes: redone.entry },
+			{ action: "probe.reattachFile", undoes: redone.entry },
 		]);
 	});
 
@@ -540,7 +542,7 @@ describe("undoing with files", () => {
 		expect(test.invoke(ana, "probe.getNote", { id: 1 })?.files).toEqual([]);
 	});
 
-	it("brings nothing back through restoreFile or restoreNote called directly", async () => {
+	it("brings nothing back through reattachFile or restoreNote called directly", async () => {
 		await using test = await household();
 		const phone = await signedIn(test, "ana");
 		const ana = test.contextOf(phone);
@@ -560,7 +562,7 @@ describe("undoing with files", () => {
 		expect(() =>
 			test.invoke(
 				ana,
-				"probe.restoreFile",
+				"probe.reattachFile",
 				{ noteId: 1, file: photo },
 				{ idempotencyKey: "r1" },
 			),

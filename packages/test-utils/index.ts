@@ -23,6 +23,7 @@ export {
 export { requireRestic } from "./restic";
 export {
 	type ChildTask,
+	contentPath,
 	fakeNode,
 	type InterleavePoint,
 	PermanentJobError,

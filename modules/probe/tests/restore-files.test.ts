@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
 
 import {
+	contentPath,
 	createTestPlatform,
 	restoreBackup,
 	type RestorePoint,
@@ -215,9 +216,8 @@ function restic(target: RestoreTarget, args: readonly string[], cwd?: string): v
 }
 
 /** Where a content lives in the target's store. */
-function contentPath(target: RestoreTarget, bytes: Uint8Array): string {
-	const hash = sha256(bytes);
-	return join(target.files, "contents", hash.slice(0, 2), hash);
+function storedIn(target: RestoreTarget, bytes: Uint8Array): string {
+	return contentPath(target.files, sha256(bytes));
 }
 
 describe("restoring a backup with files", { timeout: RESTIC_TIMEOUT }, () => {
@@ -286,7 +286,7 @@ describe("restoring a backup with files", { timeout: RESTIC_TIMEOUT }, () => {
 			file = await attached(test, phone, ana, 1, fridge);
 			await backUp(test);
 		}
-		writeFileSync(contentPath(target, fridge), "damaged");
+		writeFileSync(storedIn(target, fridge), "damaged");
 
 		await restore(target);
 
@@ -379,10 +379,10 @@ describe("refusing to restore a backup with files", { timeout: RESTIC_TIMEOUT },
 			write(test, ana, "probe.addNote", { body: "nevera" });
 			await attached(test, phone, ana, 1, fridge);
 			// The backup carries the bytes as the store has them, damaged.
-			writeFileSync(contentPath(target, fridge), "damaged");
+			writeFileSync(storedIn(target, fridge), "damaged");
 			await backUp(test);
 			// Mended in the store; a note after the backup.
-			writeFileSync(contentPath(target, fridge), fridge);
+			writeFileSync(storedIn(target, fridge), fridge);
 			write(test, ana, "probe.addNote", { body: "horno" });
 		}
 		const before = store(target);
@@ -510,7 +510,7 @@ describe("a restore with files killed by SIGKILL", { timeout: RESTIC_TIMEOUT }, 
 				).toEqual(["anterior"]);
 				// restic gives each content the time of its backup: here, more than an hour before the night.
 				for (const hash of installed) {
-					const path = join(target.files, "contents", hash.slice(0, 2), hash);
+					const path = contentPath(target.files, hash);
 					utimesSync(path, new Date(TEST_START), new Date(TEST_START));
 				}
 				test.background.start();

@@ -16,7 +16,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { TEST_ORIGIN, TEST_START, type TestBrowser } from "./index";
+import { contentPath, TEST_ORIGIN, TEST_START, type TestBrowser } from "./index";
 import { createTestPlatform, type TestPlatformOptions } from "./platform";
 
 const PASSWORD = "correct horse battery staple";
@@ -106,9 +106,7 @@ describe("uploading a file", () => {
 		});
 		const hash = sha256(JPEG);
 		expect(storedContents(test.filesDirectory)).toEqual([`${hash.slice(0, 2)}/${hash}`]);
-		expect(readFileSync(join(test.filesDirectory, "contents", hash.slice(0, 2), hash))).toEqual(
-			Buffer.from(JPEG),
-		);
+		expect(readFileSync(contentPath(test.filesDirectory, hash))).toEqual(Buffer.from(JPEG));
 		expect(incoming(test.filesDirectory)).toEqual([]);
 	});
 

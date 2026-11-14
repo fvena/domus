@@ -2,7 +2,7 @@
 // at stop. It checks the module definitions, opens SQLite and brings its schema up to date before anything uses
 // it, makes sure the one device account exists, installs the write capture of the modules' owned tables, and
 // runs the modules' actions with the production authorizer.
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute } from "node:path";
 
 import { checkModules, type ModuleDefinition, PLATFORM_ID } from "@domus/module-sdk";
 import Database from "better-sqlite3";
@@ -37,6 +37,7 @@ import {
 	type FreeSpace,
 	type Interleave,
 } from "./files";
+import { filesFolderOf } from "./files/store";
 import { accessView, registeredAreas } from "./identity/access";
 import { ensureDeviceAccount } from "./identity/accounts";
 import { platformOperations } from "./identity/operations";
@@ -227,8 +228,9 @@ export function openPlatform(
 		capture = installCapture(db, modules, areas);
 		view = accessView(db, areas);
 		const filesFolder =
-			filesDirectory ??
-			(databaseFile === IN_MEMORY ? undefined : join(dirname(databaseFile), "files"));
+			databaseFile === IN_MEMORY
+				? filesDirectory
+				: filesFolderOf(databaseFile, filesDirectory);
 		files =
 			filesFolder === undefined
 				? undefined
@@ -258,7 +260,7 @@ export function openPlatform(
 							config: backupConfig,
 							databaseFile,
 							// On a file there is always one: the option's or the data folder's.
-							filesDirectory: filesDirectory ?? join(dirname(databaseFile), "files"),
+							filesDirectory: filesFolderOf(databaseFile, filesDirectory),
 							...(restic === undefined ? {} : { executable: restic }),
 							...(node === undefined ? {} : { node }),
 						}),

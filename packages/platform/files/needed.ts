@@ -22,9 +22,6 @@ export const NEEDED_CONTENTS = `SELECT DISTINCT content AS hash FROM platform_fi
 	WHERE id NOT IN (${RELEASES_ENDED})
 	ORDER BY content`;
 
-/** A content's hash as the store names it: SHA-256 in lowercase hex. */
-export const CONTENT_HASH = /^[0-9a-f]{64}$/;
-
 /**
  * Drops what a restored copy no longer needs of its files at `now`, inside the caller's transaction (spec of phase
  * 1d3, «Restaurar»): every prepared file, since the restore ended its session; the released references that no

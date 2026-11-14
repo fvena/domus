@@ -408,7 +408,7 @@ export const backupMarks = sqliteTable(
 // content from a module's record. platform/files reads and writes them with prepared statements.
 
 /** The six types a content may have, by the type it is served with (ADR 0028, «Qué promete el tipo»). */
-const FILE_TYPES = [
+export const FILE_TYPES = [
 	"image/jpeg",
 	"image/png",
 	"image/webp",

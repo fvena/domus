@@ -41,15 +41,6 @@ export function sessionLives(connection: Database.Database): SessionLives {
 	return (account, session) => statement.get(session, account)?.lives === 1;
 }
 
-/** Whether `session` exists and is the account's. */
-export function sessionExists(
-	connection: Database.Database,
-	account: string,
-	session: string,
-): boolean {
-	return sessionLives(connection)(account, session);
-}
-
 /** One of an account's sessions, as its owner sees it: never its token, and its device by an opaque id. */
 export interface SessionSummary {
 	readonly id: string;

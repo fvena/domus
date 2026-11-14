@@ -33,7 +33,7 @@ import {
 	ResticLockedError,
 } from "./restic";
 import { checkSnapshot, takeSnapshot } from "./snapshot";
-import { emptyFolder, SNAPSHOT_FILE } from "./staging";
+import { emptyFolder, SNAPSHOT_FILE, STAGED_FILES } from "./staging";
 
 export type { BackupConfig } from "./restic";
 export type { BackupMarks } from "./marks";
@@ -50,11 +50,6 @@ const [BACKUP_SCHEDULE, BACKUP_CHECK_SCHEDULE] = BACKUP_SCHEDULES;
 
 /** The staging folder of the backups, inside the data folder. */
 const STAGING = "backup-staging";
-/**
- * The folder of the staging folder that holds the contents' links, laid out as the store's own `files` folder: in
- * the snapshot, at `/files`, whatever the data folder is.
- */
-const STAGED_FILES = "files";
 /** The list of the paths restic saves, relative to the staging folder; itself not among them. */
 const PATHS = "paths";
 /** How long after its capture the last saved backup stays fresh for the watcher. */

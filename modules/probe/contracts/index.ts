@@ -76,12 +76,12 @@ export const probeContract = {
 	attachFile: writeAction({ undoable: true, level: "write" })
 		.input(z.object({ noteId: recordId, prepared: z.string().min(1) }))
 		.output(fileRef()),
-	/** Takes a file off a note. Undone by restoring it. */
+	/** Takes a file off a note. Undone by attaching it again with `reattachFile`. */
 	detachFile: writeAction({ undoable: true, level: "write" })
 		.input(z.object({ noteId: recordId, file: z.string().min(1) }))
 		.output(fileRef()),
 	/** Attaches again the file a detachment released: only as its undo. Undone by detaching it. */
-	restoreFile: writeAction({ undoable: true, level: "write" })
+	reattachFile: writeAction({ undoable: true, level: "write" })
 		.input(z.object({ noteId: recordId, file: z.string().min(1) }))
 		.output(fileRef()),
 	/** Makes a note private or public: only its owner can. Undone by setting the previous visibility back. */

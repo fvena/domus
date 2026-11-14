@@ -10,12 +10,32 @@ import {
 	mkdirSync,
 	openSync,
 	readdirSync,
+	renameSync,
 	rmSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 
+/** The folder of the store in the data folder, unless the platform is given another. */
+const FILES_FOLDER = "files";
+
+/** The folder of the contents in the store.'s. */
+const CONTENTS = "contents";
+
 /** How many characters of the hash name the folder a content lives in. */
 const SPREAD = 2;
+
+/** A content's hash as the store names it: SHA-256 in lowercase hex. */
+export const CONTENT_HASH = /^[0-9a-f]{64}$/;
+
+/** The store's folder for a database on a file: `given`, or {@link FILES_FOLDER} beside the database. */
+export function filesFolderOf(databaseFile: string, given?: string): string {
+	return given ?? join(dirname(databaseFile), FILES_FOLDER);
+}
+
+/** Where the content of `hash` lives in the store of `directory`, whether it exists or not. */
+export function contentPath(directory: string, hash: string): string {
+	return join(directory, CONTENTS, hash.slice(0, SPREAD), hash);
+}
 
 export interface FileStore {
 	/** The folder of the uploads in progress, which exists once this returns. */
@@ -23,10 +43,11 @@ export interface FileStore {
 	/** Where the content of `hash` lives, whether it exists or not. */
 	contentPath(hash: string): string;
 	/**
-	 * Creates the folder of a content's path and every missing one above it, up to the store's own, and syncs each
-	 * new folder's parent, so the new entry outlives a power cut. Returns the content's folder.
+	 * Renames the file `from`, already synced, into the place of the content `hash`, over whatever is there, and
+	 * syncs its folder and every folder it had to create, so the new entry outlives a power cut. `from` must be on
+	 * the same volume.
 	 */
-	ensureContentFolder(hash: string): string;
+	install(hash: string, from: string): void;
 	/**
 	 * The path of every file in the folders of the contents (those named by the first characters of a hash), whatever
 	 * its name and whether it has a row or not.
@@ -37,18 +58,19 @@ export interface FileStore {
 }
 
 export function createFileStore(directory: string): FileStore {
-	const contents = join(directory, "contents");
+	const contents = join(directory, CONTENTS);
 	const incoming = join(directory, "incoming");
-	const contentPath = (hash: string) => join(contents, hash.slice(0, SPREAD), hash);
+	const pathOf = (hash: string) => contentPath(directory, hash);
 
 	return {
 		incoming: () => {
 			mkdirSync(incoming, { recursive: true });
 			return incoming;
 		},
-		contentPath,
-		ensureContentFolder: (hash) => {
-			const folder = dirname(contentPath(hash));
+		contentPath: pathOf,
+		install: (hash, from) => {
+			const target = pathOf(hash);
+			const folder = dirname(target);
 			const first = mkdirSync(folder, { recursive: true });
 			if (first !== undefined) {
 				// Each folder created, from the deepest up to the first new one, is an entry of its parent's.
@@ -57,7 +79,8 @@ export function createFileStore(directory: string): FileStore {
 					if (created === first) break;
 				}
 			}
-			return folder;
+			renameSync(from, target);
+			syncToDisk(folder);
 		},
 		stored: () =>
 			existsSync(contents)

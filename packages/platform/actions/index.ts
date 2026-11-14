@@ -266,9 +266,10 @@ export function createActions({
 
 	function download({ context, action, input, file, proof }: DownloadCall): Download {
 		if (!isVerified(context)) throw internalError();
-		const { found, value } = validated(action, input);
-		if (found.kind !== "read")
+		// The kind before the input, so a write answers as an action that does not exist, whatever its input.
+		if (registered(action).kind !== "read")
 			throw new ORPCError("NOT_FOUND", { message: `no read "${action}"` });
+		const { found, value } = validated(action, input);
 		// Authorization first, outside the transaction, so a pending confirmation it stores stays.
 		const checked = authorizeRead(found, context, action, value, { proof, file });
 		return openingDownload(connection, (opened) =>
@@ -293,12 +294,8 @@ export function createActions({
 		const reference = references.live(found.module, file);
 		// A file the read returned that is not a live reference of its module: the module's mistake.
 		if (!reference || !openContent) throw internalError();
-		return {
-			content: openContent(reference.content),
-			name: reference.name,
-			type: reference.type,
-			size: reference.size,
-		};
+		const { hash, ...description } = reference;
+		return { content: openContent(hash), ...description };
 	}
 
 	function invoke({ context, action, input, idempotencyKey, proof }: ActionCall): unknown {
@@ -310,13 +307,19 @@ export function createActions({
 			: read(found, context, action, value, { proof });
 	}
 
+	/** The registered action called `action`; "not found" when there is none. */
+	function registered(action: string): RegisteredAction {
+		const found = registry.get(action);
+		if (!found) throw new ORPCError("NOT_FOUND", { message: `no action "${action}"` });
+		return found;
+	}
+
 	/** The registered action called `action` and its input, validated by its contract. */
 	function validated(
 		action: string,
 		input: unknown,
 	): { readonly found: RegisteredAction; readonly value: unknown } {
-		const found = registry.get(action);
-		if (!found) throw new ORPCError("NOT_FOUND", { message: `no action "${action}"` });
+		const found = registered(action);
 		const checked = validate(found.inputSchema, input);
 		if (!checked.ok || !isLosslessJson(checked.value))
 			throw new ORPCError("BAD_REQUEST", {

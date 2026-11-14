@@ -7,7 +7,7 @@ import type Database from "better-sqlite3";
 
 import { isVerified, sealContext, type VerifiedContext } from "../authorization";
 import type { OpenedContent } from "../files/store";
-import type { FileType } from "../files/type";
+import type { FileDescription } from "../files/type";
 import {
 	type Confirmations,
 	isDownload,
@@ -75,11 +75,8 @@ export interface AnsweringPath {
 }
 
 /** A file ready to send: its open content and what the answer says of it. */
-export interface Download {
+export interface Download extends FileDescription {
 	readonly content: OpenedContent;
-	readonly name: string;
-	readonly type: FileType;
-	readonly size: number;
 }
 
 /**

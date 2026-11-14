@@ -11,7 +11,7 @@ import { endProofsOf } from "../actions/proofs";
 import type { AreaPolicy, Role } from "../authorization";
 import { PASSWORD_LENGTH } from "../contracts";
 import { insertAccount, setPasswordHash } from "./accounts";
-import { sessionExists } from "./sessions";
+import { sessionLives } from "./sessions";
 
 /** Why a password is not accepted, or `undefined` when it is. Never repeats the password. */
 export function passwordProblem(password: string): string | undefined {
@@ -65,10 +65,10 @@ export async function replacePassword(
 	now: number,
 	keep?: string,
 ): Promise<number> {
+	const lives = sessionLives(connection);
 	const hash = await hashPassword(password);
 	return connection.transaction(() => {
-		if (keep !== undefined && !sessionExists(connection, account, keep))
-			throw new SessionGoneError();
+		if (keep !== undefined && !lives(account, keep)) throw new SessionGoneError();
 		setPasswordHash(connection, account, hash, now);
 		endConfirmationsOf(connection, account);
 		endProofsOf(connection, account);

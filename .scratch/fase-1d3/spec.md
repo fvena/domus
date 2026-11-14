@@ -332,8 +332,8 @@ Un fichero que falta en disco con su contenido presente es un fallo interno (`IN
 - Las notas pueden tener varios archivos. `getNote`, `listNotes` y `searchNotes` devuelven `files`, una lista de `fileRef()`.
 - Acciones nuevas:
     - `attachFile({ noteId, prepared })`: deshacible, con inversa `detachFile`;
-    - `detachFile({ noteId, file })`: deshacible, con inversa `restoreFile`;
-    - `restoreFile({ noteId, file })`: deshacible, con inversa `detachFile`, que solo funciona como inversa.
+    - `detachFile({ noteId, file })`: deshacible, con inversa `reattachFile`;
+    - `reattachFile({ noteId, file })`: deshacible, con inversa `detachFile`, que solo funciona como inversa.
 - `deleteNote` suelta los archivos de la nota y su inversa, `restoreNote`, lleva sus ids y los vuelve a vincular.
 - Las áreas de salud y secretas no tienen archivos.
 - Decidido al implementar la 04:
@@ -389,7 +389,7 @@ Un fichero que falta en disco con su contenido presente es un fallo interno (`IN
 - **Con `probe` sobre la costura 1:**
     - la autorización: una nota pública ajena no admite archivos, una privada ajena no se descarga, un id que no salió de la lectura responde «no encontrado», la cuenta `device` no sube;
     - la atomicidad: un fallo después de `attach`, `detach` o `reattach` revierte la nota, la referencia, el consumo del archivo preparado y la protección, y el archivo preparado sirve para reintentar;
-    - deshacer: un borrado con archivo, un deshacer que choca con un cambio posterior en los archivos, la cadena soltar, deshacer, rehacer y deshacer el rehacer, `restoreFile` llamado directamente, y una retención cambiada que no mueve la protección;
+    - deshacer: un borrado con archivo, un deshacer que choca con un cambio posterior en los archivos, la cadena soltar, deshacer, rehacer y deshacer el rehacer, `reattachFile` llamado directamente, y una retención cambiada que no mueve la protección;
     - el archivo preparado: caducidad exacta, de otra sesión, consumido dos veces, sesión cerrada o revocada durante la subida y después;
     - la descarga confirmada: desde otra sesión de la misma persona, con respuesta perdida, rechazada por el `confirm` genérico sin consumirla y que no sirve dos veces;
     - las cabeceras de la descarga.

@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 
 import {
+	contentPath,
 	createTestPlatform,
 	fakeNode,
 	TEST_ORIGIN,
@@ -58,8 +59,7 @@ function sha256(bytes: Uint8Array): string {
 
 /** Where a content lies in a snapshot: under `files/`, as in the store, whatever the data folder. */
 const inSnapshot = (bytes: Uint8Array) => {
-	const hash = sha256(bytes);
-	return `/files/contents/${hash.slice(0, 2)}/${hash}`;
+	return contentPath("/files", sha256(bytes));
 };
 
 /** A temporary repository folder, empty, and a password file, removed at the end of a `using` block. */
@@ -270,7 +270,7 @@ describe("a backup that cannot carry its contents", { timeout: RESTIC_TIMEOUT },
 		await attached(test, phone, ana, photo("kept"));
 		await attached(test, phone, ana, lost);
 		const hash = sha256(lost);
-		rmSync(join(test.filesDirectory, "contents", hash.slice(0, 2), hash));
+		rmSync(contentPath(test.filesDirectory, hash));
 		test.background.start();
 
 		test.clock.set(FIRST_BACKUP);

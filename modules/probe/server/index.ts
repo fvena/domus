@@ -190,13 +190,16 @@ export default defineModule({
 			return {
 				result: detached,
 				touched: [],
-				inverse: { action: "probe.restoreFile", input },
+				inverse: { action: "probe.reattachFile", input },
 			};
 		},
-		restoreFile: ({ input, files }) => {
-			const restored = files.reattach(input.file, { table: schema.notes, id: input.noteId });
+		reattachFile: ({ input, files }) => {
+			const reattached = files.reattach(input.file, {
+				table: schema.notes,
+				id: input.noteId,
+			});
 			return {
-				result: restored,
+				result: reattached,
 				touched: [],
 				inverse: { action: "probe.detachFile", input },
 			};

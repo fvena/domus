@@ -8,7 +8,8 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
 import { PermanentJobError } from "../background";
-import { CONTENT_HASH, NEEDED_CONTENTS } from "../files/needed";
+import { NEEDED_CONTENTS } from "../files/needed";
+import { CONTENT_HASH } from "../files/store";
 import { LOCK_FILE, TAKE_SHARED_LOCK } from "../lock";
 import { type ClockAndTimer, runChild } from "./child";
 

@@ -4,16 +4,7 @@
 // and are published under the lock of their hash so that an error never leaves a row without its synced file.
 // module-sdk exposes none of it, and a dependency rule keeps modules out.
 import { createHash, randomUUID } from "node:crypto";
-import {
-	closeSync,
-	existsSync,
-	fsyncSync,
-	openSync,
-	readSync,
-	renameSync,
-	rmSync,
-	writeSync,
-} from "node:fs";
+import { closeSync, existsSync, fsyncSync, openSync, readSync, rmSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { ORPCError } from "@orpc/server";
@@ -30,7 +21,7 @@ import { fileError } from "./failures";
 import { readFileName } from "./name";
 import { createReservations, type FreeSpace } from "./reservations";
 import { createFileStore, createHashLocks, type OpenedContent, syncToDisk } from "./store";
-import { detectFileType, type FileType } from "./type";
+import { detectFileType, type FileDescription, type FileType } from "./type";
 
 export { errorResponse } from "./failures";
 export { markedFiles } from "./marked";
@@ -44,7 +35,7 @@ export {
 export { contentDisposition } from "./name";
 export type { FreeSpace } from "./reservations";
 export type { OpenedContent } from "./store";
-export type { FileType } from "./type";
+export type { FileDescription, FileType } from "./type";
 
 /** How many bytes of a content a download reads at a time. */
 const CHUNK = 64 * 1024;
@@ -59,13 +50,9 @@ const IDLE_LIMIT = 60 * 1000;
 const PREPARED_LIFETIME = 24 * 60 * 60 * 1000;
 
 /** What an upload gives back: the prepared file, of the session that uploaded it. */
-export interface PreparedFile {
+export interface PreparedFile extends FileDescription {
 	/** Opaque and random: never the hash. */
 	readonly id: string;
-	readonly name: string;
-	/** The type detected from the bytes, never the one the client declared. */
-	readonly type: FileType;
-	readonly size: number;
 	readonly expiresAt: number;
 }
 
@@ -258,9 +245,7 @@ export function createFiles({
 			if (state === "claimed") throw fileError("CONTENT_BUSY");
 			const target = store.contentPath(hash);
 			if (state === undefined && !existsSync(target)) {
-				store.ensureContentFolder(hash);
-				renameSync(temporary, target);
-				syncToDisk(dirname(target));
+				store.install(hash, temporary);
 			} else if (state === undefined) {
 				// A file without a row: a process killed before syncing it may have left it in memory only.
 				syncToDisk(target);

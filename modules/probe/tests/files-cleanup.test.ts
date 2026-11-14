@@ -3,15 +3,16 @@
 // from a note nor the file of a download already under way.
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import {
+	contentPath,
 	createTestPlatform,
+	type InterleavePoint,
 	TEST_ORIGIN,
 	TEST_START,
 	type TestBrowser,
 	type TestPlatform,
-	type InterleavePoint,
 	type TestPlatformOptions,
 	type VerifiedContext,
 } from "@domus/test-utils";
@@ -201,10 +202,8 @@ function sha256(bytes: Uint8Array): string {
  * last modified at `at`.
  */
 function orphan(test: Probe, bytes: Uint8Array, at: number): void {
-	const hash = sha256(bytes);
-	const folder = join(test.filesDirectory, "contents", hash.slice(0, 2));
-	mkdirSync(folder, { recursive: true });
-	const path = join(folder, hash);
+	const path = contentPath(test.filesDirectory, sha256(bytes));
+	mkdirSync(dirname(path), { recursive: true });
 	writeFileSync(path, bytes);
 	utimesSync(path, new Date(at), new Date(at));
 }
@@ -284,7 +283,7 @@ describe("the cleanup of files without a row", () => {
 	it("deletes any file of a content folder past the hour, whatever its name, and keeps a younger one", async () => {
 		await using test = await household();
 		const hash = sha256(JPEG);
-		const folder = join(test.filesDirectory, "contents", hash.slice(0, 2));
+		const folder = dirname(contentPath(test.filesDirectory, hash));
 		mkdirSync(folder, { recursive: true });
 		const left = (name: string, at: number) => {
 			writeFileSync(join(folder, name), JPEG);
@@ -497,7 +496,7 @@ describe("deleting a content while it is used", () => {
 		test.clock.set(nightOf(1));
 		await gate.reaching;
 		const hash = sha256(JPEG);
-		rmSync(join(test.filesDirectory, "contents", hash.slice(0, 2), hash));
+		rmSync(contentPath(test.filesDirectory, hash));
 		gate.release(new Error("cut after removing the file"));
 		await test.background.settled();
 		expect(lastRun(test)?.result).toBeNull();

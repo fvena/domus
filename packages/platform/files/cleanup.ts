@@ -21,9 +21,8 @@ import { basename, dirname, join } from "node:path";
 import type Database from "better-sqlite3";
 
 import type { CleanupSweep } from "../background/cleanup";
-import { CONTENT_HASH } from "./needed";
 import type { FileStore, HashLocks } from "./store";
-import { syncToDisk } from "./store";
+import { CONTENT_HASH, syncToDisk } from "./store";
 
 /** How long a file of the store may stay without a row before the cleanup deletes it: one hour. */
 const ORPHAN_AGE = 60 * 60 * 1000;

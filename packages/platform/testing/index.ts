@@ -99,6 +99,8 @@ export { PermanentJobError } from "../background";
 export { STOP_MARGIN } from "../background/engine";
 export type { BackupMarks } from "../backups";
 export type { Interleave, InterleavePoint } from "../files";
+/** Where the store of a `files` folder keeps a content, by its hash: for tests that lay one out or remove it. */
+export { contentPath } from "../files/store";
 /**
  * `runRestore` restores with the runtime the test gives: its clock, the restic executable and, only here, the points
  * where the test cuts the exchange.
