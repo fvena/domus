@@ -8,10 +8,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readJobs } from "./background";
 import { checkKey, CONNECTED_APPS, createKey, listKeys } from "./identity/keys";
+import { resolveMandate } from "./identity/mandates";
 import { sessionEnabledWhere } from "./identity/sessions";
 import { migrations as platformMigrations } from "./migrations";
 import { migrate } from "./migrator";
 import { connectionOf, createPlatform, type Platform } from "./platform";
+import { issueMandate, prepareAccount, prepareSession } from "./testing";
 
 /** A migration written by hand, as `pnpm db:generate` would carry it. */
 function migration(position: number, tag: string, ...statements: string[]): ModuleMigration {
@@ -295,6 +297,28 @@ describe("migrations at start", () => {
 		expect(listKeys(connection)).toEqual([]);
 		const key = createKey(connection, CONNECTED_APPS, "kira", 1);
 		expect(checkKey(connection, CONNECTED_APPS, key)).toMatchObject({ ok: true, app: "kira" });
+		after.close();
+	});
+
+	it("brings the mandates to a database with the keys, its keys kept and good", () => {
+		// The keys came in the platform's migration 0015, at position 16.
+		const withKeys = platformMigrations.filter(({ position }) => position <= 16);
+		const before = new Database(databaseFile);
+		migrate(before, [{ module: "platform", migrations: withKeys }]);
+		const key = createKey(before, CONNECTED_APPS, "kira", 0);
+		before.close();
+
+		const after = createPlatform({ databaseFile, modules: [] });
+		const connection = connectionOf(after);
+		expect(after.appliedMigrations).toBe(platformMigrations.length - withKeys.length);
+		expect(checkKey(connection, CONNECTED_APPS, key)).toMatchObject({ ok: true, app: "kira" });
+		prepareAccount(after, { id: "ana", name: "Ana", email: "ana@domus.test", role: "member" });
+		const { session, device } = prepareSession(after, "ana");
+		const mandate = issueMandate(after, { session, app: "kira" });
+		expect(resolveMandate(connection, mandate, "kira", Date.now())).toEqual({
+			ok: true,
+			origin: { account: "ana", device, session, deviceAccount: "ana", identity: "password" },
+		});
 		after.close();
 	});
 

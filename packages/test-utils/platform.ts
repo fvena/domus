@@ -23,6 +23,7 @@ import {
 	sessionExpiresAt,
 	type SubscriptionRow,
 	invokeAction,
+	issueMandate,
 	type IssuedProof,
 	type ListedKey,
 	type LogEntry,
@@ -217,6 +218,16 @@ export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	 * receives mandates, and none exists outside test-utils (ADR 0030).
 	 */
 	readonly apps?: readonly string[];
+	/** How long a new mandate is good, in milliseconds. Unset: the platform's 15 minutes. */
+	readonly mandateLife?: number;
+}
+
+/** What a mandate of a test may set besides the session it is born of. */
+export interface MandateOptions {
+	/** The app it is issued for: `kira` unless given. One that receives no mandates throws. */
+	readonly app?: string;
+	/** The conversation it keeps: none unless given. */
+	readonly conversation?: string;
 }
 
 /** The backups of a test platform. */
@@ -471,6 +482,13 @@ export interface TestPlatform<
 	/** Revokes the key `id` at the instant of the clock, as `keys revoke` does. An unknown id throws. */
 	revokeKey(id: string): void;
 	/**
+	 * Issues a real mandate, by the platform's one function of issuing, from the session of `browser`, signed in: it
+	 * keeps that session's account, device, device account and identity, which no option changes, and is good for the
+	 * mandate life from the instant of the clock. Returns its id, for the header `domus-mandate`. A browser not
+	 * signed in, a session that no longer lives and an app that receives no mandates throw.
+	 */
+	mandate(browser: TestBrowser, options?: MandateOptions): string;
+	/**
 	 * Closes the platform and removes the temporary folder it created. Safe to call more than once. Throws while
 	 * the background is active; disposing stops it first.
 	 */
@@ -518,6 +536,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 	push,
 	origins = [TEST_ORIGIN, TEST_PUSH_SUBJECT],
 	apps,
+	mandateLife,
 }: TestPlatformOptions<TModules>): TestPlatform<TModules> {
 	let tempDir: string | undefined;
 	let databaseFile = file ?? ":memory:";
@@ -561,6 +580,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 				confirmation,
 				filesDirectory,
 				origins,
+				...(mandateLife === undefined ? {} : { mandateLife }),
 				...(backups === undefined
 					? {}
 					: {
@@ -663,6 +683,16 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		log: () => {},
 	});
 
+	/** The session a signed-in browser's cookie carries, with its account and device. */
+	const sessionOfBrowser = (browser: TestBrowser) => {
+		// Better Auth's cookie holds the session's token and its signature, after the first dot.
+		const cookie = browser.cookie(SESSION_COOKIE);
+		const token = cookie === undefined ? undefined : decodeURIComponent(cookie).split(".")[0];
+		const found = token === undefined ? undefined : sessionOfToken(platform, token);
+		if (!found) throw new Error("the browser is not signed in");
+		return found;
+	};
+
 	return {
 		platform,
 		door,
@@ -676,12 +706,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		dbFor: (module) => moduleDatabase(platform, module),
 		context,
 		contextOf: (browser) => {
-			// Better Auth's cookie holds the session's token and its signature, after the first dot.
-			const cookie = browser.cookie(SESSION_COOKIE);
-			const token =
-				cookie === undefined ? undefined : decodeURIComponent(cookie).split(".")[0];
-			const found = token === undefined ? undefined : sessionOfToken(platform, token);
-			if (!found) throw new Error("the browser is not signed in");
+			const found = sessionOfBrowser(browser);
 			return syntheticContext({
 				account: found.account,
 				device: found.device,
@@ -743,6 +768,12 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		pendingConfirmations: () => readPendingConfirmations(platform),
 		keys: () => readKeys(platform),
 		revokeKey: (id) => revokeKeyOf(platform, id),
+		mandate: (browser, { app = "kira", conversation } = {}) =>
+			issueMandate(platform, {
+				session: sessionOfBrowser(browser).session,
+				app,
+				...(conversation === undefined ? {} : { conversation }),
+			}),
 		close,
 		// A job the test left held, often by a failed assertion before its release, would keep the stop waiting on
 		// a clock that only the test moves: disposing moves it past the stop margin, so the platform closes and the

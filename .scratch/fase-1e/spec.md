@@ -80,7 +80,7 @@ En la 1e no hay turnos de conversación, así que ninguna ruta, comando ni servi
 
 ### Dónde vive (estructura)
 
-- **`platform/identity`** gana las apps conectadas, sus llaves y los mandatos, junto a las sesiones, porque son credenciales: la lista de apps, crear, listar y revocar llaves, comprobar una llave, emitir un mandato (solo lo usa `testing` en la 1e) y resolverlo en una petición. Gana también el núcleo del comando, como el de `accounts`: `parseKeysArguments` y `runKeys`, con su texto de uso.
+- **`platform/identity`** gana las apps conectadas, sus llaves y los mandatos, junto a las sesiones, porque son credenciales: la lista de apps, crear, listar y revocar llaves, comprobar una llave, y leer y resolver un mandato en una petición. Emitir un mandato vive en la 1e en `platform/testing` (`testing/mandates.ts`), no en `identity`: así la regla `production-never-reaches-platform-testing`, sin cambiar, prueba que ningún código de producción llega a emitirlo. La 5a lo lleva a `identity` cuando la puerta emita mandatos de interacciones reales. Gana también el núcleo del comando, como el de `accounts`: `parseKeysArguments` y `runKeys`, con su texto de uso.
 - **La puerta** (`platform/http`) construye el contexto verificado de una petición con llave en el mismo sitio donde hoy lo construye a partir de una sesión, y aplica la frontera de cada ruta: qué autoridad admite.
 - **`platform/authorization`** gana una función pura con la lista de operaciones de la plataforma que admiten un mandato. Lo que no está en esa lista, también una operación desconocida, no lo admite.
 - **`platform/background`**: la limpieza gana un paso para los mandatos.
@@ -130,6 +130,13 @@ En la 1e no hay turnos de conversación, así que ninguna ruta, comando ni servi
 - Resolverlo en una petición: se busca por el hash de su id y se exige que no haya caducado, que su app sea la de la llave y que su sesión viva según la regla única de la plataforma (la fila existe, es de la cuenta y no ha caducado en el reloj de la plataforma). Esa regla ya cubre cerrar sesión, revocarla, revocar el aparato, cambiar la contraseña con la app o con `pnpm accounts`, que caduque y restaurar. Cualquier fallo responde lo mismo que no traerlo.
 - El contexto sellado tiene la cuenta, `via` (la app de la llave), el aparato, la sesión, la cuenta del aparato, el canal `contexto`, la `identity` y la conversación del mandato.
 - El mandato no da permisos: cada petición recorre la autorización completa.
+- Detalles que fijó la tarea 03:
+    - Emitir es `issueMandate` de `platform/testing`, no de `identity`, por la razón de «Dónde vive». Toma de la sesión los mismos campos que la puerta sella de ella (`originOf` de `identity/sessions.ts`, la única forma de ese paso): la cuenta, el aparato, la sesión, la cuenta del aparato igual a la cuenta e `identity: "password"`. Una app fuera de la lista o que no recibe mandatos falla con `connected app "<app>" receives no mandates`, y una sesión que no vive en el reloj de la plataforma con `the session of a mandate must live`.
+    - La opción de la plataforma es `mandateLife`, en milisegundos y entera positiva, como `retention`; `test-utils` la pasa con el mismo nombre. Cada mandato guarda su instante de caducidad al nacer.
+    - La tabla es `platform_mandates`, en la migración `0016`, con la cuenta atada a `platform_user` en cascada y la sesión sin clave foránea: terminar una sesión no borra sus mandatos, que dejan de resolver por la regla única y los borra la limpieza (04).
+    - Leer `domus-mandate` (`readMandate`, pura): exactamente 43 caracteres base64url que sean la codificación exacta de 32 bytes, con los espacios alrededor ignorados. Cualquier otra forma, también vacía, es un mandato malo, nunca ninguno.
+    - Una llave buena sin mandato, con uno malo o con uno que no resuelve es un contexto nulo, y la acción responde `UNAUTHORIZED` como sin credencial. El log de quien opera dice `mandate refused: <motivo>`, con `missing`, `malformed`, `unknown`, `expired`, `other-app` o `session-ended`, nunca el mandato. El orden de la comprobación es ese: existe, no ha caducado, es de la app de la llave, su sesión vive.
+    - Solo las acciones de los módulos piden a la puerta el contexto con mandato; todas las demás rutas siguen pidiendo el de la sesión, que con `Authorization` es nulo, hasta la 05.
 
 ### La puerta (Q4, Q9, Q11, Q14)
 

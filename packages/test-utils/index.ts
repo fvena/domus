@@ -6,6 +6,7 @@ export {
 	createTestPlatform,
 	type DelegationChange,
 	listBackups,
+	type MandateOptions,
 	restoreBackup,
 	type TestBackups,
 	type TestRestoreOptions,

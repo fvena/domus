@@ -172,4 +172,12 @@ export const generatedMigrations: readonly ModuleMigration[] = [
 			"CREATE TABLE `platform_keys` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`app` text NOT NULL,\n\t`secret_hash` text NOT NULL,\n\t`created_at` integer NOT NULL,\n\t`last_used_at` integer,\n\t`revoked_at` integer\n);\n",
 		],
 	},
+	{
+		tag: "0016_complete_tomorrow_man",
+		position: 17,
+		hash: "a474993279881727165efcb2baf3d40c9c2639a5f7103f6f9af2bf4ba8749bce",
+		statements: [
+			"CREATE TABLE `platform_mandates` (\n\t`hash` text PRIMARY KEY NOT NULL,\n\t`app` text NOT NULL,\n\t`account` text NOT NULL,\n\t`device` text NOT NULL,\n\t`session` text NOT NULL,\n\t`device_account` text NOT NULL,\n\t`identity` text NOT NULL,\n\t`conversation` text,\n\t`issued_at` integer NOT NULL,\n\t`expires_at` integer NOT NULL,\n\tFOREIGN KEY (`account`) REFERENCES `platform_user`(`id`) ON UPDATE no action ON DELETE cascade,\n\tCONSTRAINT \"platform_mandates_identity\" CHECK(\"platform_mandates\".\"identity\" IN ('password', 'voice', 'device'))\n);\n",
+		],
+	},
 ];

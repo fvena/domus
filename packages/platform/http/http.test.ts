@@ -11,8 +11,15 @@ import { z } from "zod";
 import { createHttpHandler } from ".";
 import { PROTOCOL, platformContract } from "../contracts";
 import { CONNECTED_APPS, createKey, parseKey, revokeKey } from "../identity/keys";
+import { endSessions } from "../identity/sessions";
 import { actionsOf, connectionOf, createPlatform } from "../platform";
-import { prepareAccount, preparePassword } from "../testing";
+import {
+	createPlatformWithClock,
+	issueMandate,
+	prepareAccount,
+	preparePassword,
+	prepareSession,
+} from "../testing";
 
 const { table } = moduleTables("notes");
 const notesContract = {
@@ -286,6 +293,69 @@ describe("http handler", () => {
 		lines.length = 0;
 		expect((await status({ authorization: `Bearer ${key}` })).status).toBe(200);
 		expect(lines).toEqual([]);
+	});
+
+	it("tells the operator's log why it refused a mandate, never the mandate", async () => {
+		let now = Date.now();
+		const clocked = createPlatformWithClock(
+			{ databaseFile: ":memory:", modules, mandateLife: 1000 },
+			() => now,
+			{ apps: ["tester"] },
+		);
+		try {
+			const lines: string[] = [];
+			const logged = createHttpHandler({
+				platform: clocked,
+				modules,
+				auth,
+				log: (line) => lines.push(line),
+			});
+			const connection = connectionOf(clocked);
+			const apps = [...CONNECTED_APPS, { name: "tester", mandates: false }];
+			const key = createKey(connection, apps, "kira", now);
+			const tester = createKey(connection, apps, "tester", now);
+			prepareAccount(clocked, {
+				id: "ana",
+				name: "Ana",
+				email: "ana@domus.test",
+				role: "member",
+			});
+			const { session } = prepareSession(clocked, "ana");
+			const good = issueMandate(clocked, { session, app: "kira" });
+			const other = prepareSession(clocked, "ana").session;
+			const ending = issueMandate(clocked, { session: other, app: "kira" });
+			const list = (headers: Record<string, string>) =>
+				logged.fetch(
+					new Request("http://domus/api/rpc/notes/list", { method: "POST", headers }),
+				);
+			const withKey = (mandate?: string, of = key) => ({
+				authorization: `Bearer ${of}`,
+				...(mandate === undefined ? {} : { "domus-mandate": mandate }),
+			});
+
+			lines.length = 0;
+			expect((await list(withKey(good))).status).toBe(200);
+			expect(lines).toEqual([]);
+			endSessions(connection, { session: other });
+			const cases: readonly [Record<string, string>, string][] = [
+				[withKey(), "missing"],
+				[withKey(`${good}x`), "malformed"],
+				[withKey("A".repeat(43)), "unknown"],
+				[withKey(good, tester), "other-app"],
+				[withKey(ending), "session-ended"],
+			];
+			for (const [headers, reason] of cases) {
+				lines.length = 0;
+				expect((await list(headers)).status).toBe(401);
+				expect(lines).toEqual([`mandate refused: ${reason}`]);
+			}
+			now += 1000;
+			lines.length = 0;
+			expect((await list(withKey(good))).status).toBe(401);
+			expect(lines).toEqual(["mandate refused: expired"]);
+		} finally {
+			clocked.close();
+		}
 	});
 
 	it("refuses a module whose id is one of the platform's procedures", () => {

@@ -13,8 +13,10 @@
 // Besides oRPC, routes of Hono only with a session: uploading and downloading files (ADR 0028), the live channel, the public key
 // of VAPID and the device's subscription to notices (ADR 0029).
 // The key of a connected app comes in `Authorization: Bearer` (ADR 0030). With a good one `status` says which app
-// calls; a bad one, or one next to the session cookie, is refused, never taken as no credential. Every other route
-// still refuses a key: none has a mandate yet.
+// calls; a bad one, or one next to the session cookie, is refused, never taken as no credential. With a good key
+// and a mandate in `domus-mandate`, the actions of the modules run on the person's behalf: the door seals the
+// context the mandate keeps, with `via` the key's app and the channel `contexto`. Every other route still refuses
+// a key: the platform's operations open to mandates in their own ticket.
 import type { ModuleDefinition } from "@domus/module-sdk";
 import { implement, ORPCError, os } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
@@ -29,9 +31,10 @@ import { PROTOCOL, platformContract } from "../contracts";
 import { contentDisposition, errorResponse } from "../files";
 import { AUTH_PREFIX, type AuthOptions, createAuth } from "../identity/auth";
 import { checkKey, noteKeyUse, readAuthorization } from "../identity/keys";
+import { readMandate, resolveMandate } from "../identity/mandates";
 import { replacePassword, SessionGoneError, verifiedPasswordHash } from "../identity/passwords";
 import { requestProof, WrongPasswordError } from "../identity/proofs";
-import { sessionsOf } from "../identity/sessions";
+import { originOf, sessionsOf } from "../identity/sessions";
 import { TEST_NOTICE } from "../notifications/operations";
 import {
 	actionsOf,
@@ -78,6 +81,9 @@ const IDEMPOTENCY_KEY_HEADER = "idempotency-key";
 /** The header that carries the key of a connected app, as `Bearer <key>` (ADR 0030). */
 const AUTHORIZATION_HEADER = "authorization";
 
+/** The header that carries the id of a mandate, next to the key of the app it was issued for (ADR 0030). */
+const MANDATE_HEADER = "domus-mandate";
+
 /** The header that carries a sensitive operation's step-up proof; @domus/api-client sends it from the call's context. */
 const PROOF_HEADER = "step-up-proof";
 
@@ -90,16 +96,20 @@ export interface HttpHandlerOptions {
 	readonly modules: readonly ModuleDefinition[];
 	/** How sessions are signed and which origins the app is served from. */
 	readonly auth: AuthOptions;
-	/** The operator's log, for why a key was refused, never with the key: `console.warn` unless given (ADR 0030). */
+	/**
+	 * The operator's log, for why a key or a mandate was refused, never with either: `console.warn` unless given (ADR
+	 * 0030).
+	 */
 	readonly log?: (line: string) => void;
 }
 
 /**
  * What each RPC call carries: who it comes from and which app's key it has, once a procedure asks, its idempotency key
- * and its proof.
+ * and its proof. Who it comes from is a session's context, or with `mandate` also the one a mandate keeps, which only
+ * the actions of the modules admit.
  */
 interface DoorContext {
-	readonly verify: () => Promise<VerifiedContext | null>;
+	readonly verify: (admits?: { readonly mandate?: boolean }) => Promise<VerifiedContext | null>;
 	readonly app: () => string | undefined;
 	readonly idempotencyKey: string | undefined;
 	readonly proof: string | undefined;
@@ -169,7 +179,7 @@ export function createHttpHandler({
 			Object.keys(module.contract ?? {}).map((name) => [
 				name,
 				actionProcedure.handler(async ({ input, context }) => {
-					const verified = await context.verify();
+					const verified = await context.verify({ mandate: true });
 					if (!verified) throw new ORPCError("UNAUTHORIZED");
 					return actions.invoke({
 						context: verified,
@@ -348,12 +358,16 @@ export function createHttpHandler({
 	app.all(`${RPC_PREFIX}/*`, async (c) => {
 		const request = c.req.raw;
 		const responseHeaders = new Headers();
-		let verified: Promise<VerifiedContext | null> | undefined;
+		let bySession: Promise<VerifiedContext | null> | undefined;
+		let byMandate: Promise<VerifiedContext | null> | undefined;
 		const { matched, response } = await rpc.handle(request, {
 			prefix: RPC_PREFIX,
 			context: {
 				// Read once per request, only when a procedure needs it: status works without a session.
-				verify: () => (verified ??= contextOf(request, responseHeaders)),
+				verify: ({ mandate = false } = {}) =>
+					mandate
+						? (byMandate ??= contextOf(request, responseHeaders, { mandate }))
+						: (bySession ??= contextOf(request, responseHeaders)),
 				app: () => appOf(request),
 				idempotencyKey: request.headers.get(IDEMPOTENCY_KEY_HEADER) ?? undefined,
 				proof: request.headers.get(PROOF_HEADER) ?? undefined,
@@ -489,25 +503,43 @@ export function createHttpHandler({
 	}
 
 	/**
-	 * The verified context of a request, from its session alone. Over HTTP, in phase 1c, the account is the
-	 * session's and asks itself: no via, the app channel, proven by password, no conversation.
+	 * The verified context of a request: from its session, where the account is the session's and asks itself (no
+	 * via, the app channel, no conversation), or, only where `mandate` admits one, from its key and its mandate.
 	 */
 	async function contextOf(
 		request: Request,
 		responseHeaders: Headers,
+		{ mandate = false }: { readonly mandate?: boolean } = {},
 	): Promise<VerifiedContext | null> {
-		// A key, good or bad, admits nothing that needs an account yet, not even next to a session that lives.
-		if (request.headers.has(AUTHORIZATION_HEADER)) return null;
+		// A key, good or bad, admits nothing that needs an account but with a mandate, not even next to a session
+		// that lives.
+		if (request.headers.has(AUTHORIZATION_HEADER))
+			return mandate ? mandateContextOf(request) : null;
 		const session = await identity.sessionOf(request, responseHeaders);
 		if (!session) return null;
-		return sealContext({
-			account: session.account,
-			device: session.device,
-			session: session.id,
-			deviceAccount: session.account,
-			channel: "app",
-			identity: "password",
-		});
+		return sealContext({ ...originOf(session.id, session), channel: "app" });
+	}
+
+	/**
+	 * The verified context a request's mandate keeps, for the app of its good key: the account, device, session,
+	 * device account, identity and conversation of its origin, with `via` that app and the channel `contexto`. A bad
+	 * key is refused as {@link appOf} refuses it; a missing, malformed or unresolved mandate is no context, which the
+	 * caller answers `UNAUTHORIZED` as without a credential, and only the operator's log tells why.
+	 */
+	function mandateContextOf(request: Request): VerifiedContext | null {
+		const app = appOf(request);
+		if (app === undefined) return null;
+		const read = readMandate(request.headers.get(MANDATE_HEADER));
+		if (read.kind !== "mandate") {
+			log(`mandate refused: ${read.kind === "none" ? "missing" : "malformed"}`);
+			return null;
+		}
+		const resolution = resolveMandate(connection, read.id, app, clockOf(platform)());
+		if (!resolution.ok) {
+			log(`mandate refused: ${resolution.reason}`);
+			return null;
+		}
+		return sealContext({ ...resolution.origin, via: app, channel: "contexto" });
 	}
 
 	return { fetch: async (request) => app.fetch(request) };

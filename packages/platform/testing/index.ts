@@ -3,7 +3,8 @@ import { ORPCError } from "@orpc/server";
 // dbFor; a platform with the real authorization and a clock the test chooses; the way to invoke its actions and
 // undo their entries with a verified context; synthetic verified contexts; the privileged preparation of
 // accounts, roles, passwords, permission rows, delegation rows and sessions, without a session or a proof; the
-// platform's real read of a delegation table and real request of a step-up proof; a read of its action log
+// platform's real read of a delegation table and real request of a step-up proof; issuing a mandate, the only way
+// there is to issue one in phase 1e (ADR 0030); a read of its action log
 // and of its stored pending confirmations; and child processes that hold the platform open or the exclusive lock
 // until the test kills them (ADR 0026); and a Node executable that stops the snapshot's child at its copy (ADR
 // 0027). A rule of .dependency-cruiser.cjs keeps every other importer out, production code of platform included;
@@ -88,6 +89,7 @@ export type {
 	VerifiedContext,
 } from "../authorization";
 export { type ModuleDatabase, moduleDatabase } from "./module-database";
+export { issueMandate, type MandateIssue } from "./mandates";
 export { type ChildTask, startChild, type TestChild } from "./children";
 export { type FakeNode, fakeNode, type FakeNodeOptions } from "./fake-node";
 export { controlledTimer, type ControlledTimer } from "../background";

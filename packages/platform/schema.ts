@@ -585,3 +585,34 @@ export const keys = sqliteTable("platform_keys", {
 	lastUsedAt: integer("last_used_at"),
 	revokedAt: integer("revoked_at"),
 });
+
+/**
+ * A mandate of a connected app (ADR 0030): on whose behalf that app acts, issued by the door from an interaction it
+ * authenticated. Kept under the SHA-256 of its id in hex, never the id, with the app it was issued for and the fields
+ * of the verified context of its origin in columns: the account represented, the device, the session, the device
+ * account, how the identity was proven and the conversation, if any. It is good until `expires_at` and while its
+ * session lives; nothing it holds gives a permission.
+ */
+export const mandates = sqliteTable(
+	"platform_mandates",
+	{
+		hash: text().primaryKey(),
+		app: text().notNull(),
+		account: text()
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		device: text().notNull(),
+		session: text().notNull(),
+		deviceAccount: text("device_account").notNull(),
+		identity: text({ enum: ["password", "voice", "device"] }).notNull(),
+		conversation: text(),
+		issuedAt: integer("issued_at").notNull(),
+		expiresAt: integer("expires_at").notNull(),
+	},
+	(table) => [
+		check(
+			"platform_mandates_identity",
+			sql`${table.identity} IN ('password', 'voice', 'device')`,
+		),
+	],
+);

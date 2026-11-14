@@ -5,10 +5,30 @@ import { createHash } from "node:crypto";
 
 import type Database from "better-sqlite3";
 
+import type { IdentityProof } from "../authorization";
+
 /** A session by its id: whose it is and the device it was born on. */
 export interface SessionOwner {
 	readonly account: string;
 	readonly device: string;
+}
+
+/**
+ * What a session gives a verified context: its account, device and id, the account itself as the device's, and an
+ * identity proven by password, the only way a session is born in phase 1. The door seals a request's context from
+ * it, and a mandate born of the session keeps the same fields (ADR 0030).
+ */
+export interface SessionOrigin {
+	readonly account: string;
+	readonly device: string;
+	readonly session: string;
+	readonly deviceAccount: string;
+	readonly identity: IdentityProof;
+}
+
+/** The {@link SessionOrigin} of the session `id` of `account` on `device`. */
+export function originOf(id: string, { account, device }: SessionOwner): SessionOrigin {
+	return { account, device, session: id, deviceAccount: account, identity: "password" };
 }
 
 /** Finds sessions by their id on one connection; `undefined` when there is none. */
