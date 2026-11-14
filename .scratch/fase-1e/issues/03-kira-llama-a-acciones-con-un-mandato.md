@@ -1,6 +1,6 @@
 # 03. Kira llama a acciones con un mandato
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 02
 
 Spec: [`../spec.md`](../spec.md), secciones «Mandatos», «La puerta» y «Autorización vía Kira». ADR 0030 y ADR 0023.
@@ -18,16 +18,27 @@ El recorrido central de la 1e: con su llave y un mandato, Kira ejecuta una acci�
 
 ## Criterios de aceptación
 
-- [ ] Camino positivo: con la delegación abierta, una lectura y una escritura de `probe` vía Kira funcionan, y la entrada del registro lleva la cuenta de la persona y `via = "kira"`, nunca la llave ni el mandato.
-- [ ] Una llave válida sin mandato, con un mandato mal formado o con uno desconocido responde `UNAUTHORIZED` en una acción.
-- [ ] Un mandato caducado responde `UNAUTHORIZED` en el instante exacto de su caducidad y funciona un milisegundo antes. Cambiar la vida en las opciones la cambia.
-- [ ] Un mandato emitido para `kira` y presentado con la llave de una app de prueba responde `UNAUTHORIZED`. Emitir para una app que no recibe mandatos falla.
-- [ ] Emitir desde una sesión que ya no vive falla, y el mandato hereda la `identity` de su sesión.
-- [ ] La delegación en «no», «sí» y «pedir confirmación» se respeta en cada nivel, un área sin fila deniega, y la delegación nunca supera el permiso de la persona.
-- [ ] Una escritura con «pedir confirmación» vía Kira deja una pendiente que la persona confirma por `app` desde otra de sus sesiones, conservando la delegación de entonces.
-- [ ] Una acción `manage` vía Kira no se completa.
-- [ ] La misma clave de idempotencia desde la app y vía Kira no choca. Repetir vía Kira con otro mandato de la misma persona da un acuse sin ejecutar.
-- [ ] Un registro privado ajeno vía Kira responde `NOT_FOUND`, y una acción que la delegación niega, `FORBIDDEN`.
-- [ ] Las reglas de dependencias siguen impidiendo que el código de producción llegue a emitir mandatos.
-- [ ] La migración se aplica sobre una base con la de la 01, y dos generaciones seguidas no dejan cambios.
-- [ ] `pnpm check` pasa.
+- [x] Camino positivo: con la delegación abierta, una lectura y una escritura de `probe` vía Kira funcionan, y la entrada del registro lleva la cuenta de la persona y `via = "kira"`, nunca la llave ni el mandato.
+- [x] Una llave válida sin mandato, con un mandato mal formado o con uno desconocido responde `UNAUTHORIZED` en una acción.
+- [x] Un mandato caducado responde `UNAUTHORIZED` en el instante exacto de su caducidad y funciona un milisegundo antes. Cambiar la vida en las opciones la cambia.
+- [x] Un mandato emitido para `kira` y presentado con la llave de una app de prueba responde `UNAUTHORIZED`. Emitir para una app que no recibe mandatos falla.
+- [x] Emitir desde una sesión que ya no vive falla, y el mandato hereda la `identity` de su sesión.
+- [x] La delegación en «no», «sí» y «pedir confirmación» se respeta en cada nivel, un área sin fila deniega, y la delegación nunca supera el permiso de la persona.
+- [x] Una escritura con «pedir confirmación» vía Kira deja una pendiente que la persona confirma por `app` desde otra de sus sesiones, conservando la delegación de entonces.
+- [x] Una acción `manage` vía Kira no se completa.
+- [x] La misma clave de idempotencia desde la app y vía Kira no choca. Repetir vía Kira con otro mandato de la misma persona da un acuse sin ejecutar.
+- [x] Un registro privado ajeno vía Kira responde `NOT_FOUND`, y una acción que la delegación niega, `FORBIDDEN`.
+- [x] Las reglas de dependencias siguen impidiendo que el código de producción llegue a emitir mandatos.
+- [x] La migración se aplica sobre una base con la de la 01, y dos generaciones seguidas no dejan cambios.
+- [x] `pnpm check` pasa.
+
+## Comments
+
+- Hecho en `8161ac6`.
+- Emitir no vive en `platform/identity`, como decía el ticket, sino en `platform/testing/mandates.ts` (`issueMandate`), exportado por `@domus/platform/testing`. Si viviera en `identity`, cualquier código de producción podría importarlo sin romper ninguna regla; en `testing`, la regla `production-never-reaches-platform-testing`, sin cambiar, prueba el criterio. Leer y resolver sí están en `identity/mandates.ts` (`readMandate`, `mandateHash`, `resolveMandate`). La 5a lleva `issueMandate` a `identity`. Está en la spec («Dónde vive» y «Mandatos»).
+- Lo que una sesión da a un contexto está en un solo sitio, `originOf` de `identity/sessions.ts`: la puerta sella con él el contexto de una sesión y `issueMandate` guarda lo mismo. Así el mandato hereda `identity: "password"` y la cuenta del aparato igual a la cuenta, sin que quien emite pueda cambiarlos.
+- La puerta: `DoorContext.verify({ mandate: true })` solo lo piden las acciones de los módulos; todas las demás rutas llaman a `verify()` o a `contextOf` sin opción, y con `Authorization` reciben `null`. La 05 abre `log/read` y `log/undo` pasando `{ mandate: true }` en esos dos manejadores, con la lista pura de `platform/authorization`.
+- El log de quien opera dice `mandate refused: <motivo>` (`missing`, `malformed`, `unknown`, `expired`, `other-app`, `session-ended`), probado en `platform/http/http.test.ts`.
+- La tabla es `platform_mandates` (migración `0016`), con la sesión sin clave foránea: terminar una sesión deja la fila, que ya no resuelve. La 04 borra en la limpieza las caducadas y las de sesiones que no viven, y al restaurar todas. No hay índice por sesión ni por caducidad: la 04 decide si lo necesita su limpieza.
+- `test-utils`: `test.mandate(browser, { app?, conversation? })` y la opción `mandateLife`. Las pruebas de la puerta con mandato están en `modules/probe/tests/mandates-http.test.ts`.
+- `probe` no tiene una acción que responda `NOT_FOUND` de la plataforma para un registro ajeno: un registro privado ajeno vía Kira no aparece en las listas, `getNote` da `null` y `editNote` responde `NOTE_NOT_FOUND`, como sin Kira.
