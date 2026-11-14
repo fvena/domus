@@ -1,6 +1,14 @@
 // Who a changed record reaches on the live channel (ADR 0029). Pure, like `decide`: the grant comes from the same
 // view, with the permissions in force when the write is shared out, and the record's state from the write capture.
-import { type AccessView, grantOf, reaches } from "./index";
+import { type AccessView, type Grant, grantOf, reaches } from "./index";
+
+/**
+ * Whether an account whose grant in an area went from `before` to `after` lost `read` there: its channels close
+ * after their `reset`, and reconnect with what it may see now.
+ */
+export function readLost(before: Grant, after: Grant): boolean {
+	return reaches(before, "read") && !reaches(after, "read");
+}
 
 /** An owned record's state, as the write capture saw it: its owner and its visibility. */
 export interface RecordState {

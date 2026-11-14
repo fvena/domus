@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AccessView, AreaPolicy, Grant } from ".";
-import { invalidationReaches, type OwnedRecordChange } from "./invalidations";
+import { invalidationReaches, type OwnedRecordChange, readLost } from "./invalidations";
 
 const AREA: AreaPolicy = {
 	defaultVisibility: "private",
@@ -96,5 +96,15 @@ describe("an invalidation of an area table's record", () => {
 		expect(invalidationReaches(view("read"), "luis", label())).toBe(true);
 		expect(invalidationReaches(view(), "luis", label("gone"))).toBe(false);
 		expect(invalidationReaches(view(), "nadie", label())).toBe(false);
+	});
+});
+
+describe("whether a change of grant takes away read", () => {
+	it("is true only from a grant that reads to one that does not", () => {
+		const grants: readonly Grant[] = ["none", "read", "write", "manage"];
+		const lost = grants.flatMap((before) =>
+			grants.filter((after) => readLost(before, after)).map((after) => `${before}→${after}`),
+		);
+		expect(lost).toEqual(["read→none", "write→none", "manage→none"]);
 	});
 });

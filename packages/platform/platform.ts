@@ -354,7 +354,7 @@ export function openPlatform(
 		confirmations: createConfirmations(db, confirmationTimes),
 		proofs,
 		operations: [
-			...platformOperations(db, areas),
+			...platformOperations(db, areas, events),
 			...taskOperations(background),
 			// Called only while a write runs, once the actions exist.
 			...notificationOperations((job) => actions.enqueueInWrite(job)),

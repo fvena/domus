@@ -110,9 +110,47 @@ export function sessionsOf(
 		}));
 }
 
-/** Ends every session of every account inside the caller's transaction: restoring does it. */
-export function endEverySession(connection: Database.Database): void {
-	connection.prepare("DELETE FROM platform_session").run();
+/** Each way a session ends (ADR 0029). */
+export type SessionEnd = "sign-out" | "revoke-session" | "revoke-device" | "password" | "restore";
+
+/**
+ * Told which sessions ended and why, inside the transaction that ends them when there is one: inside `api`, the
+ * live channel writes `purge` on theirs once it commits, never before.
+ */
+export type SessionsEnded = (sessions: readonly string[], why: SessionEnd) => void;
+
+/** Which sessions end: one, every one of a device, an account's but `keep`, or every one there is. */
+export type EndingSessions =
+	| { readonly session: string }
+	| { readonly device: string }
+	| { readonly account: string; readonly keep?: string }
+	| { readonly every: true };
+
+/**
+ * The one path that ends sessions (ADR 0029), inside the caller's transaction: deletes their rows, which takes
+ * their subscriptions to notices with them, and tells `ended` which ones and why. Signing out, which Better Auth
+ * deletes itself, reaches `ended` through its hook. Returns how many ended.
+ */
+export function endSessions(
+	connection: Database.Database,
+	which: EndingSessions,
+	why: SessionEnd,
+	ended?: SessionsEnded,
+): number {
+	const [where, parameters]: [string, (string | null)[]] =
+		"session" in which
+			? ["WHERE id = ?", [which.session]]
+			: "device" in which
+				? ["WHERE device_id = ?", [which.device]]
+				: "account" in which
+					? ["WHERE user_id = ? AND id IS NOT ?", [which.account, which.keep ?? null]]
+					: ["", []];
+	const sessions = connection
+		.prepare<(string | null)[], string>(`DELETE FROM platform_session ${where} RETURNING id`)
+		.pluck()
+		.all(...parameters);
+	if (sessions.length > 0) ended?.(sessions, why);
+	return sessions.length;
 }
 
 /**

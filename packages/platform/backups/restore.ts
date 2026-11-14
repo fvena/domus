@@ -48,7 +48,7 @@ import {
 	filesFolderOf,
 	syncToDisk,
 } from "../files/store";
-import { endEverySession } from "../identity/sessions";
+import { endSessions } from "../identity/sessions";
 import { takeExclusiveLock } from "../lock";
 import { migrations } from "../migrations";
 import { migrate } from "../migrator";
@@ -379,7 +379,7 @@ function sanitizeCopy(
 			// The tasks the platform declares with the backups on, each one's next run from its frequency.
 			rescheduleTasks(copy, () => now, BACKUP_SCHEDULES);
 			// A session revoked, or a password changed, after the copy must not come back.
-			endEverySession(copy);
+			endSessions(copy, { every: true }, "restore");
 			endEveryConfirmation(copy);
 			endEveryProof(copy);
 			// No prepared file serves once every session ended, and the contents left are exactly the needed ones.

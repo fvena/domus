@@ -11,7 +11,7 @@ import { endProofsOf } from "../actions/proofs";
 import type { AreaPolicy, Role } from "../authorization";
 import { PASSWORD_LENGTH } from "../contracts";
 import { insertAccount, setPasswordHash } from "./accounts";
-import { sessionLives } from "./sessions";
+import { endSessions, sessionLives, type SessionsEnded } from "./sessions";
 
 /** Why a password is not accepted, or `undefined` when it is. Never repeats the password. */
 export function passwordProblem(password: string): string | undefined {
@@ -55,8 +55,8 @@ export async function createAccountWithPassword(
 }
 
 /**
- * Sets a new password and ends the account's sessions, all but `keep` when it is given, in one transaction.
- * Returns how many sessions ended.
+ * Sets a new password and ends the account's sessions, all but `keep` when it is given, in one transaction,
+ * telling `ended` which ones. Returns how many sessions ended.
  */
 export async function replacePassword(
 	connection: Database.Database,
@@ -64,6 +64,7 @@ export async function replacePassword(
 	password: string,
 	now: number,
 	keep?: string,
+	ended?: SessionsEnded,
 ): Promise<number> {
 	const lives = sessionLives(connection);
 	const hash = await hashPassword(password);
@@ -72,9 +73,12 @@ export async function replacePassword(
 		setPasswordHash(connection, account, hash, now);
 		endConfirmationsOf(connection, account);
 		endProofsOf(connection, account);
-		return connection
-			.prepare("DELETE FROM platform_session WHERE user_id = ? AND id IS NOT ?")
-			.run(account, keep ?? null).changes;
+		return endSessions(
+			connection,
+			keep === undefined ? { account } : { account, keep },
+			"password",
+			ended,
+		);
 	})();
 }
 

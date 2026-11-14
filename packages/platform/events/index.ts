@@ -6,8 +6,11 @@ import { ORPCError } from "@orpc/server";
 // account `platform/authorization` says sees it. Each channel gets one `invalidate` per write that reaches it, in
 // the order of the commits. Its queue holds at most a limit of events not yet written: past it the channel is cut,
 // without `purge`, and the browser reconnects and asks again for what it shows. A heartbeat every 25 s of the
-// platform clock and timer checks that the session lives, and when not writes `purge` and closes. A session has at
-// most 6 channels: opening another cuts the oldest. One process of `api` only: the channels live in its memory.
+// platform clock and timer checks that the session lives, and when not writes `purge` and closes. Ending sessions
+// and changing an account's permissions leave their mark in the same table, in the transaction that does it: once
+// it commits, in the same order, the channels of the ended sessions get `purge` and close, and those of the account
+// `reset`, closing after it when it lost `read` in an area. A session has at most 6 channels: opening another cuts
+// the oldest. One process of `api` only: the channels live in its memory.
 import type Database from "better-sqlite3";
 import type { Context } from "hono";
 import { type SSEStreamingApi, streamSSE } from "hono/streaming";
@@ -16,6 +19,7 @@ import type { Clock } from "../actions";
 import type { AccessView, VerifiedContext } from "../authorization";
 import { invalidationReaches, type RecordChange } from "../authorization/invalidations";
 import type { Timer } from "../background/timer";
+import type { IdentityChanges } from "../identity/operations";
 import type { SessionLives } from "../identity/sessions";
 
 /** How often a channel writes its heartbeat and checks its session, in milliseconds of the platform clock. */
@@ -27,8 +31,14 @@ export const CHANNELS_PER_SESSION = 6;
 /** The most events a channel holds unwritten unless the test lowers it. */
 export const DEFAULT_QUEUE_LIMIT = 100;
 
-/** The table where a write leaves its changed records, inside its own transaction. */
+/**
+ * The table where a write leaves its changed records, and ending sessions or changing permissions its mark, inside
+ * its own transaction.
+ */
 const PENDING = "platform_invalidations";
+
+const PURGE: Outgoing = { event: "purge", data: {} };
+const RESET: Outgoing = { event: "reset", data: {} };
 
 export interface EventsOptions {
 	readonly connection: Database.Database;
@@ -40,7 +50,11 @@ export interface EventsOptions {
 	readonly queueLimit?: number;
 }
 
-export interface Events {
+/**
+ * Besides a write's changes, what identity tells inside the transaction that does it: the sessions that ended,
+ * whose channels get `purge` and close, and the account whose permissions changed, whose channels get `reset`.
+ */
+export interface Events extends IdentityChanges {
 	/**
 	 * Remembers the records a write changed, inside its transaction: they are shared out once it commits, and never
 	 * if it rolls back.
@@ -54,8 +68,14 @@ export interface Events {
 
 /** What a channel writes: one of its events, or a comment such as the heartbeat. */
 type Outgoing =
-	| { readonly event: "ready" | "invalidate" | "purge"; readonly data: object }
+	| { readonly event: "ready" | "invalidate" | "reset" | "purge"; readonly data: object }
 	| { readonly comment: string };
+
+/** What waits in the table until its transaction commits. */
+type Pending =
+	| { readonly kind: "invalidate"; readonly changes: readonly RecordChange[] }
+	| { readonly kind: "end"; readonly sessions: readonly string[] }
+	| { readonly kind: "reset"; readonly account: string; readonly closes: boolean };
 
 interface Channel {
 	readonly account: string;
@@ -72,7 +92,7 @@ interface Channel {
 
 interface PendingRow {
 	readonly seq: number;
-	readonly changes: string;
+	readonly item: string;
 }
 
 export function createEvents({
@@ -87,12 +107,10 @@ export function createEvents({
 		throw new Error(
 			`the queue limit must be a positive whole number, got ${String(queueLimit)}`,
 		);
-	connection.exec(
-		`CREATE TEMP TABLE ${PENDING} (seq INTEGER PRIMARY KEY, changes TEXT NOT NULL)`,
-	);
-	const insert = connection.prepare<[string]>(`INSERT INTO temp.${PENDING} (changes) VALUES (?)`);
+	connection.exec(`CREATE TEMP TABLE ${PENDING} (seq INTEGER PRIMARY KEY, item TEXT NOT NULL)`);
+	const insert = connection.prepare<[string]>(`INSERT INTO temp.${PENDING} (item) VALUES (?)`);
 	const pending = connection.prepare<[], PendingRow>(
-		`SELECT seq, changes FROM temp.${PENDING} ORDER BY seq`,
+		`SELECT seq, item FROM temp.${PENDING} ORDER BY seq`,
 	);
 	const taken = connection.prepare<[number]>(`DELETE FROM temp.${PENDING} WHERE seq <= ?`);
 
@@ -113,14 +131,28 @@ export function createEvents({
 		taken.run(last.seq);
 		const listening = [...channels].filter((channel) => {
 			if (sessionLives(channel.account, channel.session, clock())) return true;
-			end(channel);
+			end(channel, PURGE);
 			return false;
 		});
 		for (const row of rows) {
-			const changes = JSON.parse(row.changes) as RecordChange[];
+			const item = JSON.parse(row.item) as Pending;
+			if (item.kind === "end") {
+				for (const channel of listening)
+					if (item.sessions.includes(channel.session)) end(channel, PURGE);
+				continue;
+			}
+			if (item.kind === "reset") {
+				for (const channel of listening) {
+					if (channel.state !== "open" || channel.account !== item.account) continue;
+					// It reconnects and authenticates again with the permissions it has now.
+					if (item.closes) end(channel, RESET);
+					else enqueue(channel, RESET);
+				}
+				continue;
+			}
 			for (const channel of listening) {
 				if (channel.state !== "open") continue;
-				const reached = changes
+				const reached = item.changes
 					.filter((change) => invalidationReaches(view, channel.account, change))
 					.map(({ module, type, id }) => ({ module, type, id }));
 				if (reached.length > 0)
@@ -145,11 +177,14 @@ export function createEvents({
 		channel.cancelBeat();
 	}
 
-	/** The session ended: `purge` after what it holds, then the stream closes. */
-	function end(channel: Channel): void {
+	/**
+	 * `last` after what it holds, then the stream closes: `purge` when its session ended, `reset` when its account
+	 * lost access.
+	 */
+	function end(channel: Channel, last: Outgoing): void {
 		if (channel.state !== "open") return;
 		unregister(channel);
-		channel.queue.push({ event: "purge", data: {} });
+		channel.queue.push(last);
 		channel.state = "ending";
 		channel.wake();
 	}
@@ -171,7 +206,7 @@ export function createEvents({
 			share();
 			if (channel.state !== "open") return;
 			if (!sessionLives(channel.account, channel.session, clock())) {
-				end(channel);
+				end(channel, PURGE);
 				return;
 			}
 			enqueue(channel, { comment: "heartbeat" });
@@ -179,15 +214,25 @@ export function createEvents({
 		});
 	}
 
+	/** Leaves `item` in the transaction in progress, if any, and shares it out once none is open. */
+	function leave(item: Pending): void {
+		insert.run(JSON.stringify(item));
+		if (!scheduled) {
+			scheduled = true;
+			// A transaction of better-sqlite3 ends before any microtask runs.
+			queueMicrotask(share);
+		}
+	}
+
 	return {
 		remember(changes) {
-			if (changes.length === 0) return;
-			insert.run(JSON.stringify(changes));
-			if (!scheduled) {
-				scheduled = true;
-				// A transaction of better-sqlite3 ends before any microtask runs.
-				queueMicrotask(share);
-			}
+			if (changes.length > 0) leave({ kind: "invalidate", changes });
+		},
+		sessionsEnded(sessions) {
+			if (sessions.length > 0) leave({ kind: "end", sessions });
+		},
+		accessChanged(account, closes) {
+			leave({ kind: "reset", account, closes });
 		},
 		open(c, { account, session }) {
 			if (session === undefined || !sessionLives(account, session, clock()))
