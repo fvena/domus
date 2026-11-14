@@ -20,9 +20,11 @@ services:
             context: .
             dockerfile: docker/Dockerfile
             target: api
-        image: domus-api:local
+        # DOMUS_IMAGE_TAG and DOMUS_PORT exist so a second compose project on the same machine (to try the images as
+        # CI does) neither retags the real images nor needs the real port: run it with `-p <other>` and both set.
+        image: domus-api:${DOMUS_IMAGE_TAG:-local}
         ports:
-            - "3000:3000"
+            - "${DOMUS_PORT:-3000}:3000"
         volumes:
             - domus-data:/data
             # The restic repository of the backups (ADR 0026), mounted only here: on the Pi the `.env` sets
@@ -42,7 +44,7 @@ services:
             context: .
             dockerfile: docker/Dockerfile
             target: assistant
-        image: domus-assistant:local
+        image: domus-assistant:${DOMUS_IMAGE_TAG:-local}
         # No data volume, by construction: Kira reaches Domus only through the api (adr/0005-kira-aislada.md).
         environment:
             DOMUS_API_URL: http://api:3000
@@ -57,7 +59,7 @@ services:
             context: .
             dockerfile: docker/Dockerfile
             target: voice-gateway
-        image: domus-voice-gateway:local
+        image: domus-voice-gateway:${DOMUS_IMAGE_TAG:-local}
         environment:
             DOMUS_API_URL: http://api:3000
             TZ: ${TZ:-Europe/Madrid}
