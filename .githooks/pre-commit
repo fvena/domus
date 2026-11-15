@@ -11,8 +11,25 @@ GITLEAKS_VERSION=${GITLEAKS_IMAGE##*:v}
 if command -v gitleaks >/dev/null 2>&1 && [ "$(gitleaks version 2>/dev/null | sed 's/^v//')" = "$GITLEAKS_VERSION" ]; then
 	gitleaks git --pre-commit --staged --redact --no-banner --verbose .
 elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+	# In a git worktree, .git is a file naming a folder of the main repository's .git, outside this checkout. That
+	# .git is mounted read-only at /git, and git told where the worktree's part of it is: mounted at its own path, it
+	# shows up empty under Docker Desktop.
+	set --
+	if [ "$(git rev-parse --git-dir)" != .git ]; then
+		common=$(git rev-parse --path-format=absolute --git-common-dir)
+		gitdir=$(git rev-parse --absolute-git-dir)
+		case $gitdir in
+		"$common") inside= ;;
+		"$common"/*) inside=/${gitdir#"$common"/} ;;
+		*)
+			echo "pre-commit: cannot scan for secrets: the git folder $gitdir is not inside $common." >&2
+			exit 1
+			;;
+		esac
+		set -- -v "$common:/git:ro" -e GIT_DIR="/git$inside" -e GIT_COMMON_DIR=/git -e GIT_WORK_TREE=/repo
+	fi
 	# git in the image refuses a checkout owned by another user unless told it is safe.
-	docker run --rm -v "$PWD:/repo" -w /repo -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0="*" \
+	docker run --rm -v "$PWD:/repo" -w /repo "$@" -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0="*" \
 		"$GITLEAKS_IMAGE" git --pre-commit --staged --redact --no-banner --verbose /repo
 else
 	echo "pre-commit: cannot scan for secrets: start Docker, or install gitleaks $GITLEAKS_VERSION, the version CI uses." >&2

@@ -31,7 +31,7 @@ Y como gran parte del código lo escriben agentes, lo que mantiene el proyecto c
 - Plan y decisiones: el plan está en [`docs/plan.md`](../plan.md); las especificaciones y tareas de cada fase, en `.scratch/<fase>/`; los ADR, en [`docs/architecture/adr/`](../architecture/adr/); las normas que piden criterio, en [`CODING_STANDARDS.md`](../../CODING_STANDARDS.md); las instrucciones para agentes, en los `AGENTS.md`.
 - Herramientas: Node 22, pnpm, Turborepo, TypeScript sobre tsgo, Vitest, Oxlint, Oxfmt y dependency-cruiser.
 - Comandos: `pnpm install`, `pnpm dev`, `pnpm build`, `pnpm lint`, `pnpm format`, `pnpm type-check`, `pnpm test`, `pnpm db:generate` y `pnpm modules:generate`. La tabla completa está en [`AGENTS.md`](../../AGENTS.md).
-- Antes de cada commit: `.githooks/pre-commit` (gitleaks, lint, formato y tipos).
+- Antes de cada commit: `.githooks/pre-commit` (gitleaks, lint, formato y tipos), también desde un worktree de git; lo prueba `tooling/scripts/pre-commit.test.ts`.
 - En cada PR: `.github/workflows/validate-prs.yml`, con secretos, lint y formato, ficheros generados, tipos, build, pruebas e imágenes.
 - Comprobaciones del repositorio: `tooling/scripts`, con las reglas de capas (`architecture.test.ts`), los ADR (`adr.test.ts`) y el tamaño de los `AGENTS.md` (`agents-md.test.ts`).
 - Decisiones: [ADR 0017](../architecture/adr/0017-estructura-del-repositorio.md), [ADR 0018](../architecture/adr/0018-patrones-de-openclaw-y-hermes.md) y [ADR 0019](../architecture/adr/0019-oxlint-y-oxfmt.md).

@@ -101,19 +101,29 @@ function pinnedVersion(): string {
 	return pinnedImage().replace(/^.*:v/, "");
 }
 
+/** Answers when this gitleaks runs and is the pinned version, the one the hook takes from PATH. */
+export function isPinnedGitleaks(gitleaks = "gitleaks"): boolean {
+	return printed(gitleaks, ["version"])?.trim().replace(/^v/, "") === pinnedVersion();
+}
+
+/** Answers when Docker is there and its daemon running, as the hook asks before using the image. */
+export function dockerRuns(docker = "docker"): boolean {
+	return answers(docker, ["info"]);
+}
+
 /**
  * The gitleaks to scan with: the one on PATH at the pinned version, or else the pinned image. Throws, with what
  * to install, when there is neither.
  */
 export function findGitleaks({ gitleaks = "gitleaks", docker = "docker" } = {}): Gitleaks {
-	if (printed(gitleaks, ["version"])?.trim().replace(/^v/, "") === pinnedVersion()) {
+	if (isPinnedGitleaks(gitleaks)) {
 		return scanner((folder, config, output) => ({
 			command: gitleaks,
 			args: dirScan(folder, config, join(output, "report.json")),
 			seen: folder,
 		}));
 	}
-	if (answers(docker, ["info"])) {
+	if (dockerRuns(docker)) {
 		const image = pinnedImage();
 		// Pulled and run here, once, so no scan waits for the download or for the first container to start: on a
 		// cold CI runner that first start alone took longer than a test's 5 s.
