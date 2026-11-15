@@ -14,10 +14,9 @@ import { dockerRuns, findGitleaks, isPinnedGitleaks } from "./gitleaks";
 
 const root = join(import.meta.dirname, "../..");
 
-/** A key of the form the platform issues, which the rule of `.gitleaks.toml` flags. */
-function sampleKey(): string {
-	const random = (bytes: number) => randomBytes(bytes).toString("base64url");
-	return `domus_${random(8)}.${random(32)}`;
+/** A GitHub token, which a default rule of gitleaks flags: `ghp_` and 36 letters or digits, here in hex. */
+function sampleToken(): string {
+	return `ghp_${randomBytes(18).toString("hex")}`;
 }
 
 /** A way for the hook to scan: what the stand-in folder at the head of PATH holds to make it take that way. */
@@ -127,18 +126,18 @@ describe("the secret scan of the pre-commit hook", () => {
 				"blocks a commit that stages a secret, without printing it",
 				{ timeout: 60_000 },
 				() => {
-					const key = sampleKey();
-					stage(at(), "env.txt", `DOMUS_KIRA_KEY="${key}"`);
+					const token = sampleToken();
+					stage(at(), "env.txt", `GITHUB_TOKEN="${token}"`);
 					const { status, output } = commit(at());
-					expect(output).toContain("domus-api-key");
-					expect(output).not.toContain(key);
+					expect(output).toContain("github-pat");
+					expect(output).not.toContain(token);
 					expect(status).not.toBe(0);
 					expect(git(at(), "log", "--format=%s")).toBe("start\n");
 				},
 			);
 
 			it("scans only what is staged", { timeout: 60_000 }, () => {
-				writeFileSync(join(at(), "env.txt"), `DOMUS_KIRA_KEY="${sampleKey()}"\n`);
+				writeFileSync(join(at(), "env.txt"), `GITHUB_TOKEN="${sampleToken()}"\n`);
 				stage(at(), "notes.txt", "nothing secret");
 				const { status, output } = commit(at());
 				expect(output).toContain("no leaks found");
