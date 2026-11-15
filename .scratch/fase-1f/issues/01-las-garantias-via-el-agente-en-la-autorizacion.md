@@ -29,7 +29,7 @@ Antes de quitar el mandato, las garantías que hoy se cumplen por su canal `cont
 
 ## Comments
 
-- Hecho en el commit «feat(platform): decide what a context with via reaches in authorization».
+- Hecho en `9ce0d8e`.
 - La lista vive en `packages/platform/authorization/via.ts` (`admitsVia`), que sustituye a `authorization/mandates.ts` y a `admitsMandate`. `decide` la pregunta primero: con `via`, de las acciones `platform.*` solo pasa `platform.readLog`, y deshacer pasa entero (lo que se autoriza es su inversa, que sigue el resto de la decisión). Un nombre desconocido o escrito de otra forma se deniega.
 - Lo que no va por el camino de las acciones pregunta a `asksByItself` de la autorización: `password/change` y `sessions/list` en la puerta, `requestProof` en `identity/proofs.ts`, y confirmar y rechazar en `reachable` de `actions/answering.ts`, que responde `FORBIDDEN` antes de buscar la pendiente (antes, con `via` y el canal `app`, era `NOT_FOUND`).
 - El comprobante: `AuthorizationRequest` lleva `confirmedBy`, el contexto de quien contestó la pendiente, que `answering.ts` pasa en lugar de `confirmed: true`. Cuenta solo si lo trae una persona por `app` y sin `via`. Una repetición vía el agente de una escritura `manage` ya confirmada pide su comprobante y no lo acepta nunca, tampoco uno recién pedido por la persona, que queda sin gastar (`proofs.test.ts`).

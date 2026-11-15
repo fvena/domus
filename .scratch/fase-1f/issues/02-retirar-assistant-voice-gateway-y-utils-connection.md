@@ -26,7 +26,7 @@ Domus queda con un solo programa, `api`, además de la web. Los dos programas qu
 
 ## Comments
 
-- Hecho en el commit «feat: retire assistant, voice-gateway and utils/connection».
+- Hecho en `95b13ea`.
 - `compose-ci.test.ts` comprueba ahora que la composición solo tiene el servicio `api` y el secreto `backup-password`, que la CI construye exactamente los destinos que arranca la composición, y que el trabajo `containers` no da variables que la composición no lea. `docker compose up -d --build --wait` en local, con otro proyecto, arrancó solo `api`, sano.
 - La regla `programs-never-reach-platform` se queda para `web`, con el nombre `web-never-reaches-platform`: era la única que seguía la cadena de imports de la web. `assistant-and-voice-gateway-only-talk-to-api` sale entera.
 - Del tema `program` salen también `readUrl` y el servidor de `/health` (`createHealthApp`, `serveHealth`), que solo usaban los dos programas, y con ellos `hono` y `@hono/node-server` de `@domus/utils`. Quedan `readPort` y `onShutdown`, que usa `api`. Está en la spec («Herramientas, Docker y CI»).

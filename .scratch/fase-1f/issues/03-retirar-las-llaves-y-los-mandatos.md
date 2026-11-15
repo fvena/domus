@@ -30,7 +30,7 @@ La puerta deja de reconocer credenciales de apps: una petición que traiga una l
 
 ## Comments
 
-- Hecho en el commit «feat(platform): retire the keys and the mandates of the connected apps».
+- Hecho en `c4720e2`.
 - La puerta (`platform/http/index.ts`) rechaza con un solo middleware sobre `/api/*` (`retiredHeaderOf`, con `authorization` y `domus-mandate`), antes de leer la cookie. Las rutas de Better Auth reciben `{ code, message }`, como su contraseña mala; las de Hono, el JSON de `errorResponse`; en `/api/rpc/*` el middleware deja pasar y un interceptor del `RPCHandler` lanza `UNAUTHORIZED` con `context.retired`, antes de buscar el procedimiento, para que la respuesta lleve el sobre de oRPC. Por eso un procedimiento o una ruta que no existe responde también 401 con esas cabeceras, no 404.
 - El log del operador sigue: `retired credential refused: <cabecera>`, sin el valor (`http.test.ts`). Lo añado a la spec, «La puerta».
 - Sale también `KIRA` de `@domus/platform/contracts`, que solo usaba `keys.ts`; `via` sigue con el valor `kira`, que no sale de ninguna constante.

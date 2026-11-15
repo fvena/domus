@@ -25,7 +25,7 @@ Una sola migración nueva de la plataforma deja la base sin rastro de las apps c
 
 ## Comments
 
-- Hecho en el commit «feat(platform): migrate away the keys, the mandates and the confirmation in context».
+- Hecho en `3bb4f8f`.
 - La migración es `packages/platform/migrations/0017_damp_carlie_cooper.sql` (posición 18): borra `platform_keys` y `platform_mandates`, y luego, escrita a mano con un comentario que lo dice, `DELETE FROM platform_confirmations WHERE context_only = 1`, justo antes de quitar `window_closes_at` y `context_only`. drizzle-kit genera `DROP COLUMN` sin reconstruir la tabla. Dos `pnpm db:generate` seguidos no dejan cambios, y las migraciones anteriores (SQL, journal y `generated-migrations.ts`) solo ganan la nueva al final.
 - Salen con ella los restos de la 04: el campo `contextOnly` de `PendingConfirmation`, su comprobación en `reachable`, las dos columnas del `INSERT` y la prueba que preparaba una pendiente antigua con un `UPDATE` (`actions/confirmations.test.ts`); `background/cleanup.test.ts` deja de escribir `window_closes_at`. `docs/agents/packages.md` queda al día.
 - Las pruebas, en `tooling/scripts/phase-1e-database.test.ts`: es el único sitio que puede juntar el ejecutor de migraciones de la plataforma con `probe` y `test-utils` sin saltarse una regla de dependencias. La base de la 1e se escribe con `migrate` hasta `0016_complete_tomorrow_man` (la última de la 1e, por su tag) y las de `probe`, con la cuenta `ana`, notas y pendientes tal como las guardaba la 1e; luego la abre `createTestPlatform`, que aplica la migración nueva (una sola). La pendiente ordinaria se compara, columna a columna, con la fila escrita menos las dos que salen.

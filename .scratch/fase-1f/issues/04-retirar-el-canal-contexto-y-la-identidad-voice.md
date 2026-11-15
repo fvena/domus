@@ -26,7 +26,7 @@ Sin mandatos, nada puede producir el canal `contexto` ni la identidad `voice`. D
 
 ## Comments
 
-- Hecho en el commit «feat(platform): retire the channel contexto and the identity voice».
+- Hecho en `3b47273`.
 - El contexto verificado (`authorization/context.ts`): `Channel` es solo `app`, `IdentityProof` es `password` o `device`, y sale `conversation`. `deviceAccount` se queda: lo guarda el origen de cada pendiente.
 - La regla del aparato compartido (`decide`, paso 5) mira la cuenta representada: si su rol es `device`, una lectura de un área con `confirmOnSharedDevice` se deniega. Ya no mira `deviceAccount`, porque el caso del miembro reconocido desaparece. `confirm-in-context` sale de `DECISIONS`, así que `decisionOf` lo trata como una respuesta desconocida y deniega.
 - Las comprobaciones del canal `app` en `decide` (lo personal y el comprobante) se quedan, aunque hoy siempre se cumplen: la spec deja el campo para que la fase 5 decida si llega otro canal.
