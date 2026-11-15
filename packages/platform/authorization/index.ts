@@ -44,8 +44,7 @@ export interface RequiredPermission {
 /**
  * What an action asks before it runs: the verified context, which action by its full name, whether it reads
  * or writes, the permission its contract declares and its validated input. When the action is the inverse an
- * undo runs, `undoes` carries the context of the entry it undoes. `confirmed` says the person has confirmed
- * this very operation: the requirement to confirm counts as met, and only that one.
+ * undo runs, `undoes` carries the context of the entry it undoes.
  */
 export interface AuthorizationRequest {
 	readonly context: VerifiedContext;
@@ -54,6 +53,11 @@ export interface AuthorizationRequest {
 	readonly permission: RequiredPermission;
 	readonly input: unknown;
 	readonly undoes?: UndoContext;
+	/**
+	 * The person has confirmed this very operation, so the requirement to confirm counts as met, and only that one.
+	 * A pending confirmation a person answered brings it with {@link AuthorizationRequest.confirmedBy}; a repeat
+	 * under the same key brings it alone, since its acknowledgement runs nothing: only its proof is asked again.
+	 */
 	readonly confirmed?: boolean;
 	/**
 	 * Who confirmed it, when it runs a pending confirmation a person answered: the context of that answer, by the app
@@ -215,9 +219,10 @@ export function decide(request: AuthorizationRequest, view: AccessView): Decisio
 		if (delegated === "confirm") ask = true;
 	}
 	// 3. Sensitive operations ask for a step-up proof, which only an identity proven by password can bring; via
-	// Kira, changing access or delegation is denied whatever it brings. A proof counts only when a person brings it
-	// by the channel `app` and without via: one the person asked for in the app proves nothing when an agent brings
-	// it, so via an agent it counts only when the person confirms from the app (ADR 0030, ADR 0034). A proof brought to an operation that is not sensitive does not match it either.
+	// Kira, changing access or delegation is denied whatever it brings. A proof counts only when a person brings
+	// it by the channel `app` and without via: one the person asked for in the app proves nothing when an agent
+	// brings it, so via an agent it counts only when the person confirms from the app (ADR 0030, ADR 0034). A
+	// proof brought to an operation that is not sensitive does not match it either.
 	let stepUp = false;
 	if (permission.level === "manage" || sensitive !== undefined) {
 		if (context.identity !== "password") return "deny";
@@ -226,8 +231,12 @@ export function decide(request: AuthorizationRequest, view: AccessView): Decisio
 			(sensitive === "permissions" || sensitive === "delegation")
 		)
 			return "deny";
-		const bringer = request.confirmedBy ?? context;
-		if (request.proof !== "valid" || !asksByItself(bringer) || bringer.channel !== "app")
+		const proofBringer = request.confirmedBy ?? context;
+		if (
+			request.proof !== "valid" ||
+			!asksByItself(proofBringer) ||
+			proofBringer.channel !== "app"
+		)
 			stepUp = true;
 	} else if (request.proof !== undefined) stepUp = true;
 	// 4. An action that always asks for confirmation.

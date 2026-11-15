@@ -1,7 +1,8 @@
 // How a module declares its actions in `contracts/` (ADR 0022, ADR 0023). Pure: oRPC contracts and nothing else,
 // so the browser can import a module's contracts. It adds to oRPC only Domus's conventions, as metadata: whether
-// the action reads or writes, for a write whether it can be undone, and the permission it asks for. Input, output and errors are oRPC's, with zod. `fileRef()` marks where a read's output
-// holds a file, the only place a download may take one from (ADR 0028).
+// the action reads or writes, for a write whether it can be undone, and the permission it asks for. Input, output
+// and errors are oRPC's, with zod. `fileRef()` marks where a read's output holds a file, the only place a download
+// may take one from (ADR 0028).
 import { type AnySchema, type ContractProcedure, type ErrorMap, oc } from "@orpc/contract";
 import { z } from "zod";
 

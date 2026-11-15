@@ -16,6 +16,7 @@ import {
 	type PermissionLevel,
 	type Role,
 	sealContext,
+	type VerifiedContext,
 } from ".";
 
 const AREAS: Readonly<Record<string, AreaPolicy>> = {
@@ -645,5 +646,33 @@ describe("decide on a person's own operation, with no level of any area", () => 
 
 	it("asks for no proof, and one it brings does not match it", () => {
 		expect(decide(personal("ana", { proof: "valid" }), platformView)).toBe("step-up");
+	});
+});
+
+describe("a verified context", () => {
+	const view = viewOf({ paco: "admin" });
+	/**
+	 * Paco's manage in `notes` with a valid proof, in a context sealed with `fields` over the usual ones: cast, as
+	 * only a value that went around the type could bring a retired one.
+	 */
+	const sealedWith = (fields: Record<string, string>): AuthorizationRequest => {
+		const base = request("paco", "notes", "manage");
+		return {
+			...base,
+			context: sealContext({ ...base.context, ...fields } as VerifiedContext),
+		};
+	};
+
+	it("takes only the channel app and an identity proven by password or device, so the retired ones do not type-check", () => {
+		const { context } = request("paco", "notes", "manage");
+		// @ts-expect-error: the channel `contexto` left with the connected apps (ADR 0034).
+		sealContext({ ...context, channel: "contexto" });
+		// @ts-expect-error: and so did the identity `voice`.
+		sealContext({ ...context, identity: "voice" });
+
+		// Were one to come anyway, a sensitive operation would not count its proof.
+		expect(decide(sealedWith({}), view)).toBe("allow");
+		expect(decide(sealedWith({ channel: "contexto" }), view)).toBe("step-up");
+		expect(decide(sealedWith({ identity: "voice" }), view)).toBe("deny");
 	});
 });

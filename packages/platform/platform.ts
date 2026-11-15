@@ -7,7 +7,7 @@ import { dirname, isAbsolute } from "node:path";
 import { checkModules, type ModuleDefinition, PLATFORM_ID } from "@domus/module-sdk";
 import Database from "better-sqlite3";
 
-import { type Actions, type Clock, createActions } from "./actions";
+import { type Actions, type Clock, createActions, type PlatformOperation } from "./actions";
 import { type Capture, installCapture } from "./actions/capture";
 import { type ConfirmationTimes, createConfirmations } from "./actions/confirmations";
 import { createProofs, type Proofs } from "./actions/proofs";
@@ -123,6 +123,8 @@ export interface PlatformRuntime {
 	readonly tasks?: readonly ScheduledTask[];
 	/** Synthetic job kinds a test declares, by name, to enqueue them itself. */
 	readonly jobs?: Readonly<Record<string, JobKind>>;
+	/** Operations of the platform a test declares besides its own, such as an undoable sensitive one. */
+	readonly operations?: readonly PlatformOperation[];
 	/** The restic executable of the backups: `restic` from the `PATH` unless a test gives another. */
 	readonly restic?: string;
 	/** The Node executable of the backups' child processes: this process's own unless a test gives another. */
@@ -188,6 +190,7 @@ export function openPlatform(
 		timer = realTimer(clock),
 		tasks,
 		jobs,
+		operations,
 		restic,
 		node,
 		interleave,
@@ -355,6 +358,7 @@ export function openPlatform(
 			...taskOperations(background),
 			// Called only while a write runs, once the actions exist.
 			...notificationOperations((job) => actions.enqueueInWrite(job)),
+			...(operations ?? []),
 		],
 		references: createReferences(db, view),
 		...(files === undefined ? {} : { openContent: (hash: string) => files.open(hash) }),

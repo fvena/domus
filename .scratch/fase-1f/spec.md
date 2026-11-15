@@ -59,7 +59,7 @@ Se quedan la tabla de delegación, `via` con el valor `kira` y las confirmacione
 28. Como Paco, quiero que la clave de idempotencia siga siendo por cuenta y `via`, para que un reintento del agente no se confunda con uno mío.
 29. Como Rocío, quiero que un agente lea mis anotaciones y deshaga mis entradas solo dentro de mi delegación, y que deshacer se le deniegue cuando la retiro, para que retirar el acceso corte también eso.
 30. Como Paco, quiero que el registro de acciones siga anotando `via`, para saber qué se hizo vía el agente cuando lo haya.
-31. Como Paco, quiero que un agente siga sin llegar a contraseñas, sesiones, comprobantes, acceso, delegación, aparatos, ajustes de las tareas, avisos ni suscripciones, para que esa lista no dependa de un mecanismo que ya no existe.
+31. Como Paco, quiero que un agente siga sin llegar a contraseñas, sesiones, comprobantes, acceso, delegación, aparatos, avisos ni suscripciones, y que a los ajustes de las tareas no llegue por sí mismo: deshacer una entrada mía de esos ajustes vía el agente solo se completa cuando la confirmo desde la app con su comprobante, para que esa lista no dependa de un mecanismo que ya no existe.
 32. Como quien escriba la fase 5, quiero que esas garantías sigan probadas, para partir de ellas al conectar el agente por OAuth.
 33. Como quien escriba la fase 5, quiero que la retirada no invente un mecanismo nuevo de «vía agente», para decidir su forma con el perfil OAuth de MCP.
 34. Como quien escriba un módulo, quiero que los ejemplos de `probe` ya no lleven llaves ni mandatos, para copiar solo lo que un módulo necesita.
@@ -111,6 +111,7 @@ Se quedan la tabla de delegación, `via` con el valor `kira` y las confirmacione
 ### La puerta (Q8)
 
 - Toda petición a `/api` que traiga la cabecera `Authorization`, con cualquier valor, o la cabecera del mandato responde `UNAUTHORIZED`, antes de mirar la cookie y también en `status`. Las rutas de archivos y el canal en directo siguen su regla de errores como JSON plano.
+- Con cualquiera de las dos cabeceras, una ruta de `/api` o un procedimiento RPC que no existe también responde 401, no 404: ninguna respuesta dice si la ruta existe.
 - `/health` y la web compilada no miran esas cabeceras.
 - El log del operador dice qué cabecera rechazó, nunca su valor.
 - Sin esas cabeceras, la puerta hace lo de siempre: con una sesión válida, el contexto verificado de la sesión; sin ninguna, `status` sigue siendo público.

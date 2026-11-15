@@ -29,6 +29,18 @@ export interface ConfirmationCall {
 }
 
 /**
+ * What an operation brings besides its input: its step-up proof, and the context that confirmed it when it runs a
+ * pending confirmation a person answered.
+ */
+export interface ProofAndConfirmation {
+	readonly proof?: string;
+	readonly confirmedBy?: VerifiedContext;
+}
+
+/** The same, on the path of answering, where the person who answered always confirmed it. */
+type Answered = ProofAndConfirmation & { readonly confirmedBy: VerifiedContext };
+
+/**
  * What answering runs an operation with: the path's own read, write and undo, each confirmed by the context that
  * answered it, the person's by the app and without via.
  */
@@ -42,18 +54,14 @@ export interface AnsweringPath {
 		context: VerifiedContext,
 		action: string,
 		input: unknown,
-		options: { readonly proof?: string; readonly confirmedBy: VerifiedContext },
+		options: Answered,
 	) => unknown;
 	readonly write: (
 		found: RegisteredAction,
 		context: VerifiedContext,
 		action: string,
 		input: unknown,
-		options: {
-			readonly idempotencyKey: string | undefined;
-			readonly proof?: string;
-			readonly confirmedBy: VerifiedContext;
-		},
+		options: Answered & { readonly idempotencyKey: string | undefined },
 	) => { readonly entry: number };
 	readonly undo: (
 		call: {
@@ -72,7 +80,7 @@ export interface AnsweringPath {
 		found: RegisteredAction,
 		context: VerifiedContext,
 		operation: PendingDownload,
-		options: { readonly proof?: string; readonly confirmedBy: VerifiedContext },
+		options: Answered,
 	) => Download;
 }
 

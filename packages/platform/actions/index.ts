@@ -55,7 +55,13 @@ import { checkTransition, editableTo, type RecordArea } from "../authorization/w
 import { markedFiles } from "../files/marked";
 import { FilesRefusal, type References, type WriteRun } from "../files/references";
 import type { OpenedContent } from "../files/store";
-import { answeringWith, type ConfirmationCall, type Download, openingDownload } from "./answering";
+import {
+	answeringWith,
+	type ConfirmationCall,
+	type Download,
+	openingDownload,
+	type ProofAndConfirmation,
+} from "./answering";
 import { type Capture, type CapturedTransition, changesOf } from "./capture";
 import { type ConfirmationTimes, type Confirmations, type NewPending } from "./confirmations";
 import { conflict, internalError, notUndoable, stepUpRequired } from "./failures";
@@ -544,7 +550,7 @@ export function createActions({
 		context: VerifiedContext,
 		action: string,
 		input: unknown,
-		options: { readonly proof?: string; readonly confirmedBy?: VerifiedContext },
+		options: ProofAndConfirmation,
 	): unknown {
 		const checked = authorizeRead(found, context, action, input, options);
 		return answerRead(found, context, input, { proof: options.proof, checked });
@@ -559,11 +565,7 @@ export function createActions({
 		context: VerifiedContext,
 		action: string,
 		input: unknown,
-		options: {
-			readonly proof?: string;
-			readonly confirmedBy?: VerifiedContext;
-			readonly file?: string;
-		},
+		options: ProofAndConfirmation & { readonly file?: string },
 	): ProofCheck | undefined {
 		return orPending(readPending(context, action, input, options.file), () =>
 			checkRead(found, context, action, input, options),
@@ -597,7 +599,7 @@ export function createActions({
 		context: VerifiedContext,
 		action: string,
 		input: unknown,
-		{ proof, confirmedBy }: { readonly proof?: string; readonly confirmedBy?: VerifiedContext },
+		{ proof, confirmedBy }: ProofAndConfirmation,
 	): ProofCheck | undefined {
 		const checked = proofs.check(proof, context, operationFingerprint(action, input), clock());
 		authorize({
@@ -647,11 +649,7 @@ export function createActions({
 			idempotencyKey,
 			proof,
 			confirmedBy,
-		}: {
-			readonly idempotencyKey: string | undefined;
-			readonly proof?: string | undefined;
-			readonly confirmedBy?: VerifiedContext;
-		},
+		}: ProofAndConfirmation & { readonly idempotencyKey: string | undefined },
 	): WriteOutcome {
 		const actor = actorOf(context);
 		const fingerprint = operationFingerprint(action, input);
@@ -704,7 +702,10 @@ export function createActions({
 		const actor = actorOf(context);
 		const fingerprint = undoFingerprint(number);
 
-		/** The request to authorization for an inverse, with the context of the entry it undoes. */
+		/**
+		 * The request to authorization for an inverse, as the same write would ask, sensitive and with its subject,
+		 * and with the context of the entry it undoes.
+		 */
 		const requestFor = (
 			original: NumberedEntry,
 			inverse: Inverse,
@@ -718,6 +719,7 @@ export function createActions({
 				kind: "write",
 				permission: target.permission,
 				input: inverse.input,
+				...sensitivityOf(target, inverse.input, context),
 				undoes: { entry: original.entry, action: original.action, actor: original.actor },
 				...confirmationBy(confirmedBy),
 				...(checked === undefined ? {} : { proof: checked }),

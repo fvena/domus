@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { AuthorizationRequest } from "../authorization";
 import { actionsOf, connectionOf, openPlatform, type Platform } from "../platform";
 import { moduleDatabase, readLog, syntheticContext } from "../testing";
+import { platformOperation } from "./platform-operations";
 
 const { table } = moduleTables("shelf");
 const books = table("books", { id: id(), title: text().notNull() });
@@ -146,6 +147,68 @@ describe("an undo", () => {
 				confirmed: true,
 			},
 		]);
+	});
+
+	it("authorizes an inverse of the platform as the same write: sensitive and with its subject", () => {
+		// An undoable sensitive operation, which the platform does not have today: the undo of its entry must not
+		// slip past the rule that keeps an agent off changing access or delegation.
+		let guarded = false;
+		const setGuard = platformOperation({
+			name: "setGuard",
+			sensitive: "delegation",
+			undoable: true,
+			inputSchema: z.object({ account: z.string(), on: z.boolean() }),
+			subject: ({ account }) => account,
+			touches: () => [{ type: "guard", id: 1 }],
+			run: ({ account, on }) => {
+				const before = guarded;
+				guarded = on;
+				return {
+					result: { on },
+					inverse: { action: "platform.setGuard", input: { account, on: before } },
+				};
+			},
+		});
+		const requests: AuthorizationRequest[] = [];
+		platform = openPlatform(
+			{ databaseFile: ":memory:", modules: [] },
+			{
+				authorizer: (request) => {
+					requests.push(request);
+					return "allow";
+				},
+				clock: () => Date.UTC(2026, 10, 12),
+				operations: [setGuard],
+			},
+		);
+		const actions = actionsOf(platform);
+		actions.invoke({
+			context: ana,
+			action: "platform.setGuard",
+			input: { account: "ana", on: true },
+			idempotencyKey: "k1",
+		});
+		requests.length = 0;
+
+		actions.undo({ context: ana, entry: 1, idempotencyKey: "u1" });
+
+		expect(requests).toEqual([
+			{
+				context: ana,
+				action: "platform.setGuard",
+				kind: "write",
+				permission: { area: "platform", level: "write" },
+				input: { account: "ana", on: false },
+				sensitive: "delegation",
+				subject: "ana",
+				undoes: {
+					entry: 1,
+					action: "platform.setGuard",
+					actor: { account: "ana", via: "kira" },
+				},
+			},
+		]);
+		expect(guarded).toBe(false);
 	});
 
 	it("runs the inverse with exactly the input it authorized, transformed by its contract once", () => {
