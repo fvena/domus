@@ -115,9 +115,11 @@ export function findGitleaks({ gitleaks = "gitleaks", docker = "docker" } = {}):
 	}
 	if (answers(docker, ["info"])) {
 		const image = pinnedImage();
-		// Pulled here, once, so no scan waits for the download.
+		// Pulled and run here, once, so no scan waits for the download or for the first container to start: on a
+		// cold CI runner that first start alone took longer than a test's 5 s.
 		if (!answers(docker, ["image", "inspect", image]))
 			execFileSync(docker, ["pull", "--quiet", image], { stdio: "ignore" });
+		execFileSync(docker, ["run", "--rm", image, "version"], { stdio: "ignore" });
 		// As the user running the tests, so the report is theirs and the folders need no wider permissions.
 		const user = `${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`;
 		return scanner((folder, config, output) => ({
