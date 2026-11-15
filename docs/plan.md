@@ -86,6 +86,8 @@ Lo que Kira necesitará del núcleo, para el grilling de cada subfase. Desde el 
 
 **Incluye:** las pantallas y los flujos sobre lo que construye la 1c: el inicio de sesión, los perfiles y permisos ([ADR 0007](architecture/adr/0007-perfiles-y-permisos-si-o-no.md)), la delegación al agente conectado ([ADR 0008](architecture/adr/0008-la-ia-como-filtro-de-delegacion.md)) y el emparejamiento de aparatos ([ADR 0006](architecture/adr/0006-identidad-de-kira-y-aparatos.md)). Su grilling decide dos puntos que deja abiertos la 1c. La cookie de sesión va siempre con `Secure` en la Pi, así que un navegador la guarda por Tailscale (https) y no por `http://kira.local:3000` ([`despliegue.md`](despliegue.md), «Las sesiones y su cookie»). Y por HTTP una escritura devuelve su recibo (`{ result, entry }`, o el acuse), pero el tipo que da `api-client` con el contrato de un módulo dice que devuelve el resultado.
 
+El grilling también tiene en cuenta lo que cambia en la fase 5 ([ADR 0032](architecture/adr/0032-autorizacion-del-agente.md), [ADR 0033](architecture/adr/0033-conversacion-alojada-y-voz.md)). La pantalla de la delegación se construye con la regla de creación actual, pero se diseña para una tabla que nacerá denegada entera y tendrá un preajuste, sin tener que rehacerla. El consentimiento y la lista de enlaces del agente son de la fase 5. El emparejamiento es solo para navegadores y pantallas de Domus: los satélites serán del agente.
+
 **Terminada cuando** Paco y Rocío entran desde el móvil cada uno con su cuenta, un aparato emparejado entra con la cuenta `device`, y los permisos y la delegación al agente conectado se cambian desde ajustes. Antes del uso real, las copias de seguridad de la 1d funcionan y hay una restauración probada; siguen en el mismo NVMe hasta que haya un NAS ([ADR 0025](architecture/adr/0025-segundo-plano.md)).
 
 ## 4. Módulo piloto: listas y compra
@@ -93,6 +95,8 @@ Lo que Kira necesitará del núcleo, para el grilling de cada subfase. Desde el 
 **Estado:** pendiente.
 
 **Incluye:** el ciclo completo de un módulo: revisión → pantallas → servidor y web → pruebas → Pi. Antes de admitir datos privados reales, su grilling define cómo afecta su borrado al registro de acciones, a las inversas y a las copias de seguridad ([ADR 0022](architecture/adr/0022-acciones.md)); lo mismo cada módulo de la fase 6.
+
+Su carpeta `assistant/` se escribe como material para cualquier agente, no para Kira en particular, porque en la fase 5 se servirá por MCP ([ADR 0031](architecture/adr/0031-domus-con-un-agente-opcional.md)). El módulo no da por hecho que haya un agente: Domus funciona sin él. Lo mismo vale para cada módulo de la fase 6.
 
 **Terminada cuando** listas y compra corre en la Pi y la casa lo usa. El ciclo queda como el camino de los módulos de la fase 6.
 
