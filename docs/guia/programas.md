@@ -6,9 +6,11 @@ Domus funciona con tres programas (api, assistant y voice-gateway) y una web. Aq
 
 ## Cómo funciona
 
-api arranca el primero. Abre la base de datos, la pone al día y abre la puerta. A cualquiera le contesta a dos preguntas: si sigue vivo, y quién es y qué versión habla. A la segunda responde «domus, protocolo 1». También deja entrar con una cuenta. Todo lo demás lo atiende solo a quien ya ha entrado: las acciones de los módulos y las operaciones de la propia plataforma, como ver tus sesiones o cambiar tu contraseña. Y entrega la web, que hoy es una página con el nombre de Domus.
+api arranca el primero. Abre la base de datos, la pone al día y abre la puerta. A cualquiera le contesta a dos preguntas: si sigue vivo, y quién es y qué versión habla. A la segunda responde «domus, protocolo 1», y si quien pregunta trae una llave buena, también de qué app es. También deja entrar con una cuenta. Todo lo demás lo atiende solo a quien ya ha entrado: las acciones de los módulos y las operaciones de la propia plataforma, como ver tus sesiones o cambiar tu contraseña. Y entrega la web, que hoy es una página con el nombre de Domus.
 
-assistant y voice-gateway hacen ahora mismo lo mismo. Al arrancar le preguntan a api quién es y, según lo que oigan, se quedan en uno de tres estados. Si api no contesta, están conectando y vuelven a probar al segundo, a los dos, a los cuatro, y así hasta probar cada medio minuto. Si contesta y habla su misma versión, están listos. Si contesta en otra versión, son incompatibles y se quedan quietos hasta que las versiones coincidan.
+assistant y voice-gateway hacen ahora mismo casi lo mismo. Al arrancar le preguntan a api quién es y, según lo que oigan, se quedan en uno de cuatro estados. Si api no contesta, están conectando y vuelven a probar al segundo, a los dos, a los cuatro, y así hasta probar cada medio minuto. Si contesta y habla su misma versión, están listos. Si contesta en otra versión, son incompatibles y se quedan quietos hasta que las versiones coincidan.
+
+assistant, además, pregunta con su llave, la que identifica a Kira ante api. Si no la tiene, o api no la reconoce, está rechazado: sigue vivo, no hace nada que dependa de api y vuelve a probar cada medio minuto. Listo solo quiere decir que api lo reconoce.
 
 Cuando ya han conectado siguen preguntando cada medio minuto, por si algo cambia. Nada que dependa de api se pone en marcha mientras no estén listos.
 
@@ -24,11 +26,11 @@ Lo de la versión viene de pensar en las actualizaciones. Si un programa se actu
 
 ## En el código
 
-- api: `apps/api/src/main.ts` arranca la plataforma, la puerta y el servidor; `app.ts` monta la puerta y la web; `config.ts` lee `PORT`, `DOMUS_WEB_DIR`, `DOMUS_DATA_DIR`, `DOMUS_AUTH_SECRET` y `DOMUS_ORIGINS`; `accounts.ts` es el comando de las cuentas.
+- api: `apps/api/src/main.ts` arranca la plataforma, la puerta y el servidor; `app.ts` monta la puerta y la web; `config.ts` lee `PORT`, `DOMUS_WEB_DIR`, `DOMUS_DATA_DIR`, `DOMUS_AUTH_SECRET` y `DOMUS_ORIGINS`; `accounts.ts` es el comando de las cuentas y `keys.ts`, el de las llaves ([Seguridad y privacidad](seguridad.md)).
 - La puerta: `createHttpHandler` en `packages/platform/http`, con oRPC sobre Hono. Responde `GET /health`, con el estado del [segundo plano](segundo-plano.md) en `background`, y `POST /api/rpc/status` sin sesión; con sesión, cada acción en `/api/rpc/<módulo>/<acción>` y las operaciones de `platformContract`. Better Auth atiende `/api/auth/sign-in/email` y `/sign-out`. El contrato de `status` y `PROTOCOL` están en `packages/platform/contracts`.
-- assistant y voice-gateway: `apps/<programa>/src/main.ts` y `api.ts` (`checkApi`). Leen `DOMUS_API_URL`. Los estados los lleva `watchConnection` de `packages/utils/connection`, con reintentos de 1 a 30 s, una comprobación cada 30 s y 10 s de límite por pregunta.
+- assistant y voice-gateway: `apps/<programa>/src/main.ts` y `api.ts` (`checkApi`). Leen `DOMUS_API_URL`; assistant lee además su llave de `DOMUS_API_KEY_FILE`, en Docker el secret `/run/secrets/kira-key`. Los estados (conectando, listo, incompatible y rechazado) los lleva `watchConnection` de `packages/utils/connection`, con reintentos de 1 a 30 s, una comprobación cada 30 s y 10 s de límite por pregunta.
 - Salud y parada: `serveHealth` y `onShutdown` en `packages/utils/program`.
 - Cliente: `clientFor(contrato, transporte)` en `packages/api-client`.
 - Web: `apps/web`, en Vue. En desarrollo la sirve Vite; en Docker, api desde `DOMUS_WEB_DIR`.
 - Arrancar en local: `pnpm dev` (todo en modo desarrollo) o `docker compose up -d --build`.
-- Decisiones: [ADR 0003](../architecture/adr/0003-procesos-y-contenedores.md), [ADR 0004](../architecture/adr/0004-una-sola-puerta.md), [ADR 0005](../architecture/adr/0005-kira-aislada.md) y [ADR 0020](../architecture/adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md).
+- Decisiones: [ADR 0003](../architecture/adr/0003-procesos-y-contenedores.md), [ADR 0004](../architecture/adr/0004-una-sola-puerta.md), [ADR 0005](../architecture/adr/0005-kira-aislada.md), [ADR 0020](../architecture/adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md) y [ADR 0030](../architecture/adr/0030-llaves-y-mandatos.md).
