@@ -1,7 +1,7 @@
 // Asking for a step-up proof (ADR 0023), an operation of the platform: the person gives their password again for
 // one exact sensitive operation and gets a proof bound to their account, session, device and that operation's
 // fingerprint, good once and for five minutes. Only an identity proven by password can ask, never one by voice
-// or by the device. The password is checked first, asynchronously, and the proof stored after, in one
+// or by the device, and only a person by itself, never an agent on their behalf (ADR 0034). The password is checked first, asynchronously, and the proof stored after, in one
 // synchronous transaction that checks the password checked is still the current one. Neither the password nor
 // the proof is ever logged or echoed.
 import { ORPCError } from "@orpc/server";
@@ -9,7 +9,7 @@ import type Database from "better-sqlite3";
 
 import type { Actions, Clock, ProvenOperation } from "../actions";
 import { type Proofs, sessionExists } from "../actions/proofs";
-import { isVerified, type VerifiedContext } from "../authorization";
+import { asksByItself, isVerified, type VerifiedContext } from "../authorization";
 import { passwordHashOf, verifiedPasswordHash } from "./passwords";
 import { sessionLives } from "./sessions";
 
@@ -41,8 +41,8 @@ export class WrongPasswordError extends Error {
 }
 
 /**
- * A step-up proof for `operation`, once `password` is the account's current one. Throws `FORBIDDEN` for an
- * identity not proven by password, the errors of an unknown or invalid operation or one that is not sensitive,
+ * A step-up proof for `operation`, once `password` is the account's current one. Throws `FORBIDDEN` via an
+ * agent and for an identity not proven by password, the errors of an unknown or invalid operation or one that is not sensitive,
  * {@link WrongPasswordError}, and `UNAUTHORIZED` when the session ended, or expired, before the proof is stored.
  * A password changed while it was being checked is no longer the current one, so it is a wrong password too
  * (ADR 0023: changing the password ends its proofs): the answer reveals no more than giving the new one wrong.
@@ -53,7 +53,7 @@ export async function requestProof(
 	{ password, operation }: ProofRequest,
 ): Promise<IssuedProof> {
 	if (!isVerified(context)) throw new ORPCError("INTERNAL_SERVER_ERROR");
-	if (context.identity !== "password") throw new ORPCError("FORBIDDEN");
+	if (!asksByItself(context) || context.identity !== "password") throw new ORPCError("FORBIDDEN");
 	const fingerprint = actions.fingerprintOf(operation);
 	const { session } = context;
 	const bound = session !== undefined && sessionExists(connection, session);

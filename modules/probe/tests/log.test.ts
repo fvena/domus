@@ -132,6 +132,21 @@ describe("undoing", () => {
 		]);
 	});
 
+	it("through Kira, is denied once the delegation is withdrawn, also for what Kira wrote while it had it", async () => {
+		const { test, ana } = household();
+		await using _ = test;
+		const kira = test.context("ana", { via: "kira" });
+		test.invoke(kira, "probe.addNote", { body: "leche" }, { idempotencyKey: "k1" });
+
+		test.prepare.delegation("ana", "probe", "write", "no");
+		expect(() => test.undo(kira, 1, { idempotencyKey: "u1" })).toThrow(forbidden);
+		expect(test.log()).toMatchObject([{ entry: 1, undoneBy: null }]);
+
+		// The person undoes it by the app, where no delegation applies.
+		expect(test.undo(ana, 1, { idempotencyKey: "u1" })).toMatchObject({ entry: 2 });
+		expect(test.invoke(ana, "probe.listNotes")).toEqual([]);
+	});
+
 	it("through Kira, waits for the person when the inverse's delegation asks, and runs once confirmed", async () => {
 		const { test, ana } = household();
 		await using _ = test;

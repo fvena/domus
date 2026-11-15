@@ -26,6 +26,12 @@ const IN_CONVERSATION: ContextOptions = {
 	conversation: "c1",
 };
 
+/**
+ * Ana answering in that same conversation by herself, without via: a context with via never confirms nor rejects
+ * (ADR 0034), so only this one, which ends with the channel `contexto`, reaches the in-context window.
+ */
+const ANSWERING_IN_CONVERSATION: ContextOptions = { ...IN_CONVERSATION, via: undefined };
+
 /** A platform with probe where Ana's writes through Kira ask her to confirm. */
 function household() {
 	const test = createTestPlatform({ modules: [probe] });
@@ -37,6 +43,8 @@ function household() {
 		ana: test.context("ana"),
 		/** Kira, for Ana, in a conversation on her phone. */
 		kira: test.context("ana", IN_CONVERSATION),
+		/** Ana herself, answering in that conversation. */
+		inConversation: test.context("ana", ANSWERING_IN_CONVERSATION),
 	};
 }
 
@@ -84,7 +92,16 @@ describe("asking for confirmation", () => {
 
 		expect(second).not.toBe(first);
 		expect(pendingFrom(() => test.invoke(onKitchen("c1"), "probe.listNotes"))).toBe(first);
-		expect(test.confirm(onKitchen("c2"), second)).toEqual([]);
+		expect(
+			test.confirm(
+				test.context("ana", {
+					...ANSWERING_IN_CONVERSATION,
+					session: "kitchen",
+					conversation: "c2",
+				}),
+				second,
+			),
+		).toEqual([]);
 	});
 
 	it("never answers the same pending read to two reads without session or conversation", async () => {
@@ -144,22 +161,38 @@ describe("confirming", () => {
 		);
 
 		expect(() => test.confirm(test.member("luis"), pending)).toThrow(notFound);
-		expect(() => test.confirm(test.context("ana", { via: "kira" }), pending)).toThrow(notFound);
 		expect(test.confirm(test.context("ana", { session: "another-session" }), pending)).toEqual({
 			result: { id: 1, body: "regar" },
 			entry: 1,
 		});
 	});
 
+	it("is denied, and so is rejecting, to a context with via, by the channel app or in context: it stays unconsumed", async () => {
+		const { test, ana, kira } = household();
+		await using _ = test;
+		const pending = pendingFrom(() =>
+			test.invoke(kira, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" }),
+		);
+		const stored = test.pendingConfirmations();
+
+		for (const agent of [kira, test.context("ana", { via: "kira" })]) {
+			expect(() => test.confirm(agent, pending)).toThrow(forbidden);
+			expect(() => test.reject(agent, pending)).toThrow(forbidden);
+		}
+		expect(test.pendingConfirmations()).toEqual(stored);
+		expect(test.log()).toEqual([]);
+		expect(test.confirm(ana, pending)).toMatchObject({ entry: 1 });
+	});
+
 	it("works in context on the same device and conversation while the window is open", async () => {
-		const { test, kira } = household();
+		const { test, kira, inConversation } = household();
 		await using _ = test;
 		const pending = pendingFrom(() =>
 			test.invoke(kira, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" }),
 		);
 		test.clock.advance(WINDOW - 1);
 
-		expect(test.confirm(kira, pending)).toMatchObject({ entry: 1 });
+		expect(test.confirm(inConversation, pending)).toMatchObject({ entry: 1 });
 	});
 
 	it("fails in context from another device, another conversation or an empty one", async () => {
@@ -169,7 +202,7 @@ describe("confirming", () => {
 			test.invoke(kira, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" }),
 		);
 		const from = (options: ContextOptions) =>
-			test.context("ana", { ...IN_CONVERSATION, ...options });
+			test.context("ana", { ...ANSWERING_IN_CONVERSATION, ...options });
 
 		expect(() => test.confirm(from({ device: "kitchen" }), pending)).toThrow(notFound);
 		expect(() => test.confirm(from({ conversation: "c2" }), pending)).toThrow(notFound);
@@ -179,14 +212,14 @@ describe("confirming", () => {
 	});
 
 	it("fails in context from the exact millisecond its window closes, and still works from the app", async () => {
-		const { test, ana, kira } = household();
+		const { test, ana, kira, inConversation } = household();
 		await using _ = test;
 		const pending = pendingFrom(() =>
 			test.invoke(kira, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" }),
 		);
 		test.clock.advance(WINDOW);
 
-		expect(() => test.confirm(kira, pending)).toThrow(conflict("window-closed"));
+		expect(() => test.confirm(inConversation, pending)).toThrow(conflict("window-closed"));
 		expect(test.confirm(ana, pending)).toMatchObject({ entry: 1 });
 	});
 
@@ -226,14 +259,18 @@ describe("confirming", () => {
 	});
 
 	it("runs a read once, answering its result only then; the next confirmation is consumed", async () => {
-		const { test, ana, kira } = household();
+		const { test, ana, kira, inConversation } = household();
 		await using _ = test;
 		test.prepare.delegation("ana", "probe", "read", "confirm");
 		test.invoke(ana, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" });
 		const pending = pendingFrom(() => test.invoke(kira, "probe.listNotes"));
 
-		expect(test.confirm(kira, pending)).toEqual([{ id: 1, body: "regar", files: [] }]);
-		expect(() => test.confirm(kira, pending)).toThrow(conflict("confirmation-consumed"));
+		expect(test.confirm(inConversation, pending)).toEqual([
+			{ id: 1, body: "regar", files: [] },
+		]);
+		expect(() => test.confirm(inConversation, pending)).toThrow(
+			conflict("confirmation-consumed"),
+		);
 		// A new read asks again.
 		expect(pendingFrom(() => test.invoke(kira, "probe.listNotes"))).not.toBe(pending);
 	});
@@ -311,9 +348,9 @@ describe("pending confirmations across a restart", () => {
 				file,
 				confirmation: { window: 10 * WINDOW, expiry: 10 * EXPIRY },
 			});
-			const kira = test.context("ana", IN_CONVERSATION);
+			const inConversation = test.context("ana", ANSWERING_IN_CONVERSATION);
 			test.clock.advance(WINDOW);
-			expect(() => test.confirm(kira, pending)).toThrow(conflict("window-closed"));
+			expect(() => test.confirm(inConversation, pending)).toThrow(conflict("window-closed"));
 			test.clock.advance(EXPIRY - WINDOW);
 			expect(() => test.confirm(test.context("ana"), pending)).toThrow(
 				conflict("confirmation-expired"),
@@ -345,6 +382,8 @@ describe("probe.health on the shared device", () => {
 			screen: test.context(test.deviceAccount, { ...onScreen, identity: "device" }),
 			/** Ana, recognized by voice on the screen. */
 			voice: test.context("ana", { ...onScreen, identity: "voice" }),
+			/** Ana answering on the screen by herself, without via, which a context with via never does (ADR 0034). */
+			answering: test.context("ana", { ...onScreen, via: undefined, identity: "voice" }),
 		};
 	}
 
@@ -357,25 +396,26 @@ describe("probe.health on the shared device", () => {
 		expect(() => test.invoke(screen, "probe.readHealth")).toThrow(forbidden);
 	});
 
-	it("asks a recognized member to confirm, and reads once confirmed", async () => {
-		const { test, voice } = kitchen();
+	it("asks a recognized member to confirm, which the agent never answers, and reads once confirmed", async () => {
+		const { test, voice, answering } = kitchen();
 		await using _ = test;
 
 		const pending = pendingFrom(() => test.invoke(voice, "probe.readHealth"));
 
-		expect(test.confirm(voice, pending)).toEqual([{ id: 1, body: "tensión 12/8" }]);
-		expect(() => test.confirm(voice, pending)).toThrow(conflict("confirmation-consumed"));
+		expect(() => test.confirm(voice, pending)).toThrow(forbidden);
+		expect(test.confirm(answering, pending)).toEqual([{ id: 1, body: "tensión 12/8" }]);
+		expect(() => test.confirm(answering, pending)).toThrow(conflict("confirmation-consumed"));
 	});
 
-	it("is not confirmed from the app, where Ana reads it anew; by voice it ends with its window", async () => {
-		const { test, ana, voice } = kitchen();
+	it("is not confirmed from the app, where Ana reads it anew; in context it ends with its window", async () => {
+		const { test, ana, voice, answering } = kitchen();
 		await using _ = test;
 		const pending = pendingFrom(() => test.invoke(voice, "probe.readHealth"));
 
 		expect(() => test.confirm(ana, pending)).toThrow(notFound);
 		expect(test.invoke(ana, "probe.readHealth")).toEqual([{ id: 1, body: "tensión 12/8" }]);
 		test.clock.advance(WINDOW);
-		expect(() => test.confirm(voice, pending)).toThrow(conflict("confirmation-expired"));
+		expect(() => test.confirm(answering, pending)).toThrow(conflict("confirmation-expired"));
 		expect(pendingFrom(() => test.invoke(voice, "probe.readHealth"))).not.toBe(pending);
 	});
 

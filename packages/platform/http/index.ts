@@ -15,9 +15,9 @@
 // The key of a connected app comes in `Authorization: Bearer` (ADR 0030). With a good one `status` says which app
 // calls; a bad one, or one next to the session cookie, is refused, never taken as no credential. With a good key
 // and a mandate in `domus-mandate`, the actions of the modules run on the person's behalf: the door seals the
-// context the mandate keeps, with `via` the key's app and the channel `contexto`. Of the platform's operations, only
-// those the list of authorization admits a mandate for (`admitsMandate`: `log/read` and `log/undo`), by the path
-// oRPC routed to; every other one, also one added tomorrow, and every route of Hono and of Better Auth refuse a key.
+// context the mandate keeps, with `via` the key's app and the channel `contexto`. Every operation of the platform
+// takes it too, and authorization decides what a context with `via` reaches: of the platform's, only `log/read` and
+// `log/undo` (ADR 0034). Every route of Hono and of Better Auth refuses a key.
 // A mandate without a key is refused on every route too, `status` included: it never falls back to the session.
 import type { ModuleDefinition } from "@domus/module-sdk";
 import { implement, ORPCError, os } from "@orpc/server";
@@ -27,7 +27,7 @@ import { type Context, Hono } from "hono";
 
 import { READ_DELEGATION, READ_LOG } from "../actions";
 import { internalError } from "../actions/failures";
-import { admitsMandate, sealContext, type VerifiedContext } from "../authorization";
+import { asksByItself, sealContext, type VerifiedContext } from "../authorization";
 import { LIST_TASKS } from "../background/operations";
 import { AUTHORIZATION_HEADER, MANDATE_HEADER, PROTOCOL, platformContract } from "../contracts";
 import { contentDisposition, errorResponse } from "../files";
@@ -101,8 +101,8 @@ export interface HttpHandlerOptions {
 
 /**
  * What each RPC call carries: who it comes from and which app's key it has, once a procedure asks, its idempotency key
- * and its proof. Who it comes from is a session's context, or with `mandate` also the one a mandate keeps, which only
- * the actions of the modules and the operations of the platform in authorization's list admit.
+ * and its proof. Who it comes from is a session's context, or with `mandate` also the one a mandate keeps, which the
+ * actions of the modules and the operations of the platform admit, for authorization to decide.
  */
 interface DoorContext {
 	readonly verify: (admits?: { readonly mandate?: boolean }) => Promise<VerifiedContext | null>;
@@ -111,13 +111,9 @@ interface DoorContext {
 	readonly proof: string | undefined;
 }
 
-/**
- * A call to an operation of the platform as its handler receives it: the door's context and the operation's path,
- * which oRPC gives from the procedure it routed to, never from what the client wrote.
- */
+/** A call to an operation of the platform as its handler receives it: the door's context. */
 interface OperationCall {
 	readonly context: DoorContext;
-	readonly path: readonly string[];
 }
 
 const platformProcedures = implement(platformContract).$context<DoorContext>();
@@ -161,23 +157,25 @@ export function createHttpHandler({
 	}
 
 	/**
-	 * The verified context of the platform operation at `path`: a session's, or a mandate's only for an operation that
-	 * authorization's list admits one for (ADR 0030). Every other one, also one added tomorrow, needs a session.
+	 * The verified context of an operation of the platform: a session's, or a mandate's, with a session either way.
+	 * Authorization decides what a context with `via` reaches (ADR 0034): the door keeps no list of its own.
 	 */
-	async function sessionOrMandateContext({
-		context,
-		path,
-	}: OperationCall): Promise<VerifiedContext> {
-		const verified = await context.verify({ mandate: admitsMandate(path.join("/")) });
+	async function sessionOrMandateContext({ context }: OperationCall): Promise<VerifiedContext> {
+		const verified = await context.verify({ mandate: true });
 		if (!verified?.session) throw new ORPCError("UNAUTHORIZED");
 		return verified;
 	}
 
-	/** The account and session of a platform operation on one's own password or sessions. */
+	/**
+	 * The account and session of a platform operation on one's own password or sessions, which stays outside the path
+	 * of the actions: only by the person by itself, never via an agent (ADR 0034).
+	 */
 	async function signedIn(
 		call: OperationCall,
 	): Promise<{ readonly account: string; readonly session: string }> {
-		const { account, session = "" } = await sessionOrMandateContext(call);
+		const verified = await sessionOrMandateContext(call);
+		if (!asksByItself(verified)) throw new ORPCError("FORBIDDEN");
+		const { account, session = "" } = verified;
 		return { account, session };
 	}
 
@@ -285,8 +283,8 @@ export function createHttpHandler({
 				}
 			}),
 		},
-		// With a session, or with a key and a mandate: the two operations of the platform authorization's list admits
-		// one for, through the delegation in force.
+		// With a session, or with a key and a mandate: the two operations of the platform authorization lets a context
+		// with `via` reach, through the delegation in force.
 		log: {
 			read: platformProcedures.log.read.handler(
 				async (call) =>
@@ -330,7 +328,7 @@ export function createHttpHandler({
 				platformWrite("launchTask", call),
 			),
 		},
-		// Only with a session: Kira never confirms (ADR 0030, «El "sí" lo reconoce la puerta»).
+		// Kira never confirms nor rejects (ADR 0030, ADR 0034): answering denies a context with `via`.
 		confirmations: {
 			confirm: platformProcedures.confirmations.confirm.handler(async (call) =>
 				actions.confirm({

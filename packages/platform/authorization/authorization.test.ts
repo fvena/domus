@@ -233,6 +233,71 @@ describe("decide via Kira", () => {
 	});
 });
 
+describe("decide on an operation of the platform via an agent", () => {
+	const view = viewOf(
+		{ ana: "member" },
+		{},
+		{
+			"ana/platform/read": "yes",
+			"ana/platform/write": "yes",
+			"ana/platform/manage": "yes",
+			"ana/notes/write": "yes",
+		},
+	);
+	const platformView: AccessView = {
+		...view,
+		area: (id) => (id === "platform" ? policy({}) : AREAS[id]),
+	};
+	/** The operation `action` of the platform's area at `level`, by Ana via Kira, or by herself with `byItself`. */
+	const operation = (
+		action: string,
+		level: PermissionLevel = "read",
+		byItself = false,
+	): AuthorizationRequest => {
+		const { proof: _proof, ...base } = request(
+			"ana",
+			"platform",
+			level,
+			byItself ? undefined : "kira",
+		);
+		return { ...base, action };
+	};
+	const UNDO = { entry: 1, action: "notes.add", actor: { account: "ana" } } as const;
+
+	it("lets through reading one's annotations and undoing one's entry, to the rest of the decision", () => {
+		expect(decide(operation("platform.readLog"), platformView)).toBe("allow");
+		expect(
+			decide({ ...request("ana", "notes", "write", "kira"), undoes: UNDO }, platformView),
+		).toBe("allow");
+		// An undo whose inverse is the platform's goes on to the rest of the decision as well.
+		expect(
+			decide({ ...operation("platform.setTaskTime", "write"), undoes: UNDO }, platformView),
+		).toBe("allow");
+	});
+
+	it("denies every other one, also one it does not know or another way of writing one it does", () => {
+		for (const action of [
+			"platform.readDelegation",
+			"platform.listTasks",
+			"platform.setTaskTime",
+			"platform.revokeSession",
+			"platform.testNotice",
+			"platform.deleteEverything",
+			"platform.readlog",
+			"platform.readLog ",
+			"platform.",
+		])
+			expect({ action, decision: decide(operation(action), platformView) }).toEqual({
+				action,
+				decision: "deny",
+			});
+	});
+
+	it("does not apply without via", () => {
+		expect(decide(operation("platform.listTasks", "read", true), platformView)).toBe("allow");
+	});
+});
+
 describe("decide on an action that always asks for confirmation", () => {
 	const always = (account: string, via?: string): AuthorizationRequest => {
 		const base = request(account, "notes", "write", via);
@@ -394,6 +459,20 @@ describe("decide on a sensitive operation", () => {
 		expect(decide(inContext("kira"), view)).toBe("step-up");
 	});
 
+	it("takes no proof via an agent, even by the channel app: only one the person brings when confirming", () => {
+		const { proof: _proof, ...asked } = request("paco", "notes", "manage", "kira");
+		const viaKira: AuthorizationRequest = { ...asked, proof: "valid" };
+		const paco = request("paco", "notes", "read").context;
+
+		expect(decide(viaKira, view)).toBe("step-up");
+		// A repeat counts as confirmed, but nobody answered it: the proof is still the agent's.
+		expect(decide({ ...viaKira, confirmed: true }, view)).toBe("step-up");
+		expect(decide({ ...viaKira, confirmed: true, confirmedBy: paco }, view)).toBe("allow");
+		expect(decide({ ...viaKira, confirmed: true, confirmedBy: asked.context }, view)).toBe(
+			"step-up",
+		);
+	});
+
 	it("asks for a proof on changing access, delegation or sessions", () => {
 		expect(decide(operation("paco", "permissions", "ana"), platformView)).toBe("step-up");
 		expect(decide(operation("ana", "delegation", "ana"), platformView)).toBe("step-up");
@@ -409,12 +488,12 @@ describe("decide on a sensitive operation", () => {
 		expect(decide(proven("device"), view)).toBe("deny");
 	});
 
-	it("denies changing access or delegation via Kira, even with a proof and the delegation", () => {
+	it("denies changing access, delegation or sessions via Kira, even with a proof and the delegation", () => {
 		const viaKira = { via: "kira", proof: "valid" } as const;
 
 		expect(decide(operation("ana", "delegation", "ana", viaKira), platformView)).toBe("deny");
 		expect(decide(operation("paco", "permissions", "ana", viaKira), platformView)).toBe("deny");
-		expect(decide(operation("ana", "sessions", "ana", viaKira), platformView)).toBe("allow");
+		expect(decide(operation("ana", "sessions", "ana", viaKira), platformView)).toBe("deny");
 	});
 
 	it("lets only the admin change permissions, of a member or the device account, never its own", () => {
@@ -457,7 +536,18 @@ describe("decide on a sensitive operation", () => {
 		expect(decide(always, view)).toBe("confirm");
 		expect(decide({ ...always, proof: "valid" }, view)).toBe("confirm");
 		expect(decide({ ...always, confirmed: true }, view)).toBe("step-up");
-		expect(decide({ ...always, confirmed: true, proof: "valid" }, view)).toBe("allow");
+		expect(decide({ ...always, confirmed: true, proof: "valid" }, view)).toBe("step-up");
+		expect(
+			decide(
+				{
+					...always,
+					confirmed: true,
+					confirmedBy: request("paco", "notes", "read").context,
+					proof: "valid",
+				},
+				view,
+			),
+		).toBe("allow");
 	});
 });
 

@@ -1,11 +1,11 @@
 // Answering a pending confirmation (ADR 0023): confirming runs its operation once on the path of the actions,
 // evaluated again with the account, via and delegation it was born with; rejecting closes it. Who may answer
-// which one, and until when, is decided here; the operation itself runs through the path's own read, write or
-// undo.
+// which one, and until when, is decided here; that an agent answers none, by authorization (ADR 0034). The operation
+// itself runs through the path's own read, write or undo.
 import { ORPCError } from "@orpc/server";
 import type Database from "better-sqlite3";
 
-import { isVerified, sealContext, type VerifiedContext } from "../authorization";
+import { asksByItself, isVerified, sealContext, type VerifiedContext } from "../authorization";
 import type { OpenedContent } from "../files/store";
 import type { FileDescription } from "../files/type";
 import {
@@ -18,9 +18,9 @@ import { conflict, internalError } from "./failures";
 import type { RegisteredAction } from "./registry";
 
 /**
- * Confirming or rejecting a pending confirmation: who asks, through which channel, and its id. By the app, the
- * same account without via, from any of its sessions; in context, the same account on the same device in the
- * same conversation while the window is open.
+ * Confirming or rejecting a pending confirmation: who asks, through which channel, and its id. Never a context with
+ * via, whatever its channel. By the app, the same account, from any of its sessions; in context, the same account on
+ * the same device in the same conversation while the window is open.
  */
 export interface ConfirmationCall {
 	readonly context: VerifiedContext;
@@ -29,7 +29,10 @@ export interface ConfirmationCall {
 	readonly proof?: string;
 }
 
-/** What answering runs an operation with: the path's own read, write and undo, each confirmed. */
+/**
+ * What answering runs an operation with: the path's own read, write and undo, each confirmed by the context that
+ * answered it, the person's by the app and without via.
+ */
 export interface AnsweringPath {
 	readonly connection: Database.Database;
 	readonly confirmations: Confirmations;
@@ -40,7 +43,7 @@ export interface AnsweringPath {
 		context: VerifiedContext,
 		action: string,
 		input: unknown,
-		options: { readonly proof?: string; readonly confirmed: true },
+		options: { readonly proof?: string; readonly confirmedBy: VerifiedContext },
 	) => unknown;
 	readonly write: (
 		found: RegisteredAction,
@@ -50,7 +53,7 @@ export interface AnsweringPath {
 		options: {
 			readonly idempotencyKey: string | undefined;
 			readonly proof?: string;
-			readonly confirmed: true;
+			readonly confirmedBy: VerifiedContext;
 		},
 	) => { readonly entry: number };
 	readonly undo: (
@@ -60,7 +63,7 @@ export interface AnsweringPath {
 			readonly idempotencyKey: string;
 			readonly proof?: string;
 		},
-		confirmed: true,
+		confirmedBy: VerifiedContext,
 	) => { readonly entry: number };
 	/**
 	 * Runs a download's read and opens its file, inside the caller's transaction (ADR 0028). The caller closes
@@ -70,7 +73,7 @@ export interface AnsweringPath {
 		found: RegisteredAction,
 		context: VerifiedContext,
 		operation: PendingDownload,
-		options: { readonly proof?: string; readonly confirmed: true },
+		options: { readonly proof?: string; readonly confirmedBy: VerifiedContext },
 	) => Download;
 }
 
@@ -137,7 +140,7 @@ export function answeringWith({
 							idempotencyKey: pending.key ?? "",
 							...(proof === undefined ? {} : { proof }),
 						},
-						true,
+						context,
 					);
 					confirmations.consume(pending.id, outcome.entry);
 					return outcome;
@@ -147,7 +150,7 @@ export function answeringWith({
 				if (found.kind === "read") {
 					const result = read(found, asked, operation.action, operation.input, {
 						...(proof === undefined ? {} : { proof }),
-						confirmed: true,
+						confirmedBy: context,
 					});
 					confirmations.consume(pending.id, undefined);
 					return result;
@@ -155,7 +158,7 @@ export function answeringWith({
 				const outcome = write(found, asked, operation.action, operation.input, {
 					idempotencyKey: pending.key,
 					...(proof === undefined ? {} : { proof }),
-					confirmed: true,
+					confirmedBy: context,
 				});
 				confirmations.consume(pending.id, outcome.entry);
 				return outcome;
@@ -181,7 +184,7 @@ export function answeringWith({
 				const ready = opened(
 					download(found, askedBy(context, pending), operation, {
 						...(proof === undefined ? {} : { proof }),
-						confirmed: true,
+						confirmedBy: context,
 					}),
 				);
 				confirmations.consume(pending.id, undefined);
@@ -214,11 +217,13 @@ export function answeringWith({
 	}
 
 	/**
-	 * The pending confirmation `context` may answer, still waiting. Another account's, or one out of reach of
-	 * this channel, is not found: by the app, only the account itself without via, and never one confirmed only
-	 * in context; in context, only the same device and the same, not empty, conversation.
+	 * The pending confirmation `context` may answer, still waiting. A context with via answers none: it is denied
+	 * before any is looked up. Another account's, or one out of reach of this channel, is not found: by the app,
+	 * only the account itself, and never one confirmed only in context; in context, only the same device and the
+	 * same, not empty, conversation.
 	 */
 	function reachable(context: VerifiedContext, id: string): PendingConfirmation {
+		if (!asksByItself(context)) throw new ORPCError("FORBIDDEN");
 		const pending = confirmations.find(id);
 		const { origin } = pending ?? {};
 		const inReach =
@@ -226,7 +231,7 @@ export function answeringWith({
 			origin !== undefined &&
 			pending.account === context.account &&
 			(context.channel === "app"
-				? context.via === undefined && !pending.contextOnly
+				? !pending.contextOnly
 				: context.device === origin.device &&
 					context.conversation !== undefined &&
 					context.conversation !== "" &&

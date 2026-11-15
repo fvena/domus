@@ -505,9 +505,7 @@ describe("restoring a backup", { timeout: RESTIC_TIMEOUT }, () => {
 			test.prepare.account({ id: "ana", role: "member" });
 			await test.prepare.password("ana", PASSWORD);
 			test.prepare.delegation("ana", "platform", "read", "confirm");
-			pending = pendingFrom(() =>
-				test.delegation(test.context("ana", { via: "kira" }), "ana"),
-			);
+			pending = pendingFrom(() => test.readLog(test.context("ana", { via: "kira" })));
 			({ proof } = await test.requestProof(test.context("ana"), PASSWORD, {
 				action: "platform.setDelegation",
 				input: change,
@@ -539,9 +537,7 @@ describe("restoring a backup", { timeout: RESTIC_TIMEOUT }, () => {
 			file: join(preserved, "domus.db"),
 		});
 		before.clock.set(used);
-		expect(before.confirm(before.context("ana"), pending)).toEqual(
-			expect.objectContaining({ platform: expect.anything() }),
-		);
+		expect(before.confirm(before.context("ana"), pending)).toEqual([]);
 		expect(
 			before.setDelegation(before.context("ana"), change, {
 				idempotencyKey: "before",

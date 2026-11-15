@@ -210,8 +210,7 @@ describe("runAccounts", () => {
 		try {
 			invokeAction(platform, {
 				context: syntheticContext({ ...context, via: "kira" }),
-				action: "platform.readDelegation",
-				input: { account: ana },
+				action: "platform.readLog",
 			});
 		} catch (error) {
 			pending = (error as { data: { confirmation: string } }).data.confirmation;

@@ -311,8 +311,8 @@ export function createActions({
 		read,
 		write,
 		undo: undoEntry,
-		download: (found, context, { action, input, file }, { proof, confirmed }) => {
-			const checked = authorizeRead(found, context, action, input, { proof, confirmed });
+		download: (found, context, { action, input, file }, { proof, confirmedBy }) => {
+			const checked = authorizeRead(found, context, action, input, { proof, confirmedBy });
 			return openReturned(found, context, input, file, { proof, checked });
 		},
 	});
@@ -546,7 +546,7 @@ export function createActions({
 		context: VerifiedContext,
 		action: string,
 		input: unknown,
-		options: { readonly proof?: string; readonly confirmed?: boolean },
+		options: { readonly proof?: string; readonly confirmedBy?: VerifiedContext },
 	): unknown {
 		const checked = authorizeRead(found, context, action, input, options);
 		return answerRead(found, context, input, { proof: options.proof, checked });
@@ -561,7 +561,11 @@ export function createActions({
 		context: VerifiedContext,
 		action: string,
 		input: unknown,
-		options: { readonly proof?: string; readonly confirmed?: boolean; readonly file?: string },
+		options: {
+			readonly proof?: string;
+			readonly confirmedBy?: VerifiedContext;
+			readonly file?: string;
+		},
 	): ProofCheck | undefined {
 		return orPending(readPending(context, action, input, options.file), () =>
 			checkRead(found, context, action, input, options),
@@ -595,7 +599,7 @@ export function createActions({
 		context: VerifiedContext,
 		action: string,
 		input: unknown,
-		{ proof, confirmed = false }: { readonly proof?: string; readonly confirmed?: boolean },
+		{ proof, confirmedBy }: { readonly proof?: string; readonly confirmedBy?: VerifiedContext },
 	): ProofCheck | undefined {
 		const checked = proofs.check(proof, context, operationFingerprint(action, input), clock());
 		authorize({
@@ -605,7 +609,7 @@ export function createActions({
 			permission: found.permission,
 			input,
 			...sensitivityOf(found, input, context),
-			...(confirmed ? { confirmed } : {}),
+			...confirmationBy(confirmedBy),
 			...(checked === undefined ? {} : { proof: checked }),
 		});
 		return checked;
@@ -644,11 +648,11 @@ export function createActions({
 		{
 			idempotencyKey,
 			proof,
-			confirmed = false,
+			confirmedBy,
 		}: {
 			readonly idempotencyKey: string | undefined;
 			readonly proof?: string | undefined;
-			readonly confirmed?: boolean;
+			readonly confirmedBy?: VerifiedContext;
 		},
 	): WriteOutcome {
 		const actor = actorOf(context);
@@ -660,7 +664,7 @@ export function createActions({
 			permission: found.permission,
 			input,
 			...sensitivityOf(found, input, context),
-			...(confirmed ? { confirmed } : {}),
+			...confirmationBy(confirmedBy),
 			...(checked === undefined ? {} : { proof: checked }),
 		});
 
@@ -697,7 +701,7 @@ export function createActions({
 
 	function undoEntry(
 		{ context, entry: number, idempotencyKey, proof }: UndoCall,
-		confirmed = false,
+		confirmedBy?: VerifiedContext,
 	): WriteOutcome {
 		const actor = actorOf(context);
 		const fingerprint = undoFingerprint(number);
@@ -717,7 +721,7 @@ export function createActions({
 				permission: target.permission,
 				input: inverse.input,
 				undoes: { entry: original.entry, action: original.action, actor: original.actor },
-				...(confirmed ? { confirmed } : {}),
+				...confirmationBy(confirmedBy),
 				...(checked === undefined ? {} : { proof: checked }),
 			};
 		};
@@ -1097,6 +1101,16 @@ class ConfirmationNeeded extends Error {
 	constructor(readonly confirmedIn: ConfirmedIn) {
 		super("confirmation needed");
 	}
+}
+
+/**
+ * What a request to authorization carries of the person who answered the pending confirmation it runs: confirmed, and
+ * by whom. Nothing when nobody answered one.
+ */
+function confirmationBy(
+	confirmedBy: VerifiedContext | undefined,
+): Pick<AuthorizationRequest, "confirmed" | "confirmedBy"> {
+	return confirmedBy === undefined ? {} : { confirmed: true, confirmedBy };
 }
 
 /** What the path does with each decision of authorization: go on, or throw what stops the operation. */

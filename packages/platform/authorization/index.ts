@@ -6,8 +6,8 @@ import type { Visibility } from "@domus/module-sdk";
 import type { PermissionLevel } from "@domus/module-sdk/contracts";
 
 import type { VerifiedContext } from "./context";
+import { admitsVia } from "./via";
 
-export { admitsMandate } from "./mandates";
 export { newOwnership, visibleTo } from "./visibility";
 
 export {
@@ -55,6 +55,12 @@ export interface AuthorizationRequest {
 	readonly input: unknown;
 	readonly undoes?: UndoContext;
 	readonly confirmed?: boolean;
+	/**
+	 * Who confirmed it, when it runs a pending confirmation a person answered: the context of that answer, by the app
+	 * and without via. The operation keeps the context it was born with for everything else; only the proof the
+	 * answer brings is that person's, not of who asked.
+	 */
+	readonly confirmedBy?: Pick<VerifiedContext, "channel" | "via">;
 	/**
 	 * For an operation of the platform on one account's own settings, such as its delegation table: that
 	 * account. Only the account itself reaches them, and the admin those of the device account. Changing
@@ -183,6 +189,9 @@ export function delegationOf(
 /** The decision, in the order of ADR 0023. Pure: everything it reads comes in `request` and `view`. */
 export function decide(request: AuthorizationRequest, view: AccessView): Decision {
 	const { context, permission, subject, sensitive } = request;
+	// Via an agent, of the platform's own operations only reading one's annotations and undoing one's entry.
+	if (context.via !== undefined && !admitsVia(request.action, request.undoes !== undefined))
+		return "deny";
 	// A person's own operation asks for no level: who asks is all that counts. A proof does not match it.
 	if (request.personal === true) {
 		if (context.channel !== "app" || !personByItself(view, context)) return "deny";
@@ -207,10 +216,10 @@ export function decide(request: AuthorizationRequest, view: AccessView): Decisio
 		if (delegated === "confirm") ask = true;
 	}
 	// 3. Sensitive operations ask for a step-up proof, which only an identity proven by password can bring; via
-	// Kira, changing access or delegation is denied whatever it brings. A proof counts only by the channel `app`:
-	// one the person asked for in the app proves nothing when a mandate of that same session brings it, so via
-	// Kira it counts only when the person confirms from the app (ADR 0030). A proof brought to an operation that
-	// is not sensitive does not match it either.
+	// Kira, changing access or delegation is denied whatever it brings. A proof counts only when a person brings it
+	// by the channel `app` and without via: one the person asked for in the app proves nothing when an agent brings
+	// it, whatever channel it declares, so via an agent it counts only when the person confirms from the app (ADR
+	// 0030, ADR 0034). A proof brought to an operation that is not sensitive does not match it either.
 	let stepUp = false;
 	if (permission.level === "manage" || sensitive !== undefined) {
 		if (context.identity !== "password") return "deny";
@@ -219,7 +228,9 @@ export function decide(request: AuthorizationRequest, view: AccessView): Decisio
 			(sensitive === "permissions" || sensitive === "delegation")
 		)
 			return "deny";
-		if (request.proof !== "valid" || context.channel !== "app") stepUp = true;
+		const bringer = request.confirmedBy ?? context;
+		if (request.proof !== "valid" || !asksByItself(bringer) || bringer.channel !== "app")
+			stepUp = true;
 	} else if (request.proof !== undefined) stepUp = true;
 	// 4. An action that always asks for confirmation.
 	if (permission.alwaysConfirm === true) ask = true;
@@ -280,9 +291,19 @@ export function maySubscribe(view: AccessView, context: VerifiedContext): boolea
 	return personByItself(view, context);
 }
 
+/**
+ * Whether the context asks by itself, with no agent in between: no via, whatever channel it declares. The only way to
+ * the operations of the platform that stay outside the path of the actions (changing one's password, listing one's
+ * sessions, asking for a step-up proof, confirming or rejecting a pending confirmation), so an agent reaches none of
+ * them (ADR 0030, ADR 0034).
+ */
+export function asksByItself(context: Pick<VerifiedContext, "via">): boolean {
+	return context.via === undefined;
+}
+
 /** A person's account, admin or member, asking by itself: no via. */
 function personByItself(view: AccessView, context: VerifiedContext): boolean {
-	return context.via === undefined && isPerson(view, context.account);
+	return asksByItself(context) && isPerson(view, context.account);
 }
 
 /** Whether `account` is a person's: admin or member, never the device account nor one without a role. */

@@ -1,6 +1,7 @@
-// The operations of the platform with a key and a mandate (ADR 0030): Kira reads and undoes a person's own entries
-// in the action log within the delegation in force, and nothing else of the platform; every other surface, the
-// routes of Hono and of Better Auth included, refuses a good key with a good mandate. Kira never confirms.
+// The operations of the platform with a key and a mandate (ADR 0030, ADR 0034): the door lets the mandate reach each
+// one, and authorization denies every one but reading and undoing in the log, which it lets a context with `via` reach
+// within the delegation; the routes of Hono and of Better Auth refuse a good key with a good mandate. What a context
+// with `via` reaches is proved over the synthetic context, in `log`, `confirmations` and `proofs`.
 // Mandates are issued by the platform's real function from a test browser's session; Kira's calls go through the
 // same `clientFor` and `fetch` as `assistant`, straight to the door, without the browser's cookies.
 import { clientFor } from "@domus/api-client";
@@ -22,17 +23,6 @@ const PASSWORD = "correct horse battery staple";
 const contract = { ...platformContract, probe: probeContract };
 
 const unauthorized = { code: "UNAUTHORIZED" };
-const forbidden = { code: "FORBIDDEN" };
-
-/** A platform with probe, and Ana and Luis, members with a password. */
-async function household() {
-	const test = createTestPlatform({ modules: [probe] });
-	for (const id of ["ana", "luis"]) {
-		test.prepare.account({ id, role: "member" });
-		await test.prepare.password(id, PASSWORD);
-	}
-	return test;
-}
 
 /** A browser of `account`, signed in with {@link PASSWORD}. */
 async function signedIn(test: TestPlatform, account: string) {
@@ -56,11 +46,6 @@ function kiraWith(test: TestPlatform, key: string, mandate: string) {
 	});
 }
 
-/** Kira's client with a new key and a mandate of `browser`'s session. */
-function kiraOf(test: TestPlatform, browser: TestBrowser) {
-	return kiraWith(test, test.prepare.key("kira"), test.mandate(browser));
-}
-
 /** The client of the app, in a signed-in browser with its cookies. */
 function app(browser: TestBrowser) {
 	return clientFor(contract, { baseUrl: TEST_ORIGIN, fetch: browser.fetch });
@@ -78,129 +63,6 @@ async function outcome(call: () => Promise<unknown>): Promise<string> {
 		return String((error as { code?: unknown }).code);
 	}
 }
-
-describe("log/read via Kira", () => {
-	it("answers only the person's annotations, within the delegation in force", async () => {
-		await using test = await household();
-		const ana = await signedIn(test, "ana");
-		await app(ana).probe.addNote({ body: "pan" }, keyed("k1"));
-		await app(await signedIn(test, "luis")).probe.addNote({ body: "secreto" }, keyed("k1"));
-		const kira = kiraOf(test, ana);
-
-		const seen: Record<string, string> = {};
-		for (const value of ["no", "yes", "confirm"] as const) {
-			test.prepare.delegation("ana", "platform", "read", value);
-			seen[value] = await outcome(() => kira.log.read());
-		}
-		expect(seen).toEqual({ no: "FORBIDDEN", yes: "ok", confirm: "CONFIRMATION_REQUIRED" });
-
-		test.prepare.delegation("ana", "platform", "read", "yes");
-		expect(await kira.log.read()).toEqual(await app(ana).log.read());
-		expect(await kira.log.read()).toMatchObject([
-			{ entry: 1, action: "probe.addNote", actor: { account: "ana" } },
-		]);
-	});
-});
-
-describe("log/undo via Kira", () => {
-	it("undoes a write of the person within the delegation in force, logged via kira, and never another's", async () => {
-		await using test = await household();
-		test.prepare.delegation("ana", "probe", "write", "yes");
-		const ana = await signedIn(test, "ana");
-		await app(ana).probe.addNote({ body: "pan" }, keyed("k1"));
-		await app(await signedIn(test, "luis")).probe.addNote({ body: "secreto" }, keyed("k1"));
-		const kira = kiraOf(test, ana);
-
-		expect(await kira.log.undo({ entry: 1 }, keyed("u1"))).toEqual({
-			result: { id: 1, body: "pan" },
-			entry: 3,
-		});
-		expect(await kira.log.undo({ entry: 1 }, keyed("u1"))).toEqual({
-			entry: 3,
-			repeated: true,
-		});
-		await expect(kira.log.undo({ entry: 2 }, keyed("u2"))).rejects.toMatchObject({
-			code: "NOT_FOUND",
-		});
-		expect(test.log()).toMatchObject([
-			{ entry: 1, undoneBy: 3 },
-			{ entry: 2, undoneBy: null },
-			{ entry: 3, undoes: 1, actor: { account: "ana", via: "kira" } },
-		]);
-		expect(await app(ana).probe.listNotes()).toEqual([]);
-	});
-
-	it("is denied once the delegation of the area is withdrawn, though the write was from before", async () => {
-		await using test = await household();
-		test.prepare.delegation("ana", "probe", "write", "yes");
-		const ana = await signedIn(test, "ana");
-		const kira = kiraOf(test, ana);
-		await kira.probe.addNote({ body: "leche" }, keyed("k1"));
-
-		test.prepare.delegation("ana", "probe", "write", "no");
-		await expect(kira.log.undo({ entry: 1 }, keyed("u1"))).rejects.toMatchObject(forbidden);
-		expect(test.log()).toMatchObject([{ entry: 1, undoneBy: null }]);
-		expect(await app(ana).probe.listNotes()).toEqual([{ id: 1, body: "leche", files: [] }]);
-
-		// The person undoes it by the app, where no delegation applies.
-		expect(await app(ana).log.undo({ entry: 1 }, keyed("u1"))).toMatchObject({ entry: 2 });
-		expect(await app(ana).probe.listNotes()).toEqual([]);
-	});
-});
-
-describe("a pending confirmation via Kira", () => {
-	/** Asks Kira to add a note the delegation makes it confirm, and returns the pending confirmation's id. */
-	async function pendingOf(kira: ReturnType<typeof kiraWith>, idempotencyKey: string) {
-		const error: unknown = await kira.probe
-			.addNote({ body: "leche" }, keyed(idempotencyKey))
-			.then(
-				() => undefined,
-				(thrown: unknown) => thrown,
-			);
-		expect(error).toMatchObject({ code: "CONFIRMATION_REQUIRED" });
-		return (error as { data: { confirmation: string } }).data.confirmation;
-	}
-
-	it("is never confirmed with a mandate: it stays unconsumed, and the app confirms it later", async () => {
-		await using test = await household();
-		test.prepare.delegation("ana", "probe", "write", "confirm");
-		const ana = await signedIn(test, "ana");
-		const kira = kiraOf(test, ana);
-		const pending = await pendingOf(kira, "k1");
-		const stored = test.pendingConfirmations();
-
-		await expect(kira.confirmations.confirm({ id: pending })).rejects.toMatchObject(
-			unauthorized,
-		);
-		expect(test.pendingConfirmations()).toEqual(stored);
-		expect(test.log()).toEqual([]);
-
-		expect(await app(ana).confirmations.confirm({ id: pending })).toEqual({
-			result: { id: 1, body: "leche" },
-			entry: 1,
-		});
-	});
-
-	it("is never rejected with a mandate: it stays, and the app rejects it later", async () => {
-		await using test = await household();
-		test.prepare.delegation("ana", "probe", "write", "confirm");
-		const ana = await signedIn(test, "ana");
-		const kira = kiraOf(test, ana);
-		const pending = await pendingOf(kira, "k1");
-		const stored = test.pendingConfirmations();
-
-		await expect(kira.confirmations.reject({ id: pending })).rejects.toMatchObject(
-			unauthorized,
-		);
-		expect(test.pendingConfirmations()).toEqual(stored);
-
-		await app(ana).confirmations.reject({ id: pending });
-		await expect(app(ana).confirmations.confirm({ id: pending })).rejects.toMatchObject({
-			code: "CONFLICT",
-		});
-		expect(test.log()).toEqual([]);
-	});
-});
 
 /** Every procedure of `router` by its path, `<group>/<name>`, as the door serves it. */
 function pathsOf(router: object, prefix = ""): string[] {
@@ -241,10 +103,12 @@ describe("every other surface with a good key and a good mandate", () => {
 		return { test, browser, key, mandate, kira: kiraWith(test, key, mandate) };
 	}
 
-	it("refuses every operation of the platform outside the list, and changes nothing", async () => {
+	it("lets authorization deny every operation of the platform but reading and undoing in the log, and changes nothing", async () => {
 		const { test, browser, kira } = await delegatingAdmin();
 		await using _ = test;
 		const session = test.contextOf(browser).session ?? "";
+		// A device the admin may revoke: one of the device account's, which the operation finds before authorization.
+		const kitchen = test.prepare.session(test.deviceAccount).session ?? "";
 		const delegation = await app(browser).delegation.read({ account: "paco" });
 		const tasks = await app(browser).tasks.list();
 		const pending = "an-unknown-pending-confirmation";
@@ -255,7 +119,7 @@ describe("every other surface with a good key and a good mandate", () => {
 				kira.password.change({ currentPassword: PASSWORD, newPassword: `${PASSWORD} 2` }),
 			"sessions/list": () => kira.sessions.list(),
 			"sessions/revoke": () => kira.sessions.revoke({ session }, keyed("s1")),
-			"devices/revoke": () => kira.devices.revoke({ session }, keyed("d1")),
+			"devices/revoke": () => kira.devices.revoke({ session: kitchen }, keyed("d1")),
 			"confirmations/confirm": () => kira.confirmations.confirm({ id: pending }),
 			"confirmations/reject": () => kira.confirmations.reject({ id: pending }),
 			"proofs/request": () =>
@@ -281,7 +145,8 @@ describe("every other surface with a good key and a good mandate", () => {
 			"tasks/resume": () => kira.tasks.resume(cleanup, keyed("t3")),
 			"tasks/launch": () => kira.tasks.launch(cleanup, keyed("t4")),
 		};
-		// Every operation of the platform is here, in the list, or `status`: one added tomorrow fails until it is.
+		// Every operation of the platform is here, reading and undoing in the log, or `status`: one added tomorrow fails
+		// until it is.
 		expect(Object.keys(calls).sort()).toEqual(
 			pathsOf(platformContract)
 				.filter((path) => !["status", "log/read", "log/undo"].includes(path))
@@ -291,13 +156,14 @@ describe("every other surface with a good key and a good mandate", () => {
 		const seen: Record<string, string> = {};
 		for (const [path, call] of Object.entries(calls)) seen[path] = await outcome(call);
 		expect(seen).toEqual(
-			Object.fromEntries(Object.keys(calls).map((path) => [path, "UNAUTHORIZED"])),
+			Object.fromEntries(Object.keys(calls).map((path) => [path, "FORBIDDEN"])),
 		);
 
 		// The mandate was good all along, and nothing changed.
 		expect(await kira.log.read()).toEqual([]);
 		expect(test.log()).toEqual([]);
 		expect(test.hasSession(session)).toBe(true);
+		expect(test.hasSession(kitchen)).toBe(true);
 		expect(await app(browser).delegation.read({ account: "paco" })).toEqual(delegation);
 		expect(await app(browser).tasks.list()).toEqual(tasks);
 		expect((await browser.signIn("paco@domus.test", PASSWORD)).status).toBe(200);

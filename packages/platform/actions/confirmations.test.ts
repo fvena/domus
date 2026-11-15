@@ -135,6 +135,7 @@ const vitalsModule = defineModule({
 describe("a pending confirmation born of the shared device rule", () => {
 	const WINDOW = 60 * 1000;
 	const notFound = expect.objectContaining({ code: "NOT_FOUND" });
+	const forbidden = expect.objectContaining({ code: "FORBIDDEN" });
 	const conflict = (reason: string) =>
 		expect.objectContaining({ code: "CONFLICT", data: { reason } });
 
@@ -158,11 +159,14 @@ describe("a pending confirmation born of the shared device rule", () => {
 			identity: "voice",
 			conversation: "c1",
 		});
+		// Ana answering on the screen by herself: a context with via never confirms (ADR 0034).
+		const answering = syntheticContext({ ...voice, via: undefined });
 		const readOnScreen = () =>
 			pendingOf(() => invokeAction(opened, { context: voice, action: "vitals.read" }));
 		return {
 			platform: opened,
 			voice,
+			answering,
 			readOnScreen,
 			advance: (milliseconds: number) => {
 				now += milliseconds;
@@ -183,25 +187,28 @@ describe("a pending confirmation born of the shared device rule", () => {
 		expect(invokeAction(opened, { context: ana, action: "vitals.read" })).toBe("tensión 12/8");
 	});
 
-	it("is confirmed once in context while its window is open", () => {
-		const { platform: opened, voice, readOnScreen, advance } = kitchen();
+	it("is confirmed once in context while its window is open, never by the agent", () => {
+		const { platform: opened, voice, answering, readOnScreen, advance } = kitchen();
 		const pending = readOnScreen();
 		advance(WINDOW - 1);
 
-		expect(confirmPending(opened, { context: voice, confirmation: pending })).toBe(
+		expect(() => confirmPending(opened, { context: voice, confirmation: pending })).toThrow(
+			forbidden,
+		);
+		expect(confirmPending(opened, { context: answering, confirmation: pending })).toBe(
 			"tensión 12/8",
 		);
-		expect(() => confirmPending(opened, { context: voice, confirmation: pending })).toThrow(
+		expect(() => confirmPending(opened, { context: answering, confirmation: pending })).toThrow(
 			conflict("confirmation-consumed"),
 		);
 	});
 
 	it("expires the millisecond its window closes, for every channel", () => {
-		const { platform: opened, voice, readOnScreen, advance } = kitchen();
+		const { platform: opened, answering, readOnScreen, advance } = kitchen();
 		const pending = readOnScreen();
 		advance(WINDOW);
 
-		expect(() => confirmPending(opened, { context: voice, confirmation: pending })).toThrow(
+		expect(() => confirmPending(opened, { context: answering, confirmation: pending })).toThrow(
 			conflict("confirmation-expired"),
 		);
 		expect(() => confirmPending(opened, { context: ana, confirmation: pending })).toThrow(
