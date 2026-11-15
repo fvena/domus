@@ -31,6 +31,11 @@ type Probe = TestPlatform<readonly [typeof probe]>;
 const PASSWORD = "correct horse battery staple";
 /** The engine's wait before a first retry. */
 const FIRST_RETRY = 30 * 1000;
+/**
+ * A test that starts a child process: the child loads tsx, the platform and probe from cold, which takes a fraction
+ * of a second here but more than vitest's 5 s default on CI, where the heavy test files run at the same time.
+ */
+const CHILD_TIMEOUT = 30 * 1000;
 
 /**
  * A platform with probe and a fake push service, where Paco and Rocío, members, have a password; its background
@@ -547,47 +552,53 @@ describe("sharing a notice out again", () => {
 		expect(push.requests).toHaveLength(2);
 	});
 
-	it("after the process died once its deliveries were committed recovers it without a second batch", async () => {
-		const folder = mkdtempSync(join(tmpdir(), "domus-notices-"));
-		try {
-			const file = join(folder, "domus.db");
-			const clients: PushClient[] = [];
-			{
-				const { test, rocio } = await household({ file, started: false });
-				await using _ = test;
-				clients.push(await subscribed(await signedIn(test, "paco"), "paco-phone"));
-				clients.push(await subscribed(await signedIn(test, "paco"), "paco-laptop"));
-				publicNote(test, rocio, ["paco"]);
+	it(
+		"after the process died once its deliveries were committed recovers it without a second batch",
+		{ timeout: CHILD_TIMEOUT },
+		async () => {
+			const folder = mkdtempSync(join(tmpdir(), "domus-notices-"));
+			try {
+				const file = join(folder, "domus.db");
+				const clients: PushClient[] = [];
+				{
+					const { test, rocio } = await household({ file, started: false });
+					await using _ = test;
+					clients.push(await subscribed(await signedIn(test, "paco"), "paco-phone"));
+					clients.push(await subscribed(await signedIn(test, "paco"), "paco-laptop"));
+					publicNote(test, rocio, ["paco"]);
+				}
+
+				const child = await startChild({
+					hold: "distribute",
+					dataDirectory: folder,
+					now: TEST_START,
+					modules: [new URL("../server/index.ts", import.meta.url).href],
+				});
+				await child.kill();
+
+				const push = fakePushService();
+				await using test = createTestPlatform({ modules: [probe], file, push });
+				test.background.start();
+				await test.background.runDue();
+
+				expect(jobsOf(test, "notice")).toEqual([
+					expect.objectContaining({ state: "done", outcome: "distributed" }),
+				]);
+				expect(test.background.jobs().find(({ kind }) => kind === "notice")?.attempts).toBe(
+					2,
+				);
+				expect(jobsOf(test, "delivery")).toEqual([
+					expect.objectContaining({ state: "done", outcome: "sent" }),
+					expect.objectContaining({ state: "done", outcome: "sent" }),
+				]);
+				expect([...reached(push)].sort()).toEqual(
+					clients.map(({ endpoint }) => endpoint).sort(),
+				);
+			} finally {
+				rmSync(folder, { recursive: true, force: true });
 			}
-
-			const child = await startChild({
-				hold: "distribute",
-				dataDirectory: folder,
-				now: TEST_START,
-				modules: [new URL("../server/index.ts", import.meta.url).href],
-			});
-			await child.kill();
-
-			const push = fakePushService();
-			await using test = createTestPlatform({ modules: [probe], file, push });
-			test.background.start();
-			await test.background.runDue();
-
-			expect(jobsOf(test, "notice")).toEqual([
-				expect.objectContaining({ state: "done", outcome: "distributed" }),
-			]);
-			expect(test.background.jobs().find(({ kind }) => kind === "notice")?.attempts).toBe(2);
-			expect(jobsOf(test, "delivery")).toEqual([
-				expect.objectContaining({ state: "done", outcome: "sent" }),
-				expect.objectContaining({ state: "done", outcome: "sent" }),
-			]);
-			expect([...reached(push)].sort()).toEqual(
-				clients.map(({ endpoint }) => endpoint).sort(),
-			);
-		} finally {
-			rmSync(folder, { recursive: true, force: true });
-		}
-	});
+		},
+	);
 });
 
 /** What a test does to a delivery's world while it waits at `delivering`. */
