@@ -4,3 +4,4 @@ La IA no es un perfil: es una tabla de delegación que solo puede rebajar los pe
 
 Fecha: 2026-11-11. Preguntas del grilling: P11, P12, P17, P18.
 Precisado por el ADR 0023: cada persona edita su tabla de delegación, que nace copiando su acceso sin `manage`, y la de la cuenta `device` la lleva el admin; confirmar desde la app algo nacido vía Kira conserva su delegación.
+Precisado por el ADR 0032: a partir de la fase 5, la tabla es la del agente conectado y nace denegada entera, y toda confirmación se hace en Domus.

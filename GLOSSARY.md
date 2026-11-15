@@ -1,6 +1,6 @@
 # Domus
 
-Vocabulario compartido de Domus, el organizador de una casa con Kira dentro: términos del dominio y conceptos propios de su arquitectura. Entre paréntesis, el nombre en el código.
+Vocabulario compartido de Domus, el organizador de una casa, con Kira como agente conectado: términos del dominio y conceptos propios de su arquitectura. Entre paréntesis, el nombre en el código.
 
 ## Personas y cuentas
 
@@ -28,13 +28,21 @@ _Evitar_: usuario.
 Un programa que habla con Domus por la API con su propia llave, como Kira. Solo puede hacer lo que se le concede de forma expresa; ser una app conectada no da ningún permiso por sí mismo.
 _Evitar_: integración, cliente (para esto), servicio.
 
+**Agente conectado** (`agent`):
+La app conectada que conversa con las personas y actúa en su nombre, como Kira. Domus admite uno para toda la casa, y es opcional: Domus funciona sin él.
+_Evitar_: asistente (para esto), bot, IA.
+
 **Llave** (`key`):
 La credencial de una app conectada: dice qué app es, nunca de parte de quién actúa. Se crea, se cambia y se revoca fuera de las acciones.
 _Evitar_: token, API key (en el texto en español).
 
 **Mandato** (`mandate`):
 Lo que la puerta da a una app conectada, a partir de una interacción que ella autenticó, para que actúe en nombre de quien la hizo. Ata ese contexto verificado a una sola app, caduca pronto y muere con su origen. No da permisos ni prueba que la persona apruebe nada: lo que pide sigue pasando por la autorización y la delegación vigentes.
-_Evitar_: delegación (que es la tabla), token, sesión de Kira.
+_Evitar_: delegación (que es la tabla), token, token de conversación, sesión de Kira.
+
+**Enlace del agente** (`agent link`):
+La autorización que una persona da al agente conectado para que actúe en su nombre fuera de Domus, por ejemplo desde Telegram. Dura hasta que se revoca. Como el mandato, no da permisos: lo que pide sigue pasando por la autorización y la delegación vigentes.
+_Evitar_: conexión, token, cuenta de Kira.
 
 **Aparato** (`device`):
 Un navegador instalado o un satélite desde el que se usa Domus. Sobrevive a cerrar sesión y puede cambiar de cuenta. No es la cuenta de aparato: un móvil de Paco es un aparato que entra con la cuenta de Paco.
@@ -133,6 +141,10 @@ _Evitar_: módulo falso, mock.
 **Puerta** (`platform/http`):
 El único punto de entrada a Domus: autentica cada canal y sirve las acciones.
 _Evitar_: gateway, backend.
+
+**Conversación alojada** (`hosted conversation`):
+La conversación con el agente conectado dentro de la interfaz de Domus, por chat o por voz. La guarda el agente; Domus la muestra.
+_Evitar_: chat de Domus, sesión de Kira.
 
 ## Segundo plano
 

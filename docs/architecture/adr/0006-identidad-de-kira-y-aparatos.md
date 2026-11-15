@@ -4,3 +4,4 @@ Kira actúa como la cuenta con la que entró el aparato. En un aparato con la cu
 
 Fecha: 2026-11-11. Preguntas del grilling: P4, P20, P21, P22b, P24, P26.
 Precisado por el ADR 0023: aparato, sesión y cuenta van separados; quién habla, que acredita la voz, es distinto de quién ejecuta (`via`); y una voz no reconocida en la cuenta `device` no deja memoria ni conversación, aunque lo que ejecuta conserva su entrada en el registro.
+Precisado por el ADR 0033: a partir de la fase 5, los satélites, las huellas y el reconocimiento de quién habla son del agente; en una pantalla de Domus con la cuenta `device`, reconocer una voz no cambia la cuenta.

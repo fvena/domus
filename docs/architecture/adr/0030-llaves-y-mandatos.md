@@ -63,3 +63,4 @@ Ejecutar y consumir la pendiente siguen en una sola transacción. Nunca cuenta u
 **El arranque de `assistant`.** Manda su llave también en `status`, y `@domus/utils/connection` gana un cuarto estado, rechazado. Sin llave, con una llave mala o con la de otra app, el proceso no ejecuta nada que dependa de la api, sigue vivo y vuelve a comprobar cada 30 s, como con incompatible. Listo significa una conexión autenticada y compatible, no que el proceso ya haya actuado por nadie. El criterio del ADR 0020 se prueba en la integración: el mismo `clientFor` de `assistant`, contra la puerta en proceso, ejecuta una acción con la llave y un mandato de prueba, y sin la llave da `UNAUTHORIZED`.
 
 Fecha: 2026-11-14. Preguntas del grilling: Q1–Q21 de la fase 1e.
+Precisado por el ADR 0032: en la fase 5, la llave y los mandatos se sustituyen por el perfil OAuth de MCP; el mandato sigue como autorización de la conversación alojada.

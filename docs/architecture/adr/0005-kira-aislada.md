@@ -4,3 +4,4 @@ Kira no puede tocar los datos aunque se equivoque o la engañen, porque no tiene
 
 Fecha: 2026-11-11. Preguntas del grilling: P51.
 Precisado por el ADR 0020: de `platform`, `assistant` importa solo sus contratos (`@domus/platform/contracts`), que son puros.
+Precisado por el ADR 0031: a partir de la fase 5, el aislamiento es entre productos; el agente solo llega a Domus por MCP con sus autorizaciones, y en la página de Domus no corre código suyo (ADR 0033).

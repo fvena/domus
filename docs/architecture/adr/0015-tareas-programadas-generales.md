@@ -4,3 +4,4 @@ Cualquier módulo declara una tarea con su frecuencia, a la hora de la familia, 
 
 Fecha: 2026-11-11. Preguntas del grilling: P29, P30.
 Precisado por el ADR 0025: en la 1d el planificador solo programa mantenimiento de la plataforma, sin actor; la forma en que un módulo declara su tarea y su actor llegan con la primera. Las horas siguen reglas fijas en el cambio de hora y cada ejecución prevista ocurre una sola vez.
+Precisado por el ADR 0031: la revisión nocturna de la memoria se va con la memoria hacia Kira.
