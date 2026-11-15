@@ -384,6 +384,16 @@ describe("decide on a sensitive operation", () => {
 		expect(decide(manage("paco", "valid"), view)).toBe("allow");
 	});
 
+	it("takes a valid proof only by the channel app: in context, with or without via, it still asks for one", () => {
+		const base = manage("paco", "valid");
+		const inContext = (via?: string) => ({
+			...base,
+			context: sealContext({ ...base.context, channel: "contexto", via }),
+		});
+		expect(decide(inContext(), view)).toBe("step-up");
+		expect(decide(inContext("kira"), view)).toBe("step-up");
+	});
+
 	it("asks for a proof on changing access, delegation or sessions", () => {
 		expect(decide(operation("paco", "permissions", "ana"), platformView)).toBe("step-up");
 		expect(decide(operation("ana", "delegation", "ana"), platformView)).toBe("step-up");

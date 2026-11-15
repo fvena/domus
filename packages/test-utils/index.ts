@@ -6,6 +6,7 @@ export {
 	createTestPlatform,
 	type DelegationChange,
 	listBackups,
+	type MandateOptions,
 	restoreBackup,
 	type TestBackups,
 	type TestRestoreOptions,
@@ -53,4 +54,4 @@ export {
 	type VerifiedContext,
 } from "@domus/platform/testing";
 /** The platform's own operations, for HTTP tests of modules, whose rules keep them from platform's contracts. */
-export { platformContract } from "@domus/platform/contracts";
+export { PROTOCOL, platformContract } from "@domus/platform/contracts";

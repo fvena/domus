@@ -24,6 +24,18 @@ _Evitar_: suplantar, actuar como.
 Quién pide una acción: la cuenta representada (un miembro o la cuenta de aparato) y, si la lleva otro, la app autenticada que la lleva, como Kira.
 _Evitar_: usuario.
 
+**App conectada** (`app`):
+Un programa que habla con Domus por la API con su propia llave, como Kira. Solo puede hacer lo que se le concede de forma expresa; ser una app conectada no da ningún permiso por sí mismo.
+_Evitar_: integración, cliente (para esto), servicio.
+
+**Llave** (`key`):
+La credencial de una app conectada: dice qué app es, nunca de parte de quién actúa. Se crea, se cambia y se revoca fuera de las acciones.
+_Evitar_: token, API key (en el texto en español).
+
+**Mandato** (`mandate`):
+Lo que la puerta da a una app conectada, a partir de una interacción que ella autenticó, para que actúe en nombre de quien la hizo. Ata ese contexto verificado a una sola app, caduca pronto y muere con su origen. No da permisos ni prueba que la persona apruebe nada: lo que pide sigue pasando por la autorización y la delegación vigentes.
+_Evitar_: delegación (que es la tabla), token, sesión de Kira.
+
 **Aparato** (`device`):
 Un navegador instalado o un satélite desde el que se usa Domus. Sobrevive a cerrar sesión y puede cambiar de cuenta. No es la cuenta de aparato: un móvil de Paco es un aparato que entra con la cuenta de Paco.
 _Evitar_: dispositivo, terminal.

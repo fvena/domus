@@ -10,8 +10,16 @@ import { z } from "zod";
 
 import { createHttpHandler } from ".";
 import { PROTOCOL, platformContract } from "../contracts";
+import { CONNECTED_APPS, createKey, parseKey, revokeKey } from "../identity/keys";
+import { endSessions } from "../identity/sessions";
 import { actionsOf, connectionOf, createPlatform } from "../platform";
-import { prepareAccount, preparePassword } from "../testing";
+import {
+	createPlatformWithClock,
+	issueMandate,
+	prepareAccount,
+	preparePassword,
+	prepareSession,
+} from "../testing";
 
 const { table } = moduleTables("notes");
 const notesContract = {
@@ -241,6 +249,114 @@ describe("http handler", () => {
 			expect(before).toHaveLength(1);
 			expect(devicesOf(luis)).toEqual(before);
 		});
+	});
+
+	it("tells the operator's log why it refused a key, never the key", async () => {
+		const lines: string[] = [];
+		const logged = createHttpHandler({
+			platform,
+			modules,
+			auth,
+			log: (line) => lines.push(line),
+		});
+		const connection = connectionOf(platform);
+		const tester = [...CONNECTED_APPS, { name: "tester", receivesMandates: false }];
+		const key = createKey(connection, CONNECTED_APPS, "kira", 0);
+		const other = createKey(connection, CONNECTED_APPS, "kira", 0);
+		const revoked = createKey(connection, CONNECTED_APPS, "kira", 0);
+		revokeKey(connection, parseKey(revoked)?.id ?? "", 0);
+		const unlisted = createKey(connection, tester, "tester", 0);
+		const status = (headers: Record<string, string>) =>
+			logged.fetch(new Request("http://domus/api/rpc/status", { method: "POST", headers }));
+
+		const cases: readonly [Record<string, string>, string][] = [
+			[{ authorization: "Bearer" }, "empty"],
+			[{ authorization: `Basic ${key}` }, "scheme"],
+			[{ authorization: `Bearer ${key}x` }, "malformed"],
+			[{ authorization: `Bearer domus_AbCdEfGh-_0.${parseKey(key)?.secret}` }, "unknown"],
+			[
+				{ authorization: `Bearer domus_${parseKey(key)?.id}.${parseKey(other)?.secret}` },
+				"wrong-secret",
+			],
+			[{ authorization: `Bearer ${revoked}` }, "revoked"],
+			[{ authorization: `Bearer ${unlisted}` }, "unknown-app"],
+			[
+				{ authorization: `Bearer ${key}`, cookie: "better-auth.session_token=some.token" },
+				"session-cookie",
+			],
+		];
+		for (const [headers, reason] of cases) {
+			lines.length = 0;
+			expect((await status(headers)).status).toBe(401);
+			expect(lines).toEqual([`key refused: ${reason}`]);
+		}
+		lines.length = 0;
+		expect((await status({ authorization: `Bearer ${key}` })).status).toBe(200);
+		expect(lines).toEqual([]);
+	});
+
+	it("tells the operator's log why it refused a mandate, never the mandate", async () => {
+		let now = Date.now();
+		const clocked = createPlatformWithClock(
+			{ databaseFile: ":memory:", modules, mandateLife: 1000 },
+			() => now,
+			{ apps: ["tester"] },
+		);
+		try {
+			const lines: string[] = [];
+			const logged = createHttpHandler({
+				platform: clocked,
+				modules,
+				auth,
+				log: (line) => lines.push(line),
+			});
+			const connection = connectionOf(clocked);
+			const apps = [...CONNECTED_APPS, { name: "tester", receivesMandates: false }];
+			const key = createKey(connection, apps, "kira", now);
+			const tester = createKey(connection, apps, "tester", now);
+			prepareAccount(clocked, {
+				id: "ana",
+				name: "Ana",
+				email: "ana@domus.test",
+				role: "member",
+			});
+			const { session } = prepareSession(clocked, "ana");
+			const good = issueMandate(clocked, { session, app: "kira" });
+			const other = prepareSession(clocked, "ana").session;
+			const ending = issueMandate(clocked, { session: other, app: "kira" });
+			const list = (headers: Record<string, string>) =>
+				logged.fetch(
+					new Request("http://domus/api/rpc/notes/list", { method: "POST", headers }),
+				);
+			const withKey = (mandate?: string, of = key) => ({
+				authorization: `Bearer ${of}`,
+				...(mandate === undefined ? {} : { "domus-mandate": mandate }),
+			});
+
+			lines.length = 0;
+			expect((await list(withKey(good))).status).toBe(200);
+			expect(lines).toEqual([]);
+			endSessions(connection, { session: other });
+			const cases: readonly [Record<string, string>, string][] = [
+				[withKey(), "missing"],
+				[withKey(`${good}x`), "malformed"],
+				[withKey("A".repeat(43)), "unknown"],
+				[withKey(good, tester), "other-app"],
+				[withKey(ending), "session-ended"],
+				[{ "domus-mandate": good }, "without-key"],
+			];
+			for (const [headers, reason] of cases) {
+				lines.length = 0;
+				expect((await list(headers)).status).toBe(401);
+				expect(lines).toEqual([`mandate refused: ${reason}`]);
+			}
+			now += 1000;
+			lines.length = 0;
+			expect((await list(withKey(good))).status).toBe(401);
+			expect(lines).toEqual(["mandate refused: expired"]);
+		} finally {
+			clocked.close();
+		}
 	});
 
 	it("refuses a module whose id is one of the platform's procedures", () => {

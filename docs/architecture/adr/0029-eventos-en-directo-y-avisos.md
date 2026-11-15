@@ -35,3 +35,5 @@ Precisa los ADR 0023 y 0025: cómo llega una invalidación a quien puede verla, 
 **Lo que queda para la fase 2.** El service worker, con el texto fijo y la `tag`; el manifest; y las reglas del cliente: abrir el canal antes de leer, la marca de lectura pendiente, borrar los datos con `purge`, y volver a suscribirse cuando cambia la clave. La 1d4 prueba el servidor contra un servicio de push falso.
 
 Fecha: 2026-11-14. Preguntas del grilling: Q1–Q24 de la fase 1d4.
+
+Precisado por el ADR 0030: un mandato no abre el canal en directo ni registra suscripciones.

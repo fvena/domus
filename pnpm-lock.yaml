@@ -347,6 +347,12 @@ importers:
       '@domus/utils':
         specifier: workspace:*
         version: link:../../packages/utils
+      '@orpc/client':
+        specifier: 'catalog:'
+        version: 1.16.2
+      '@orpc/contract':
+        specifier: 'catalog:'
+        version: 1.16.2
     devDependencies:
       '@domus/test-utils':
         specifier: workspace:*
@@ -665,6 +671,12 @@ importers:
       '@domus/platform':
         specifier: workspace:*
         version: link:../../packages/platform
+      '@domus/probe':
+        specifier: workspace:*
+        version: link:../../modules/probe
+      '@domus/test-utils':
+        specifier: workspace:*
+        version: link:../../packages/test-utils
       '@domus/tsconfig':
         specifier: workspace:*
         version: link:../typescript

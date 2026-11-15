@@ -12,6 +12,8 @@
 	"devDependencies": {
 		"@domus/module-sdk": "workspace:*",
 		"@domus/platform": "workspace:*",
+		"@domus/probe": "workspace:*",
+		"@domus/test-utils": "workspace:*",
 		"@domus/tsconfig": "workspace:*",
 		"@types/better-sqlite3": "catalog:",
 		"@types/node": "catalog:",

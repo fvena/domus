@@ -6,6 +6,7 @@ Precisa los ADR 0002, 0006, 0007, 0008, 0009, 0010, 0021 y 0022: cómo entra cad
 
 Precisado por el ADR 0024: un borrado puede decir que lo impiden registros dependientes ocultos solo a quien ya ve el registro padre y puede borrarlo, sin revelar nada más de ellos.
 Precisado por el ADR 0028: vincular o soltar un archivo cambia su registro y pasa por `editable(table)`; una descarga que pide confirmación se confirma solo en su ruta, desde cualquier sesión de la misma persona, y el `confirm` genérico la rechaza sin consumirla.
+Precisado por el ADR 0030: `via` sale de la llave, y el resto del contexto, de un mandato que emite la puerta, con el canal `contexto`, y que muere con su sesión. `confirmations/confirm` nunca acepta un mandato: el «sí» por `contexto` lo reconoce la puerta en el turno siguiente. Un comprobante solo cuenta por el canal `app`. «Acciones en HTTP» ya no es solo con una sesión válida: las acciones de los módulos, `log/read` y `log/undo` admiten también una llave válida con un mandato; el resto de las operaciones de la plataforma, solo la sesión.
 
 **Sin Permix.** La decisión es una función pura y síncrona de `platform/authorization` sobre tres tablas de búsqueda: permisos, delegación y visibilidad. La web no decide nada. Pregunta a la API, y si un día necesita pintar permisos, lo hará con una consulta. Permix no añadía nada a esa función.
 

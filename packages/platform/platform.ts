@@ -41,6 +41,7 @@ import {
 import { filesFolderOf } from "./files/store";
 import { accessView, registeredAreas } from "./identity/access";
 import { ensureDeviceAccount } from "./identity/accounts";
+import { CONNECTED_APPS, type ConnectedApp } from "./identity/keys";
 import { platformOperations } from "./identity/operations";
 import type { ProofIssuer } from "./identity/proofs";
 import { sessionLives } from "./identity/sessions";
@@ -82,6 +83,11 @@ export interface PlatformOptions {
 	 * 0029). Without one, no notice goes out: each delivery fails with `PUSH_NOT_CONFIGURED`.
 	 */
 	readonly origins?: readonly string[];
+	/**
+	 * How long a new mandate is good, in milliseconds: {@link DEFAULT_MANDATE_LIFE} when unset (ADR 0030). Each
+	 * mandate keeps the instant it expires at, fixed when it is issued, so a change applies only to new ones.
+	 */
+	readonly mandateLife?: number;
 }
 
 /** The retention of the action log's content unless one is given: 30 days. */
@@ -92,6 +98,9 @@ const DEFAULT_CONFIRMATION_TIMES: ConfirmationTimes = {
 	window: 60 * 1000,
 	expiry: 24 * 60 * 60 * 1000,
 };
+
+/** How long a mandate is good unless another life is given: 15 minutes. */
+const DEFAULT_MANDATE_LIFE = 15 * 60 * 1000;
 
 export interface Platform {
 	/** How many migrations this start applied, for the log of `apps/api`. */
@@ -145,6 +154,11 @@ export interface PlatformRuntime {
 	readonly channelQueue?: number;
 	/** Only from the testing entry: how the deliveries reach the push service, the global `fetch` unless given. */
 	readonly fetch?: typeof fetch;
+	/**
+	 * Only from the testing entry: connected apps of the test besides {@link CONNECTED_APPS}, which never receive
+	 * mandates (ADR 0030).
+	 */
+	readonly apps?: readonly ConnectedApp[];
 }
 
 const IN_MEMORY = ":memory:";
@@ -166,6 +180,8 @@ const internals = new WeakMap<
 		readonly notifications: Notifications;
 		readonly interleave: Interleave | undefined;
 		readonly events: Events;
+		readonly apps: readonly ConnectedApp[];
+		readonly mandateLife: number;
 	}
 >();
 
@@ -184,6 +200,7 @@ export function openPlatform(
 		backups: backupConfig,
 		filesDirectory,
 		origins = [],
+		mandateLife = DEFAULT_MANDATE_LIFE,
 	}: PlatformOptions,
 	{
 		clock,
@@ -199,6 +216,7 @@ export function openPlatform(
 		pushServices = PUSH_SERVICES,
 		channelQueue,
 		fetch = globalThis.fetch,
+		apps: testApps = [],
 	}: PlatformRuntime,
 ): Platform {
 	if (databaseFile !== IN_MEMORY && !isAbsolute(databaseFile)) {
@@ -220,6 +238,10 @@ export function openPlatform(
 			`retention must be a positive whole number of milliseconds, got ${String(retention)}`,
 		);
 	}
+	if (!Number.isSafeInteger(mandateLife) || mandateLife <= 0)
+		throw new Error(
+			`mandateLife must be a positive whole number of milliseconds, got ${String(mandateLife)}`,
+		);
 	const confirmationTimes: ConfirmationTimes = { ...DEFAULT_CONFIRMATION_TIMES, ...confirmation };
 	for (const [name, value] of Object.entries(confirmationTimes))
 		if (!Number.isSafeInteger(value) || value <= 0)
@@ -227,6 +249,10 @@ export function openPlatform(
 				`confirmation.${name} must be a positive whole number of milliseconds, got ${String(value)}`,
 			);
 	checkModules(modules);
+	const apps = [...CONNECTED_APPS, ...testApps];
+	for (const [index, { name }] of apps.entries())
+		if (apps.findIndex((app) => app.name === name) !== index)
+			throw new Error(`connected app "${name}" is listed twice`);
 
 	const areas = registeredAreas(modules);
 	// Before the data is touched, and held until close: no restore runs while the platform has the database open.
@@ -378,6 +404,8 @@ export function openPlatform(
 		notifications,
 		interleave,
 		events,
+		apps,
+		mandateLife,
 	});
 	return platform;
 }
@@ -465,4 +493,14 @@ export function interleaveOf(platform: Platform): Interleave | undefined {
 /** The live channels of a platform. Inside platform only: the door serves `GET /api/events`. */
 export function eventsOf(platform: Platform): Events {
 	return internalsOf(platform).events;
+}
+
+/** The connected apps of a platform: production's and, in a test, the test's own. Inside platform only. */
+export function appsOf(platform: Platform): readonly ConnectedApp[] {
+	return internalsOf(platform).apps;
+}
+
+/** How long a mandate issued now on a platform is good, in milliseconds. Inside platform only. */
+export function mandateLifeOf(platform: Platform): number {
+	return internalsOf(platform).mandateLife;
 }

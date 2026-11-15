@@ -7,6 +7,7 @@ import type { PermissionLevel } from "@domus/module-sdk/contracts";
 
 import type { VerifiedContext } from "./context";
 
+export { admitsMandate } from "./mandates";
 export { newOwnership, visibleTo } from "./visibility";
 
 export {
@@ -206,8 +207,10 @@ export function decide(request: AuthorizationRequest, view: AccessView): Decisio
 		if (delegated === "confirm") ask = true;
 	}
 	// 3. Sensitive operations ask for a step-up proof, which only an identity proven by password can bring; via
-	// Kira, changing access or delegation is denied whatever it brings. A proof brought to an operation that is
-	// not sensitive does not match it either.
+	// Kira, changing access or delegation is denied whatever it brings. A proof counts only by the channel `app`:
+	// one the person asked for in the app proves nothing when a mandate of that same session brings it, so via
+	// Kira it counts only when the person confirms from the app (ADR 0030). A proof brought to an operation that
+	// is not sensitive does not match it either.
 	let stepUp = false;
 	if (permission.level === "manage" || sensitive !== undefined) {
 		if (context.identity !== "password") return "deny";
@@ -216,7 +219,7 @@ export function decide(request: AuthorizationRequest, view: AccessView): Decisio
 			(sensitive === "permissions" || sensitive === "delegation")
 		)
 			return "deny";
-		if (request.proof !== "valid") stepUp = true;
+		if (request.proof !== "valid" || context.channel !== "app") stepUp = true;
 	} else if (request.proof !== undefined) stepUp = true;
 	// 4. An action that always asks for confirmation.
 	if (permission.alwaysConfirm === true) ask = true;
@@ -261,8 +264,8 @@ export function decisionOf(authorizer: Authorizer, request: AuthorizationRequest
 
 /**
  * Whether the context may upload a file (ADR 0028), an operation of the platform: a person's account, by itself.
- * Never the device account, which is shared and would leave a file without a person behind it, nor Kira, until
- * its key (phase 1e).
+ * Never the device account, which is shared and would leave a file without a person behind it, nor Kira: the door
+ * refuses a key on the routes of files, and phase 5a decides how Kira reaches its conversations' attachments (ADR 0030).
  */
 export function mayUpload(view: AccessView, context: VerifiedContext): boolean {
 	return personByItself(view, context);
