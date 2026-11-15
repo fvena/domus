@@ -25,7 +25,7 @@ Quién pide una acción: la cuenta representada (un miembro o la cuenta de apara
 _Evitar_: usuario.
 
 **App conectada** (`app`):
-Un programa que habla con Domus por la API con su propia llave, como Kira. Solo puede hacer lo que se le concede de forma expresa; ser una app conectada no da ningún permiso por sí mismo.
+Un programa que habla con Domus por la API con su propia llave, como Kira. Solo puede hacer lo que se le concede de forma expresa; ser una app conectada no da ningún permiso por sí mismo. Sale en la 1f (ADR 0034), y el agente conectado de la fase 5 se autoriza de otra forma (ADR 0032).
 _Evitar_: integración, cliente (para esto), servicio.
 
 **Agente conectado** (`agent`):
@@ -33,11 +33,11 @@ La app conectada que conversa con las personas y actúa en su nombre, como Kira.
 _Evitar_: asistente (para esto), bot, IA.
 
 **Llave** (`key`):
-La credencial de una app conectada: dice qué app es, nunca de parte de quién actúa. Se crea, se cambia y se revoca fuera de las acciones.
+La credencial de una app conectada: dice qué app es, nunca de parte de quién actúa. Se crea, se cambia y se revoca fuera de las acciones. Sale en la 1f (ADR 0034).
 _Evitar_: token, API key (en el texto en español).
 
 **Mandato** (`mandate`):
-Lo que la puerta da a una app conectada, a partir de una interacción que ella autenticó, para que actúe en nombre de quien la hizo. Ata ese contexto verificado a una sola app, caduca pronto y muere con su origen. No da permisos ni prueba que la persona apruebe nada: lo que pide sigue pasando por la autorización y la delegación vigentes.
+Lo que la puerta da a una app conectada, a partir de una interacción que ella autenticó, para que actúe en nombre de quien la hizo. Ata ese contexto verificado a una sola app, caduca pronto y muere con su origen. No da permisos ni prueba que la persona apruebe nada: lo que pide sigue pasando por la autorización y la delegación vigentes. El de la llave sale en la 1f (ADR 0034); desde la fase 5 es el de la conversación alojada, para el agente, la persona y la conversación, y muere con la sesión de Domus (ADR 0032).
 _Evitar_: delegación (que es la tabla), token, token de conversación, sesión de Kira.
 
 **Enlace del agente** (`agent link`):

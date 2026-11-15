@@ -70,3 +70,4 @@ Fecha: 2026-11-12. Preguntas del grilling: Q1–Q32 de la fase 1c.
 
 Precisado por el ADR 0029: una sesión caducada ha terminado aunque su fila siga ahí, en toda la plataforma; las cinco formas de terminar una sesión pasan por un solo camino; y el aparato anota qué sesión suya recibe avisos, que cambia cada vez que entra otra y nunca vuelve a una anterior.
 Precisado por el ADR 0032: a partir de la fase 5, la delegación nace denegada entera, el agente se autoriza con su enlace y el mandato de la conversación alojada, la lectura confirmada vía el agente se aprueba, el canal `contexto` desaparece, y la regla de la salud en un aparato `device` da paso a la de la salud vía el agente.
+Precisado por el ADR 0034: en la subfase 1f desaparecen el canal `contexto` y la identidad `voice`, y la regla del aparato compartido se reduce a que la cuenta `device` no lee un área que declara `confirmOnSharedDevice`.
