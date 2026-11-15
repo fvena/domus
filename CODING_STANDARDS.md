@@ -24,11 +24,12 @@ Read during review. Mechanical rules live in tooling and are not repeated here: 
 
 ## Security
 
-Read every path that authorizes, confirms, proves or reveals with these three in mind:
+Read every path that authorizes, confirms, proves or reveals with these four in mind:
 
 - **Existence oracle.** A caller who may not see a record gets the same answer for a hidden record as for a missing one: the same code, the same data, and the same order of checks, so no earlier check (a proof, a permission) answers differently first. The one admitted exception is the referential block of ADR 0024.
 - **Check-then-act.** Whatever is verified outside the transaction that uses it, or before an `await` (a password hash, a session, a proof), is verified again inside that transaction.
 - **Every path authorizes alike.** A repeat, a confirmation and an undo authorize as the first call does, proof included; a confirmation counts only as the confirmation that was missing. A pending is reused only where it can be answered (same session and conversation).
+- **Credentials combine.** A promise that an outcome never happens through a credential (a key, a mandate) has a test that tries to reach that outcome with the credential plus whatever the same person can obtain elsewhere: a proof, a pending confirmation, an idempotency key. A test of the one reason it should fail leaves the combination open: in phase 1e, Kira could not ask for a proof, yet a proof the person asked for in the app reached a `manage` action through a mandate of that same session.
 
 ## Documents
 

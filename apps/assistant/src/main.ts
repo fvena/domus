@@ -12,7 +12,7 @@ const origin = config.apiUrl.origin;
 const rejection = `${
 	config.key === undefined
 		? `no key in ${config.keyFile}; create one with \`keys create ${APP}\``
-		: `the key in ${config.keyFile} is not a good key of ${APP}`
+		: `the key in ${config.keyFile} is not a good key of ${APP}; put a live one there, made with \`keys create ${APP}\``
 }, then start assistant again (in Docker, recreate its container)`;
 
 // Nothing that depends on the api runs unless `api.state` is "ready".
