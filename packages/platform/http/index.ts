@@ -12,35 +12,27 @@
 // notice (ADR 0029: a person's own irreversible write, with no level of any area). A write's idempotency key and a sensitive operation's step-up proof come in headers.
 // Besides oRPC, routes of Hono only with a session: uploading and downloading files (ADR 0028), the live channel, the public key
 // of VAPID and the device's subscription to notices (ADR 0029).
-// The key of a connected app comes in `Authorization: Bearer` (ADR 0030). With a good one `status` says which app
-// calls; a bad one, or one next to the session cookie, is refused, never taken as no credential. With a good key
-// and a mandate in `domus-mandate`, the actions of the modules run on the person's behalf: the door seals the
-// context the mandate keeps, with `via` the key's app and the channel `contexto`. Of the platform's operations, only
-// those the list of authorization admits a mandate for (`admitsMandate`: `log/read` and `log/undo`), by the path
-// oRPC routed to; every other one, also one added tomorrow, and every route of Hono and of Better Auth refuse a key.
-// A mandate without a key is refused on every route too, `status` included: it never falls back to the session.
+// The credentials of the connected apps are retired (ADR 0034): a request to `/api` with `Authorization`, of any
+// value, or `domus-mandate` is refused with `UNAUTHORIZED` before the door looks at the cookie, `status` and Better
+// Auth's routes included, each in its own form of errors: never taken as no credential, nor as the session's.
 import type { ModuleDefinition } from "@domus/module-sdk";
 import { implement, ORPCError, os } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
-import { getSessionCookie } from "better-auth/cookies";
 import { type Context, Hono } from "hono";
 
 import { READ_DELEGATION, READ_LOG } from "../actions";
 import { internalError } from "../actions/failures";
-import { admitsMandate, sealContext, type VerifiedContext } from "../authorization";
+import { asksByItself, sealContext, type VerifiedContext } from "../authorization";
 import { LIST_TASKS } from "../background/operations";
-import { AUTHORIZATION_HEADER, MANDATE_HEADER, PROTOCOL, platformContract } from "../contracts";
+import { PROTOCOL, platformContract } from "../contracts";
 import { contentDisposition, errorResponse } from "../files";
 import { AUTH_PREFIX, type AuthOptions, createAuth } from "../identity/auth";
-import { checkKey, noteKeyUse, readAuthorization } from "../identity/keys";
-import { readMandate, resolveMandate } from "../identity/mandates";
 import { replacePassword, SessionGoneError, verifiedPasswordHash } from "../identity/passwords";
 import { requestProof, WrongPasswordError } from "../identity/proofs";
 import { originOf, sessionsOf } from "../identity/sessions";
 import { TEST_NOTICE } from "../notifications/operations";
 import {
 	actionsOf,
-	appsOf,
 	backgroundOf,
 	clockOf,
 	connectionOf,
@@ -86,6 +78,12 @@ const PROOF_HEADER = "step-up-proof";
 /** The only routes of Better Auth the door lets through: everything else of it answers 404. */
 const AUTH_ROUTES: readonly string[] = ["/sign-in/email", "/sign-out"];
 
+/**
+ * The headers of the retired credentials of the connected apps, the key's and the mandate's (ADR 0034): a request to
+ * `/api` with either is refused.
+ */
+const RETIRED_HEADERS = ["authorization", "domus-mandate"] as const;
+
 export interface HttpHandlerOptions {
 	readonly platform: Platform;
 	/** The modules the platform was opened with, in the same order. */
@@ -93,31 +91,26 @@ export interface HttpHandlerOptions {
 	/** How sessions are signed and which origins the app is served from. */
 	readonly auth: AuthOptions;
 	/**
-	 * The operator's log, for why a key or a mandate was refused, never with either: `console.warn` unless given (ADR
-	 * 0030).
+	 * The operator's log, for which retired credential was refused, by its header, never with its value:
+	 * `console.warn` unless given (ADR 0034).
 	 */
 	readonly log?: (line: string) => void;
 }
 
 /**
- * What each RPC call carries: who it comes from and which app's key it has, once a procedure asks, its idempotency key
- * and its proof. Who it comes from is a session's context, or with `mandate` also the one a mandate keeps, which only
- * the actions of the modules and the operations of the platform in authorization's list admit.
+ * What each RPC call carries: whether it brings a retired credential, who it comes from, once a procedure asks, its
+ * idempotency key and its proof.
  */
 interface DoorContext {
-	readonly verify: (admits?: { readonly mandate?: boolean }) => Promise<VerifiedContext | null>;
-	readonly app: () => string | undefined;
+	readonly retired: boolean;
+	readonly verify: () => Promise<VerifiedContext | null>;
 	readonly idempotencyKey: string | undefined;
 	readonly proof: string | undefined;
 }
 
-/**
- * A call to an operation of the platform as its handler receives it: the door's context and the operation's path,
- * which oRPC gives from the procedure it routed to, never from what the client wrote.
- */
+/** A call to an operation of the platform as its handler receives it: the door's context. */
 interface OperationCall {
 	readonly context: DoorContext;
-	readonly path: readonly string[];
 }
 
 const platformProcedures = implement(platformContract).$context<DoorContext>();
@@ -152,7 +145,7 @@ export function createHttpHandler({
 		call: OperationCall & { readonly input?: unknown },
 	): Promise<never> {
 		return actions.invoke({
-			context: await sessionOrMandateContext(call),
+			context: await sessionContext(call),
 			action: `platform.${name}`,
 			input: call.input,
 			idempotencyKey: call.context.idempotencyKey,
@@ -160,24 +153,23 @@ export function createHttpHandler({
 		}) as never;
 	}
 
-	/**
-	 * The verified context of the platform operation at `path`: a session's, or a mandate's only for an operation that
-	 * authorization's list admits one for (ADR 0030). Every other one, also one added tomorrow, needs a session.
-	 */
-	async function sessionOrMandateContext({
-		context,
-		path,
-	}: OperationCall): Promise<VerifiedContext> {
-		const verified = await context.verify({ mandate: admitsMandate(path.join("/")) });
+	/** The verified context of an operation of the platform: a session's. */
+	async function sessionContext({ context }: OperationCall): Promise<VerifiedContext> {
+		const verified = await context.verify();
 		if (!verified?.session) throw new ORPCError("UNAUTHORIZED");
 		return verified;
 	}
 
-	/** The account and session of a platform operation on one's own password or sessions. */
+	/**
+	 * The account and session of a platform operation on one's own password or sessions, which stays outside the path
+	 * of the actions: only by the person by itself, never via an agent (ADR 0034).
+	 */
 	async function signedIn(
 		call: OperationCall,
 	): Promise<{ readonly account: string; readonly session: string }> {
-		const { account, session = "" } = await sessionOrMandateContext(call);
+		const verified = await sessionContext(call);
+		if (!asksByItself(verified)) throw new ORPCError("FORBIDDEN");
+		const { account, session = "" } = verified;
 		return { account, session };
 	}
 
@@ -189,7 +181,7 @@ export function createHttpHandler({
 			Object.keys(module.contract ?? {}).map((name) => [
 				name,
 				actionProcedure.handler(async ({ input, context }) => {
-					const verified = await context.verify({ mandate: true });
+					const verified = await context.verify();
 					if (!verified) throw new ORPCError("UNAUTHORIZED");
 					return actions.invoke({
 						context: verified,
@@ -203,17 +195,13 @@ export function createHttpHandler({
 		);
 	}
 
-	const rpc = new RPCHandler({
+	const router = {
 		...moduleRouters,
-		// Public without a credential; with a good key it also says which app calls, and a bad one is refused.
-		status: platformProcedures.status.handler(({ context }) => {
-			const app = context.app();
-			return {
-				service: "domus" as const,
-				protocol: PROTOCOL,
-				...(app === undefined ? {} : { app }),
-			};
-		}),
+		// Public without a credential.
+		status: platformProcedures.status.handler(() => ({
+			service: "domus" as const,
+			protocol: PROTOCOL,
+		})),
 		password: {
 			change: platformProcedures.password.change.handler(async (call) => {
 				const { input, errors } = call;
@@ -261,7 +249,7 @@ export function createHttpHandler({
 			read: platformProcedures.delegation.read.handler(
 				async (call) =>
 					actions.invoke({
-						context: await sessionOrMandateContext(call),
+						context: await sessionContext(call),
 						action: READ_DELEGATION,
 						input: call.input,
 					}) as never,
@@ -275,7 +263,7 @@ export function createHttpHandler({
 				try {
 					return await requestProof(
 						proofIssuerOf(platform),
-						await sessionOrMandateContext(call),
+						await sessionContext(call),
 						call.input,
 					);
 				} catch (error) {
@@ -285,19 +273,17 @@ export function createHttpHandler({
 				}
 			}),
 		},
-		// With a session, or with a key and a mandate: the two operations of the platform authorization's list admits
-		// one for, through the delegation in force.
 		log: {
 			read: platformProcedures.log.read.handler(
 				async (call) =>
 					actions.invoke({
-						context: await sessionOrMandateContext(call),
+						context: await sessionContext(call),
 						action: READ_LOG,
 					}) as never,
 			),
 			undo: platformProcedures.log.undo.handler(async (call) =>
 				actions.undo({
-					context: await sessionOrMandateContext(call),
+					context: await sessionContext(call),
 					entry: call.input.entry,
 					idempotencyKey: call.context.idempotencyKey ?? "",
 					...(call.context.proof === undefined ? {} : { proof: call.context.proof }),
@@ -313,7 +299,7 @@ export function createHttpHandler({
 			list: platformProcedures.tasks.list.handler(
 				async (call) =>
 					actions.invoke({
-						context: await sessionOrMandateContext(call),
+						context: await sessionContext(call),
 						action: LIST_TASKS,
 					}) as never,
 			),
@@ -330,22 +316,31 @@ export function createHttpHandler({
 				platformWrite("launchTask", call),
 			),
 		},
-		// Only with a session: Kira never confirms (ADR 0030, «El "sí" lo reconoce la puerta»).
+		// An agent never confirms nor rejects (ADR 0034): answering denies a context with `via`.
 		confirmations: {
 			confirm: platformProcedures.confirmations.confirm.handler(async (call) =>
 				actions.confirm({
-					context: await sessionOrMandateContext(call),
+					context: await sessionContext(call),
 					confirmation: call.input.id,
 					...(call.context.proof === undefined ? {} : { proof: call.context.proof }),
 				}),
 			),
 			reject: platformProcedures.confirmations.reject.handler(async (call) => {
 				actions.reject({
-					context: await sessionOrMandateContext(call),
+					context: await sessionContext(call),
 					confirmation: call.input.id,
 				});
 			}),
 		},
+	};
+	// A retired credential is refused before the procedure is even looked for, in oRPC's own form of errors.
+	const rpc = new RPCHandler<DoorContext>(router, {
+		interceptors: [
+			(options) => {
+				if (options.context.retired) throw new ORPCError("UNAUTHORIZED");
+				return options.next();
+			},
+		],
 	});
 	const app = new Hono();
 
@@ -362,6 +357,21 @@ export function createHttpHandler({
 		c.json({ status: "ok", background: backgroundOf(platform).health() }),
 	);
 
+	// A retired credential gets `UNAUTHORIZED` on every route of `/api`, before anything looks at the cookie.
+	app.use(`${API_PREFIX}/*`, async (c, next) => {
+		const header = retiredHeaderOf(c.req.raw);
+		if (header === undefined) return next();
+		log(`retired credential refused: ${header}`);
+		// The RPC handler refuses it in oRPC's form, Better Auth's routes in Better Auth's, the rest as plain JSON.
+		if (c.req.path.startsWith(`${RPC_PREFIX}/`)) return next();
+		if (c.req.path.startsWith(`${AUTH_PREFIX}/`))
+			return Response.json(
+				{ code: "UNAUTHORIZED", message: "a retired credential signs nobody in or out" },
+				{ status: 401 },
+			);
+		return errorResponse(new ORPCError("UNAUTHORIZED"));
+	});
+
 	app.post(`${AUTH_PREFIX}/*`, (c) =>
 		AUTH_ROUTES.includes(c.req.path.slice(AUTH_PREFIX.length))
 			? identity.handler(c.req.raw)
@@ -372,16 +382,12 @@ export function createHttpHandler({
 		const request = c.req.raw;
 		const responseHeaders = new Headers();
 		let bySession: Promise<VerifiedContext | null> | undefined;
-		let byMandate: Promise<VerifiedContext | null> | undefined;
 		const { matched, response } = await rpc.handle(request, {
 			prefix: RPC_PREFIX,
 			context: {
+				retired: retiredHeaderOf(request) !== undefined,
 				// Read once per request, only when a procedure needs it: status works without a session.
-				verify: ({ mandate = false } = {}) =>
-					mandate
-						? (byMandate ??= contextOf(request, responseHeaders, { mandate }))
-						: (bySession ??= contextOf(request, responseHeaders)),
-				app: () => appOf(request),
+				verify: () => (bySession ??= contextOf(request, responseHeaders)),
 				idempotencyKey: request.headers.get(IDEMPOTENCY_KEY_HEADER) ?? undefined,
 				proof: request.headers.get(PROOF_HEADER) ?? undefined,
 			},
@@ -495,71 +501,24 @@ export function createHttpHandler({
 	);
 
 	/**
-	 * The connected app whose key the request carries in `Authorization: Bearer`, `undefined` without the header. A
-	 * bad key, of any form, a key next to the session cookie of Better Auth and a mandate without a key are refused
-	 * with `UNAUTHORIZED`, never taken as no credential (ADR 0030).
-	 */
-	function appOf(request: Request): string | undefined {
-		const read = readAuthorization(request.headers.get(AUTHORIZATION_HEADER));
-		if (read.kind === "none") {
-			if (!request.headers.has(MANDATE_HEADER)) return undefined;
-			log("mandate refused: without-key");
-			throw new ORPCError("UNAUTHORIZED");
-		}
-		/** The same answer to every failure; only the operator's log tells them apart. */
-		const refuse = (reason: string): never => {
-			log(`key refused: ${reason}`);
-			throw new ORPCError("UNAUTHORIZED");
-		};
-		if (read.kind === "bad") return refuse(read.reason);
-		if (getSessionCookie(request) !== null) return refuse("session-cookie");
-		const check = checkKey(connection, appsOf(platform), read.key);
-		if (!check.ok) return refuse(check.reason);
-		noteKeyUse(connection, check.id, clockOf(platform)());
-		return check.app;
-	}
-
-	/**
-	 * The verified context of a request: from its session, where the account is the session's and asks itself (no
-	 * via, the app channel, no conversation), or, only where `mandate` admits one, from its key and its mandate.
+	 * The verified context of a request, from its session: the account is the session's and asks itself (no via, the
+	 * app channel).
 	 */
 	async function contextOf(
 		request: Request,
 		responseHeaders: Headers,
-		{ mandate = false }: { readonly mandate?: boolean } = {},
 	): Promise<VerifiedContext | null> {
-		// A key, good or bad, admits nothing that needs an account but with a mandate, not even next to a session
-		// that lives; nor does a mandate, with its key or without.
-		if (request.headers.has(AUTHORIZATION_HEADER) || request.headers.has(MANDATE_HEADER))
-			return mandate ? mandateContextOf(request) : null;
 		const session = await identity.sessionOf(request, responseHeaders);
 		if (!session) return null;
 		return sealContext({ ...originOf(session.id, session), channel: "app" });
 	}
 
-	/**
-	 * The verified context a request's mandate keeps, for the app of its good key: the account, device, session,
-	 * device account, identity and conversation of its origin, with `via` that app and the channel `contexto`. A bad
-	 * key is refused as {@link appOf} refuses it; a missing, malformed or unresolved mandate is no context, which the
-	 * caller answers `UNAUTHORIZED` as without a credential, and only the operator's log tells why.
-	 */
-	function mandateContextOf(request: Request): VerifiedContext | null {
-		const app = appOf(request);
-		if (app === undefined) return null;
-		const read = readMandate(request.headers.get(MANDATE_HEADER));
-		if (read.kind !== "mandate") {
-			log(`mandate refused: ${read.kind === "none" ? "missing" : "malformed"}`);
-			return null;
-		}
-		const resolution = resolveMandate(connection, read.id, app, clockOf(platform)());
-		if (!resolution.ok) {
-			log(`mandate refused: ${resolution.reason}`);
-			return null;
-		}
-		return sealContext({ ...resolution.origin, via: app, channel: "contexto" });
-	}
-
 	return { fetch: async (request) => app.fetch(request) };
+}
+
+/** The header of the first retired credential the request carries, of any value, or `undefined` without one. */
+function retiredHeaderOf(request: Request): string | undefined {
+	return RETIRED_HEADERS.find((name) => request.headers.has(name));
 }
 
 /**

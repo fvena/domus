@@ -55,7 +55,13 @@ import { checkTransition, editableTo, type RecordArea } from "../authorization/w
 import { markedFiles } from "../files/marked";
 import { FilesRefusal, type References, type WriteRun } from "../files/references";
 import type { OpenedContent } from "../files/store";
-import { answeringWith, type ConfirmationCall, type Download, openingDownload } from "./answering";
+import {
+	answeringWith,
+	type ConfirmationCall,
+	type Download,
+	openingDownload,
+	type ProofAndConfirmation,
+} from "./answering";
 import { type Capture, type CapturedTransition, changesOf } from "./capture";
 import { type ConfirmationTimes, type Confirmations, type NewPending } from "./confirmations";
 import { conflict, internalError, notUndoable, stepUpRequired } from "./failures";
@@ -116,7 +122,7 @@ export interface Actions {
 	 * Confirms a pending confirmation of the account that asks and runs its operation once, evaluated again
 	 * with the account, via and delegation it was born with. Returns what the operation would have: a read's
 	 * result, which is never kept, or a write's {@link WriteOutcome}. Throws "not found" for another account's,
-	 * a conflict when its window closed, it expired or it was already consumed or rejected, or what the
+	 * a conflict when it expired or it was already consumed or rejected, or what the
 	 * operation throws.
 	 */
 	confirm(call: ConfirmationCall): unknown;
@@ -311,8 +317,8 @@ export function createActions({
 		read,
 		write,
 		undo: undoEntry,
-		download: (found, context, { action, input, file }, { proof, confirmed }) => {
-			const checked = authorizeRead(found, context, action, input, { proof, confirmed });
+		download: (found, context, { action, input, file }, { proof, confirmedBy }) => {
+			const checked = authorizeRead(found, context, action, input, { proof, confirmedBy });
 			return openReturned(found, context, input, file, { proof, checked });
 		},
 	});
@@ -443,12 +449,10 @@ export function createActions({
 	 * own, or finds the one the same request left before, and answers `CONFIRMATION_REQUIRED` with its id.
 	 */
 	function orPending<T>(pending: NewPending, operation: () => T): T {
-		let contextOnly: boolean;
 		try {
 			return operation();
 		} catch (error) {
 			if (!(error instanceof ConfirmationNeeded)) throw error;
-			contextOnly = error.confirmedIn === "context-only";
 		}
 		const id = connection.transaction(() => {
 			const { kind, origin, fingerprint, key } = pending;
@@ -456,7 +460,7 @@ export function createActions({
 				kind === "read" || key === undefined
 					? confirmations.findRead(origin, fingerprint, clock())
 					: confirmations.findWrite(actorOf(origin), key);
-			if (!earlier) return confirmations.create({ ...pending, contextOnly }, clock());
+			if (!earlier) return confirmations.create(pending, clock());
 			if (earlier.fingerprint !== fingerprint) throw conflict("key-reused");
 			return earlier.id;
 		})();
@@ -546,7 +550,7 @@ export function createActions({
 		context: VerifiedContext,
 		action: string,
 		input: unknown,
-		options: { readonly proof?: string; readonly confirmed?: boolean },
+		options: ProofAndConfirmation,
 	): unknown {
 		const checked = authorizeRead(found, context, action, input, options);
 		return answerRead(found, context, input, { proof: options.proof, checked });
@@ -561,7 +565,7 @@ export function createActions({
 		context: VerifiedContext,
 		action: string,
 		input: unknown,
-		options: { readonly proof?: string; readonly confirmed?: boolean; readonly file?: string },
+		options: ProofAndConfirmation & { readonly file?: string },
 	): ProofCheck | undefined {
 		return orPending(readPending(context, action, input, options.file), () =>
 			checkRead(found, context, action, input, options),
@@ -595,7 +599,7 @@ export function createActions({
 		context: VerifiedContext,
 		action: string,
 		input: unknown,
-		{ proof, confirmed = false }: { readonly proof?: string; readonly confirmed?: boolean },
+		{ proof, confirmedBy }: ProofAndConfirmation,
 	): ProofCheck | undefined {
 		const checked = proofs.check(proof, context, operationFingerprint(action, input), clock());
 		authorize({
@@ -605,7 +609,7 @@ export function createActions({
 			permission: found.permission,
 			input,
 			...sensitivityOf(found, input, context),
-			...(confirmed ? { confirmed } : {}),
+			...confirmationBy(confirmedBy),
 			...(checked === undefined ? {} : { proof: checked }),
 		});
 		return checked;
@@ -644,12 +648,8 @@ export function createActions({
 		{
 			idempotencyKey,
 			proof,
-			confirmed = false,
-		}: {
-			readonly idempotencyKey: string | undefined;
-			readonly proof?: string | undefined;
-			readonly confirmed?: boolean;
-		},
+			confirmedBy,
+		}: ProofAndConfirmation & { readonly idempotencyKey: string | undefined },
 	): WriteOutcome {
 		const actor = actorOf(context);
 		const fingerprint = operationFingerprint(action, input);
@@ -660,7 +660,7 @@ export function createActions({
 			permission: found.permission,
 			input,
 			...sensitivityOf(found, input, context),
-			...(confirmed ? { confirmed } : {}),
+			...confirmationBy(confirmedBy),
 			...(checked === undefined ? {} : { proof: checked }),
 		});
 
@@ -697,12 +697,15 @@ export function createActions({
 
 	function undoEntry(
 		{ context, entry: number, idempotencyKey, proof }: UndoCall,
-		confirmed = false,
+		confirmedBy?: VerifiedContext,
 	): WriteOutcome {
 		const actor = actorOf(context);
 		const fingerprint = undoFingerprint(number);
 
-		/** The request to authorization for an inverse, with the context of the entry it undoes. */
+		/**
+		 * The request to authorization for an inverse, as the same write would ask, sensitive and with its subject,
+		 * and with the context of the entry it undoes.
+		 */
 		const requestFor = (
 			original: NumberedEntry,
 			inverse: Inverse,
@@ -716,8 +719,9 @@ export function createActions({
 				kind: "write",
 				permission: target.permission,
 				input: inverse.input,
+				...sensitivityOf(target, inverse.input, context),
 				undoes: { entry: original.entry, action: original.action, actor: original.actor },
-				...(confirmed ? { confirmed } : {}),
+				...confirmationBy(confirmedBy),
 				...(checked === undefined ? {} : { proof: checked }),
 			};
 		};
@@ -1084,19 +1088,23 @@ interface KeyedWrite {
 }
 
 /**
- * Where a pending confirmation may be answered: by the app or in context, or `context-only`, by the channel
- * `contexto` inside its window (the shared device rule).
- */
-type ConfirmedIn = "app-or-context" | "context-only";
-
-/**
- * Authorization asked for confirmation: whatever was opened rolls back and the operation waits, to be answered
- * where `confirmedIn` says.
+ * Authorization asked for confirmation: whatever was opened rolls back and the operation waits for the person to
+ * answer it from the app.
  */
 class ConfirmationNeeded extends Error {
-	constructor(readonly confirmedIn: ConfirmedIn) {
+	constructor() {
 		super("confirmation needed");
 	}
+}
+
+/**
+ * What a request to authorization carries of the person who answered the pending confirmation it runs: confirmed, and
+ * by whom. Nothing when nobody answered one.
+ */
+function confirmationBy(
+	confirmedBy: VerifiedContext | undefined,
+): Pick<AuthorizationRequest, "confirmed" | "confirmedBy"> {
+	return confirmedBy === undefined ? {} : { confirmed: true, confirmedBy };
 }
 
 /** What the path does with each decision of authorization: go on, or throw what stops the operation. */
@@ -1106,10 +1114,7 @@ const ANSWERS: Readonly<Record<Decision, () => void>> = {
 		throw new ORPCError("FORBIDDEN");
 	},
 	confirm: () => {
-		throw new ConfirmationNeeded("app-or-context");
-	},
-	"confirm-in-context": () => {
-		throw new ConfirmationNeeded("context-only");
+		throw new ConfirmationNeeded();
 	},
 	"step-up": () => {
 		throw stepUpRequired();

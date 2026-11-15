@@ -118,7 +118,7 @@ describe("changing permissions", () => {
 		test.prepare.delegation("paco", "platform", "write", "yes");
 		const kira = test.context("paco", { via: "kira" });
 		const change = { account: "ana", area: "probe", level: "none" } as const;
-		const proof = await proofOf(test, kira, "setPermission", change);
+		const proof = await proofOf(test, test.context("paco"), "setPermission", change);
 
 		expect(() => test.setPermission(kira, change, { idempotencyKey: "p1", proof })).toThrow(
 			forbidden,
@@ -183,7 +183,7 @@ describe("changing delegation", () => {
 		test.prepare.delegation("ana", "platform", "write", "yes");
 		const kira = test.context("ana", { via: "kira" });
 		const change = { account: "ana", area: "probe", level: "write", value: "yes" } as const;
-		const proof = await proofOf(test, kira, "setDelegation", change);
+		const proof = await proofOf(test, test.context("ana"), "setDelegation", change);
 
 		expect(() => test.setDelegation(kira, change, { idempotencyKey: "d1", proof })).toThrow(
 			forbidden,
@@ -349,19 +349,18 @@ describe("revoking", () => {
 		expect(test.log()).toEqual([]);
 	});
 
-	it("is denied with an identity proven by voice or by the device", async () => {
+	it("is denied with an identity proven by the device", async () => {
 		await using test = await household();
 		const kitchen = test.prepare.session(test.deviceAccount);
 		const paco = test.context("paco");
 		const proof = await proofOf(test, paco, "revokeSession", { session: kitchen.session });
 
-		for (const identity of ["voice", "device"] as const)
-			expect(() =>
-				test.revokeSession(test.context("paco", { identity }), kitchen.session, {
-					idempotencyKey: "r1",
-					proof,
-				}),
-			).toThrow(forbidden);
+		expect(() =>
+			test.revokeSession(test.context("paco", { identity: "device" }), kitchen.session, {
+				idempotencyKey: "r1",
+				proof,
+			}),
+		).toThrow(forbidden);
 	});
 });
 
@@ -449,5 +448,70 @@ describe("proofs and the password", () => {
 				proof,
 			}),
 		).toThrow(stepUp);
+	});
+});
+
+describe("the platform's own operations via an agent", () => {
+	it("are denied with every level of the platform delegated and the person's proof, but reading the log", async () => {
+		await using test = await household();
+		for (const level of ["read", "write", "manage"] as const)
+			test.prepare.delegation("paco", "platform", level, "yes");
+		const paco = test.context("paco");
+		const kira = test.context("paco", { via: "kira" });
+		const other = test.prepare.session("paco").session ?? "";
+		const kitchen = test.prepare.session(test.deviceAccount).session ?? "";
+		const permission = { account: "ana", area: "probe", level: "read" } as const;
+		const delegation = { account: "paco", area: "probe", level: "read", value: "no" } as const;
+		const proofs = {
+			setPermission: await proofOf(test, paco, "setPermission", permission),
+			setDelegation: await proofOf(test, paco, "setDelegation", delegation),
+			revokeSession: await proofOf(test, paco, "revokeSession", { session: other }),
+			revokeDevice: await proofOf(test, paco, "revokeDevice", { session: kitchen }),
+		};
+
+		const calls: Record<string, () => unknown> = {
+			readDelegation: () => test.delegation(kira, "paco"),
+			setPermission: () =>
+				test.setPermission(kira, permission, {
+					idempotencyKey: "p1",
+					proof: proofs.setPermission,
+				}),
+			setDelegation: () =>
+				test.setDelegation(kira, delegation, {
+					idempotencyKey: "g1",
+					proof: proofs.setDelegation,
+				}),
+			revokeSession: () =>
+				test.revokeSession(kira, other, {
+					idempotencyKey: "s1",
+					proof: proofs.revokeSession,
+				}),
+			revokeDevice: () =>
+				test.revokeDevice(kira, kitchen, {
+					idempotencyKey: "d1",
+					proof: proofs.revokeDevice,
+				}),
+			testNotice: () => test.testNotice(kira, { idempotencyKey: "n1" }),
+		};
+		const seen = Object.fromEntries(
+			Object.entries(calls).map(([name, call]) => {
+				try {
+					call();
+					return [name, "ok"];
+				} catch (error) {
+					return [name, String((error as { code?: unknown }).code)];
+				}
+			}),
+		);
+		expect(seen).toEqual(
+			Object.fromEntries(Object.keys(calls).map((name) => [name, "FORBIDDEN"])),
+		);
+
+		expect(test.log()).toEqual([]);
+		expect(test.hasSession(other)).toBe(true);
+		expect(test.hasSession(kitchen)).toBe(true);
+		expect(test.pendingConfirmations()).toEqual([]);
+		// Reading one's annotations is the operation of the platform it reaches, within the delegation.
+		expect(test.readLog(kira)).toEqual([]);
 	});
 });

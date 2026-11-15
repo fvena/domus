@@ -12,9 +12,7 @@
 	},
 	"dependencies": {
 		"@date-fns/tz": "catalog:",
-		"@hono/node-server": "catalog:",
-		"date-fns": "catalog:",
-		"hono": "catalog:"
+		"date-fns": "catalog:"
 	},
 	"devDependencies": {
 		"@domus/tsconfig": "workspace:*",

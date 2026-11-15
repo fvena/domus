@@ -84,4 +84,28 @@ describe("api with the built web app", () => {
 		}
 		expect(await page.text()).toContain("Domus");
 	});
+
+	// The retired credentials of the connected apps are refused only under /api (ADR 0034).
+	it("answers /health and the web app the same with a retired credential, and refuses it under /api", async () => {
+		const answer = async (path: string, headers: Record<string, string> = {}) => {
+			const response = await app.request(path, { headers });
+			return { status: response.status, body: await response.text() };
+		};
+		const retired: readonly Record<string, string>[] = [
+			{ authorization: "Bearer a-retired-credential" },
+			{ authorization: "Basic a-retired-credential" },
+			{ authorization: "" },
+			{ "domus-mandate": "a-retired-credential" },
+		];
+
+		for (const path of ["/health", "/", "/lists"]) {
+			const without = await answer(path);
+			expect(without.status).toBe(200);
+			for (const headers of retired) expect(await answer(path, headers)).toEqual(without);
+		}
+		for (const headers of retired)
+			expect((await app.request("/api/rpc/status", { method: "POST", headers })).status).toBe(
+				401,
+			);
+	});
 });

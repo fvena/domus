@@ -1,5 +1,5 @@
 // What platform answers over RPC, besides the modules. Pure: schemas and contracts only, so the
-// browser, assistant and voice-gateway can import it (@domus/platform/contracts).
+// browser can import it (@domus/platform/contracts).
 import { oc } from "@orpc/contract";
 import { z } from "zod";
 
@@ -9,35 +9,13 @@ import { z } from "zod";
  */
 export const PROTOCOL = 1;
 
-/**
- * Public on purpose: it carries no personal data. Nothing else is public by default. With a good key it also says
- * which connected app calls, `app`; with a bad one it answers `UNAUTHORIZED` (ADR 0030). A new optional field breaks
- * nobody, so it did not raise {@link PROTOCOL}.
- */
+/** Public on purpose: it carries no personal data. Nothing else is public by default. */
 export const statusContract = oc.output(
 	z.object({
 		service: z.literal("domus"),
 		protocol: z.number().int(),
-		app: z.string().optional(),
 	}),
 );
-
-/** The connected app Kira is: its name in `via` and in the `app` of {@link statusContract} (ADR 0030). */
-export const KIRA = "kira";
-
-/** The header that carries the key of a connected app, as {@link bearerOf} writes it (ADR 0030). */
-export const AUTHORIZATION_HEADER = "authorization";
-
-/** The scheme of a key in {@link AUTHORIZATION_HEADER}, which the door reads in any case. */
-export const KEY_SCHEME = "Bearer";
-
-/** The header that carries the id of a mandate, next to the key of the app it was issued for (ADR 0030). */
-export const MANDATE_HEADER = "domus-mandate";
-
-/** The value of {@link AUTHORIZATION_HEADER} that carries `key`. */
-export function bearerOf(key: string): string {
-	return `${KEY_SCHEME} ${key}`;
-}
 
 /** How long a password may be, in characters: Better Auth's own bounds, applied by every way of setting one. */
 export const PASSWORD_LENGTH = { min: 8, max: 128 } as const;

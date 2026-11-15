@@ -4,6 +4,7 @@
 import { clientFor } from "@domus/api-client";
 import {
 	createTestPlatform,
+	pendingFrom,
 	platformContract,
 	TEST_ORIGIN,
 	type TestBrowser,
@@ -390,5 +391,51 @@ describe("launching a task over HTTP", () => {
 		held.fail(new Error("the disk is full"));
 		await test.background.flush();
 		expect(await listed()).toMatchObject({ stuck: false });
+	});
+});
+
+describe("undoing a change of the scheduled tasks via an agent", () => {
+	// The change goes over HTTP, as the person makes it; the undo via the agent comes with a synthetic context,
+	// since no credential of the door carries `via` (ADR 0034).
+	it("never completes by itself, whatever the delegation and the person's proof: only once the person confirms it from the app", async () => {
+		await using test = await household();
+		const app = await signedIn(test, "paco");
+		const sixAm = { task: "cleanup", time: "06:00" };
+		await app.tasks.setTime(sixAm, {
+			context: { idempotencyKey: "t1", proof: await proofOf(app, "setTaskTime", sixAm) },
+		});
+		const paco = test.context("paco");
+		const kira = test.context("paco", { via: "kira" });
+		// The person's proof of this very undo, asked for in the app, in the session the agent comes with.
+		const { proof } = await test.requestProof(paco, PASSWORD, { undo: 1 });
+		const atSix = [{ frequency: { every: "day", at: "06:00" } }];
+
+		// Without a row for the platform's manage, the agent does not reach it.
+		expect(() => test.undo(kira, 1, { idempotencyKey: "u1", proof })).toThrow(
+			expect.objectContaining({ code: "FORBIDDEN" }),
+		);
+		// Delegated as yes, the proof the agent brings is not the person's: it asks for one that nobody can give it.
+		test.prepare.delegation("paco", "platform", "manage", "yes");
+		expect(() => test.undo(kira, 1, { idempotencyKey: "u2", proof })).toThrow(
+			expect.objectContaining({ code: "STEP_UP_REQUIRED" }),
+		);
+		// Delegated as confirm, it waits for the person.
+		test.prepare.delegation("paco", "platform", "manage", "confirm");
+		const pending = pendingFrom(() => test.undo(kira, 1, { idempotencyKey: "u3", proof }));
+		expect(await app.tasks.list()).toMatchObject(atSix);
+		expect(test.log()).toHaveLength(1);
+
+		// The person confirms it from the app, with the proof of the undo.
+		expect(() => test.confirm(paco, pending)).toThrow(
+			expect.objectContaining({ code: "STEP_UP_REQUIRED" }),
+		);
+		expect(test.confirm(paco, pending, { proof })).toEqual({
+			result: { task: "cleanup", time: null },
+			entry: 2,
+		});
+		expect(await app.tasks.list()).toMatchObject([
+			{ frequency: { every: "day", at: "04:30" } },
+		]);
+		expect(test.log()[1]).toMatchObject({ undoes: 1, actor: { account: "paco", via: "kira" } });
 	});
 });

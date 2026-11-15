@@ -336,80 +336,6 @@ importers:
         specifier: 'catalog:'
         version: 5.1.0(@types/node@26.6.6)(happy-dom@21.0.4)(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15))
 
-  apps/assistant:
-    dependencies:
-      '@domus/api-client':
-        specifier: workspace:*
-        version: link:../../packages/api-client
-      '@domus/platform':
-        specifier: workspace:*
-        version: link:../../packages/platform
-      '@domus/utils':
-        specifier: workspace:*
-        version: link:../../packages/utils
-      '@orpc/client':
-        specifier: 'catalog:'
-        version: 1.16.2
-      '@orpc/contract':
-        specifier: 'catalog:'
-        version: 1.16.2
-    devDependencies:
-      '@domus/test-utils':
-        specifier: workspace:*
-        version: link:../../packages/test-utils
-      '@domus/tsconfig':
-        specifier: workspace:*
-        version: link:../../tooling/typescript
-      '@types/node':
-        specifier: 'catalog:'
-        version: 26.6.6
-      esbuild:
-        specifier: 'catalog:'
-        version: 0.28.2
-      tsx:
-        specifier: 'catalog:'
-        version: 4.23.15
-      typescript:
-        specifier: 'catalog:'
-        version: typescript-native-bridge@6.0.3-bridge.19.tsgo.7.0.2
-      vitest:
-        specifier: 'catalog:'
-        version: 5.1.0(@types/node@26.6.6)(happy-dom@21.0.4)(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15))
-
-  apps/voice-gateway:
-    dependencies:
-      '@domus/api-client':
-        specifier: workspace:*
-        version: link:../../packages/api-client
-      '@domus/platform':
-        specifier: workspace:*
-        version: link:../../packages/platform
-      '@domus/utils':
-        specifier: workspace:*
-        version: link:../../packages/utils
-    devDependencies:
-      '@domus/test-utils':
-        specifier: workspace:*
-        version: link:../../packages/test-utils
-      '@domus/tsconfig':
-        specifier: workspace:*
-        version: link:../../tooling/typescript
-      '@types/node':
-        specifier: 'catalog:'
-        version: 26.6.6
-      esbuild:
-        specifier: 'catalog:'
-        version: 0.28.2
-      tsx:
-        specifier: 'catalog:'
-        version: 4.23.15
-      typescript:
-        specifier: 'catalog:'
-        version: typescript-native-bridge@6.0.3-bridge.19.tsgo.7.0.2
-      vitest:
-        specifier: 'catalog:'
-        version: 5.1.0(@types/node@26.6.6)(happy-dom@21.0.4)(vite@8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15))
-
   apps/web:
     dependencies:
       vue:
@@ -640,15 +566,9 @@ importers:
       '@date-fns/tz':
         specifier: 'catalog:'
         version: 1.5.0
-      '@hono/node-server':
-        specifier: 'catalog:'
-        version: 2.1.6(hono@4.13.17)
       date-fns:
         specifier: 'catalog:'
         version: 4.4.0
-      hono:
-        specifier: 'catalog:'
-        version: 4.13.17
     devDependencies:
       '@domus/tsconfig':
         specifier: workspace:*

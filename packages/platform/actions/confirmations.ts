@@ -1,6 +1,6 @@
 // Pending confirmations (ADR 0023): where an operation that authorization asked to confirm waits, in
 // `platform_confirmations`. Each one keeps the exact operation, its fingerprint, a write's key, the verified
-// context it was born in and two absolute deadlines fixed when it is created. Prepared statements on the one
+// context it was born in and its absolute expiry, fixed when it is created. Prepared statements on the one
 // connection, synchronous, so the path of the actions reads and changes them inside its own transactions.
 // Expiry is checked when one is reached; no row is ever removed, and the cleanup (ADR 0025) empties the operation
 // of one that expired.
@@ -48,33 +48,23 @@ export interface PendingConfirmation {
 	/** A write's idempotency key. */
 	readonly key?: string;
 	readonly origin: Origin;
-	readonly windowClosesAt: number;
 	readonly expiresAt: number;
-	/**
-	 * Only the channel `contexto` may confirm it, inside its window, which is also when it expires: born of the
-	 * shared device rule (ADR 0023). By the app it is not found.
-	 */
-	readonly contextOnly: boolean;
 	/** `ended` too when the session it was born in was revoked. */
 	readonly state: PendingState;
 }
 
-/** A new pending confirmation, before it gets its id and its deadlines. */
+/** A new pending confirmation, before it gets its id and its expiry. */
 export interface NewPending {
 	readonly kind: "read" | "write";
 	readonly operation: PendingOperation;
 	readonly fingerprint: string;
 	readonly key?: string;
 	readonly origin: VerifiedContext;
-	/** Confirmed only in context, and expiring when its window closes. */
-	readonly contextOnly?: boolean;
 }
 
-/** The two deadlines of a new pending confirmation, in milliseconds from its birth. */
+/** The deadline of a new pending confirmation, in milliseconds from its birth. */
 export interface ConfirmationTimes {
-	/** How long it can be confirmed in the conversation it was born in. */
-	readonly window: number;
-	/** How long it can be confirmed at all. */
+	/** How long it can be confirmed. */
 	readonly expiry: number;
 }
 
@@ -84,15 +74,15 @@ export interface Confirmations {
 	/** The write waiting under the actor's key, whatever its state: a key names one operation. */
 	findWrite(actor: Actor, key: string): PendingConfirmation | undefined;
 	/**
-	 * A read still waiting with this fingerprint, for the same account and via, born where `origin` can answer it:
-	 * the same session and, when there is a conversation, the same one too. Two empty conversations never match.
+	 * A read still waiting with this fingerprint, for the same account and via, born in the same session as `origin`.
+	 * Two reads without a session never match.
 	 */
 	findRead(
 		origin: VerifiedContext,
 		fingerprint: string,
 		now: number,
 	): PendingConfirmation | undefined;
-	/** Stores a new one with its deadlines from `now` and returns its id. */
+	/** Stores a new one with its expiry from `now` and returns its id. */
 	create(pending: NewPending, now: number): string;
 	/** Marks it consumed, linked to the entry a write logged. */
 	consume(id: string, entry: number | undefined): void;
@@ -108,16 +98,14 @@ interface Row {
 	readonly fingerprint: string;
 	readonly key: string | null;
 	readonly origin: string;
-	readonly window_closes_at: number;
 	readonly expires_at: number;
-	readonly context_only: number;
 	readonly state: PendingState;
 	/** 0 when it was bound to a session that is gone. */
 	readonly live: number;
 }
 
-const COLUMNS = `id, account, via, kind, operation, fingerprint, key, origin, window_closes_at, expires_at,
-	context_only, state, (bound = 0 OR session IS NOT NULL) AS live`;
+const COLUMNS = `id, account, via, kind, operation, fingerprint, key, origin, expires_at, state,
+	(bound = 0 OR session IS NOT NULL) AS live`;
 
 export function createConfirmations(
 	connection: Database.Database,
@@ -141,9 +129,9 @@ export function createConfirmations(
 	);
 	const insert = connection.prepare(
 		`INSERT INTO platform_confirmations (id, account, via, kind, operation, fingerprint, key, origin, session,
-			bound, created_at, window_closes_at, expires_at, context_only, state)
+			bound, created_at, expires_at, state)
 		VALUES (@id, @account, @via, @kind, @operation, @fingerprint, @key, @origin, @session, @bound, @createdAt,
-			@windowClosesAt, @expiresAt, @contextOnly, 'pending')`,
+			@expiresAt, 'pending')`,
 	);
 	const settle = connection.prepare<[PendingState, number | null, string]>(
 		"UPDATE platform_confirmations SET state = ?, entry = ? WHERE id = ? AND state = 'pending'",
@@ -157,7 +145,7 @@ export function createConfirmations(
 				.all(origin.account, origin.via ?? null, fingerprint, now)
 				.map((row) => pendingOf(row))
 				.find((pending) => pending !== undefined && sameOrigin(pending.origin, origin)),
-		create: ({ kind, operation, fingerprint, key, origin, contextOnly = false }, now) => {
+		create: ({ kind, operation, fingerprint, key, origin }, now) => {
 			const id = randomId();
 			// Bound to its session only when that session is a real one: revoking it then ends this one.
 			const session =
@@ -176,10 +164,7 @@ export function createConfirmations(
 				session,
 				bound: session === null ? 0 : 1,
 				createdAt: now,
-				windowClosesAt: now + times.window,
-				// One confirmed only in context has no later life: it expires with its window.
-				expiresAt: now + (contextOnly ? times.window : times.expiry),
-				contextOnly: contextOnly ? 1 : 0,
+				expiresAt: now + times.expiry,
 			});
 			return id;
 		},
@@ -192,16 +177,9 @@ export function createConfirmations(
 	};
 }
 
-/**
- * A pending read born in `born` is answerable from `now`: the same session, if any, and the same conversation
- * when there is one; without session it needs a conversation, since two empty ones never match (ADR 0023).
- */
+/** A pending read born in `born` is the one a read of `now` repeats: the same session, never none (ADR 0023). */
 function sameOrigin(born: Origin, now: VerifiedContext): boolean {
-	const conversation = now.conversation === "" ? undefined : now.conversation;
-	const bornIn = born.conversation === "" ? undefined : born.conversation;
-	if (born.session !== now.session) return false;
-	if (conversation === undefined) return now.session !== undefined && bornIn === undefined;
-	return bornIn === conversation;
+	return now.session !== undefined && born.session === now.session;
 }
 
 function pendingOf(row: Row | undefined): PendingConfirmation | undefined {
@@ -217,9 +195,7 @@ function pendingOf(row: Row | undefined): PendingConfirmation | undefined {
 		fingerprint: row.fingerprint,
 		...(row.key === null ? {} : { key: row.key }),
 		origin: JSON.parse(row.origin) as Origin,
-		windowClosesAt: row.window_closes_at,
 		expiresAt: row.expires_at,
-		contextOnly: row.context_only === 1,
 		state: row.state === "pending" && row.live === 0 ? "ended" : row.state,
 	};
 }

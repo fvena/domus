@@ -7,7 +7,6 @@ type ConflictReason =
 	| "key-reused"
 	| "already-undone"
 	| "changed-since"
-	| "window-closed"
 	| "confirmation-expired"
 	| "confirmation-consumed"
 	| "task-busy"

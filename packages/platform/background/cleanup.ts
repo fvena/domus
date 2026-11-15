@@ -6,9 +6,7 @@
 // operation of those whose `expiresAt` passed, whatever their state, and keeps the rest of the row, which answers
 // «consumed» or «expired». It removes the step-up proofs that ended and those issued and never used past their
 // expiry, which answer «not valid» as a missing one does; a used one stays, since it proves the repeat of its
-// write. It purges the jobs that ended more than 30 days ago and the runs that ended more than 90 days ago. It
-// removes the mandates of the connected apps that expired or whose session no longer lives, which no longer
-// resolve, as a missing one (ADR 0030). Of the
+// write. It purges the jobs that ended more than 30 days ago and the runs that ended more than 90 days ago. Of the
 // files (ADR 0028) it removes the prepared files that expired, were consumed or whose session no longer exists, and
 // the released references whose entry expired or was undone, so that nothing they kept protects a content any
 // more; then the sweeps of the store, which touch the disk, delete the contents nothing points to.
@@ -100,15 +98,6 @@ const STEPS: readonly StatementStep[] = [
 			SELECT prepared.id FROM (SELECT ? AS now) AS at, platform_prepared_files AS prepared
 			WHERE prepared.expires_at <= at.now OR prepared.consumed = 1
 				OR NOT ${sessionLivesWhere("prepared.session", "prepared.account", "at.now")}
-			LIMIT ?)`,
-	},
-	// A mandate resolves only before its expiry and while its session lives (ADR 0030): past either, it decides
-	// nothing, as a missing one. Its table holds a few minutes of mandates, so it needs no index for this.
-	{
-		sql: `DELETE FROM platform_mandates WHERE hash IN (
-			SELECT mandate.hash FROM (SELECT ? AS now) AS at, platform_mandates AS mandate
-			WHERE mandate.expires_at <= at.now
-				OR NOT ${sessionLivesWhere("mandate.session", "mandate.account", "at.now")}
 			LIMIT ?)`,
 	},
 	// A released reference protects its content only while the entry that released it can still be undone.

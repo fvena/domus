@@ -127,6 +127,25 @@ describe("probe idempotency", () => {
 		expect(test.invoke(actors[1]!, "probe.countNotes")).toBe(1);
 	});
 
+	it("acknowledges a repeat via Kira from another session of the person, apart from her own key", async () => {
+		const { test } = probePlatform();
+		await using _ = test;
+		const ana = test.context("ana");
+		const first = test.context("ana", { via: "kira", session: "phone" });
+		const second = test.context("ana", { via: "kira", session: "laptop" });
+
+		expect(
+			test.invoke(ana, "probe.addNote", { body: "pan" }, { idempotencyKey: "k1" }),
+		).toMatchObject({ entry: 1 });
+		expect(
+			test.invoke(first, "probe.addNote", { body: "leche" }, { idempotencyKey: "k1" }),
+		).toEqual({ result: { id: 2, body: "leche" }, entry: 2 });
+		expect(
+			test.invoke(second, "probe.addNote", { body: "leche" }, { idempotencyKey: "k1" }),
+		).toEqual({ entry: 2, repeated: true });
+		expect(test.invoke(ana, "probe.countNotes")).toBe(2);
+	});
+
 	it("runs a key again after an attempt with it rolled back", async () => {
 		const { test, ana } = probePlatform();
 		await using _ = test;

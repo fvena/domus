@@ -117,7 +117,40 @@ describe("probe's configure, an action of level manage", () => {
 		});
 	});
 
-	it("asks a repeat of a confirmed write for its proof again, and spends a fresh one without running twice", async () => {
+	it("via an agent, does not complete with the person's valid proof by the channel app, until the person confirms it from the app", async () => {
+		const { test, paco } = await household();
+		await using _ = test;
+		const kira = test.context("paco", { via: "kira" });
+		const { proof } = await test.requestProof(paco, PASSWORD, CONFIGURE);
+
+		test.prepare.delegation("paco", "probe", "manage", "yes");
+		expect(() =>
+			test.invoke(kira, "probe.configure", PUBLIC, { idempotencyKey: "c1", proof }),
+		).toThrow(stepUp);
+		test.prepare.delegation("paco", "probe", "manage", "confirm");
+		const pending = pendingFrom(() =>
+			test.invoke(kira, "probe.configure", PUBLIC, { idempotencyKey: "c2", proof }),
+		);
+		expect(test.log()).toHaveLength(1);
+
+		// The proof the agent brought is still unused: the person's, confirming from the app, counts.
+		expect(test.confirm(paco, pending, { proof })).toEqual({ result: { notes: 1 }, entry: 2 });
+		expect(test.log()).toMatchObject([
+			{ entry: 1 },
+			{ entry: 2, action: "probe.configure", actor: { account: "paco", via: "kira" } },
+		]);
+	});
+
+	it("via an agent, gives no proof, even by the channel app", async () => {
+		const { test } = await household();
+		await using _ = test;
+
+		await expect(
+			test.requestProof(test.context("paco", { via: "kira" }), PASSWORD, CONFIGURE),
+		).rejects.toMatchObject({ code: "FORBIDDEN" });
+	});
+
+	it("asks a repeat via the agent of a confirmed write for its proof again, which no proof gives it", async () => {
 		const { test } = await household();
 		await using _ = test;
 		test.prepare.delegation("paco", "probe", "manage", "confirm");
@@ -137,9 +170,38 @@ describe("probe's configure, an action of level manage", () => {
 			test.invoke(kira, "probe.configure", PUBLIC, { idempotencyKey: "c1" }),
 		).toThrow(stepUp);
 
+		// Nobody answers a repeat: a proof the agent brings is not the person's, even a fresh one.
+		const fresh = await test.requestProof(paco, PASSWORD, CONFIGURE);
+		expect(() =>
+			test.invoke(kira, "probe.configure", PUBLIC, {
+				idempotencyKey: "c1",
+				proof: fresh.proof,
+			}),
+		).toThrow(stepUp);
+		expect(test.log()).toHaveLength(2);
+		// The repeat did not spend it: it stays good for the person.
+		expect(
+			test.invoke(paco, "probe.configure", PUBLIC, {
+				idempotencyKey: "c2",
+				proof: fresh.proof,
+			}),
+		).toMatchObject({ entry: 3 });
+	});
+
+	it("spends a fresh proof on a repeat by the person, without running twice", async () => {
+		const { test, paco } = await household();
+		await using _ = test;
+		const first = await test.requestProof(paco, PASSWORD, CONFIGURE);
+		expect(
+			test.invoke(paco, "probe.configure", PUBLIC, {
+				idempotencyKey: "c1",
+				proof: first.proof,
+			}),
+		).toEqual({ result: { notes: 1 }, entry: 2 });
+
 		const fresh = await test.requestProof(paco, PASSWORD, CONFIGURE);
 		expect(
-			test.invoke(kira, "probe.configure", PUBLIC, {
+			test.invoke(paco, "probe.configure", PUBLIC, {
 				idempotencyKey: "c1",
 				proof: fresh.proof,
 			}),
@@ -154,20 +216,18 @@ describe("probe's configure, an action of level manage", () => {
 		).toThrow(stepUp);
 	});
 
-	it("is denied to an identity proven by voice or by the device, which cannot ask for a proof either", async () => {
+	it("is denied to an identity proven by the device, which cannot ask for a proof either", async () => {
 		const { test, paco } = await household();
 		await using _ = test;
 		const { proof } = await test.requestProof(paco, PASSWORD, CONFIGURE);
+		const context = test.context("paco", { identity: "device" });
 
-		for (const identity of ["voice", "device"] as const) {
-			const context = test.context("paco", { identity });
-			expect(() =>
-				test.invoke(context, "probe.configure", PUBLIC, { idempotencyKey: "c1", proof }),
-			).toThrow(forbidden);
-			await expect(test.requestProof(context, PASSWORD, CONFIGURE)).rejects.toMatchObject({
-				code: "FORBIDDEN",
-			});
-		}
+		expect(() =>
+			test.invoke(context, "probe.configure", PUBLIC, { idempotencyKey: "c1", proof }),
+		).toThrow(forbidden);
+		await expect(test.requestProof(context, PASSWORD, CONFIGURE)).rejects.toMatchObject({
+			code: "FORBIDDEN",
+		});
 	});
 
 	it("gives no proof for a wrong password or an operation that is not sensitive", async () => {

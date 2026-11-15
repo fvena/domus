@@ -13,3 +13,4 @@ Precisa los ADR 0003, 0005, 0015, 0016, 0017, 0018 y 0020: Domus y Kira pasan a 
 **La interfaz pública.** Kira no importa ningún paquete de Domus. Las tools MCP se generan a partir de los contratos de los módulos y recorren el mismo camino que cualquier acción (ADR 0022). Al conectar, Domus anuncia la versión de su interfaz, que cubre las tools, el significado de sus resultados y errores, y el material sobre los módulos. Un cambio que rompe sube la versión, y una ejecución abierta que deja de ser compatible tras actualizar Domus falla de forma controlada. El contrato comprueba que el agente descubre y usa el material de los módulos, no solo que ejecuta tools.
 
 Fecha: 2026-11-15. Preguntas del grilling: Q1, Q2, Q5–Q10, Q14, Q17, Q21, Q22, Q26 y Q27 de la separación de Kira.
+Precisado por el ADR 0034: `assistant`, `voice-gateway`, la llave y los mandatos no esperan a la fase 5: salen en la subfase 1f.

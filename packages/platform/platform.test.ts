@@ -185,13 +185,4 @@ describe("createPlatform", () => {
 			).toThrow(/retention/);
 		},
 	);
-
-	it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
-		"rejects a mandate life of %s milliseconds",
-		(mandateLife) => {
-			expect(() =>
-				createPlatform({ databaseFile: ":memory:", modules: [], mandateLife }),
-			).toThrow(/mandateLife/);
-		},
-	);
 });

@@ -3,15 +3,12 @@
 // the device cookie names it when it is known, and a new device is created otherwise. Which device a session
 // belongs to is kept on the server; the cookie is not a credential. Each session entering a device writes a new
 // `entry` on it before it is created, and the same value as its own `deviceEntry`: the session the device has
-// enabled for notices is the one that matches (ADR 0029). A request with the key or a mandate of a connected app
-// signs nobody in or out (ADR 0030).
+// enabled for notices is the one that matches (ADR 0029).
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { APIError, createAuthMiddleware } from "better-auth/api";
 import type Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 
-import { AUTHORIZATION_HEADER, MANDATE_HEADER } from "../contracts";
 import { account, session, user, verification } from "../schema";
 import { randomId } from "./accounts";
 import type { SessionsEnded } from "./sessions";
@@ -123,20 +120,6 @@ export function createAuth(
 			},
 		},
 		telemetry: { enabled: false },
-		hooks: {
-			// A key and a mandate are an app's credentials, never a person's: Better Auth answers either with its own
-			// UNAUTHORIZED.
-			before: createAuthMiddleware(async (context) => {
-				if (
-					context.headers?.has(AUTHORIZATION_HEADER) ||
-					context.headers?.has(MANDATE_HEADER)
-				)
-					throw new APIError("UNAUTHORIZED", {
-						code: "UNAUTHORIZED",
-						message: "a key or a mandate signs nobody in or out",
-					});
-			}),
-		},
 		databaseHooks: {
 			session: {
 				create: {

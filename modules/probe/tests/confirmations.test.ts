@@ -8,7 +8,6 @@ import { describe, expect, it } from "vitest";
 import probe from "../server";
 
 const SECOND = 1000;
-const WINDOW = 60 * SECOND;
 const EXPIRY = 24 * 60 * 60 * SECOND;
 
 const conflict = (reason: string) =>
@@ -16,15 +15,8 @@ const conflict = (reason: string) =>
 const notFound = expect.objectContaining({ code: "NOT_FOUND" });
 const forbidden = expect.objectContaining({ code: "FORBIDDEN" });
 
-/** Kira in a conversation, on Ana's phone. */
-const IN_CONVERSATION: ContextOptions = {
-	via: "kira",
-	device: "ana-phone",
-	session: undefined,
-	channel: "contexto",
-	identity: "password",
-	conversation: "c1",
-};
+/** Kira, for Ana, on her phone. */
+const KIRA: ContextOptions = { via: "kira", device: "ana-phone", session: "ana-phone-session" };
 
 /** A platform with probe where Ana's writes through Kira ask her to confirm. */
 function household() {
@@ -35,8 +27,8 @@ function household() {
 		test,
 		/** Ana herself, from the app. */
 		ana: test.context("ana"),
-		/** Kira, for Ana, in a conversation on her phone. */
-		kira: test.context("ana", IN_CONVERSATION),
+		/** Kira, for Ana, on her phone. */
+		kira: test.context("ana", KIRA),
 	};
 }
 
@@ -54,7 +46,7 @@ describe("asking for confirmation", () => {
 		expect(test.invoke(test.context("ana"), "probe.listNotes")).toEqual([]);
 	});
 
-	it("answers the same pending confirmation to the same read repeated in the same conversation", async () => {
+	it("answers the same pending confirmation to the same read repeated in the same session", async () => {
 		const { test, kira } = household();
 		await using _ = test;
 		test.prepare.delegation("ana", "probe", "read", "confirm");
@@ -65,37 +57,22 @@ describe("asking for confirmation", () => {
 		expect(
 			pendingFrom(() =>
 				test.invoke(
-					test.context("ana", { ...IN_CONVERSATION, conversation: "c2" }),
+					test.context("ana", { ...KIRA, session: "kitchen" }),
 					"probe.listNotes",
 				),
 			),
 		).not.toBe(first);
 	});
 
-	it("answers another conversation of the same session its own pending read, which it can confirm", async () => {
+	it("never answers the same pending read to two reads without session", async () => {
 		const { test } = household();
 		await using _ = test;
 		test.prepare.delegation("ana", "probe", "read", "confirm");
-		const onKitchen = (conversation: string) =>
-			test.context("ana", { ...IN_CONVERSATION, session: "kitchen", conversation });
+		const sessionless = test.context("ana", { ...KIRA, session: undefined });
 
-		const first = pendingFrom(() => test.invoke(onKitchen("c1"), "probe.listNotes"));
-		const second = pendingFrom(() => test.invoke(onKitchen("c2"), "probe.listNotes"));
+		const first = pendingFrom(() => test.invoke(sessionless, "probe.listNotes"));
 
-		expect(second).not.toBe(first);
-		expect(pendingFrom(() => test.invoke(onKitchen("c1"), "probe.listNotes"))).toBe(first);
-		expect(test.confirm(onKitchen("c2"), second)).toEqual([]);
-	});
-
-	it("never answers the same pending read to two reads without session or conversation", async () => {
-		const { test } = household();
-		await using _ = test;
-		test.prepare.delegation("ana", "probe", "read", "confirm");
-		const empty = test.context("ana", { ...IN_CONVERSATION, conversation: "" });
-
-		const first = pendingFrom(() => test.invoke(empty, "probe.listNotes"));
-
-		expect(pendingFrom(() => test.invoke(empty, "probe.listNotes"))).not.toBe(first);
+		expect(pendingFrom(() => test.invoke(sessionless, "probe.listNotes"))).not.toBe(first);
 	});
 
 	it("answers key-reused to the same key with another input or another action", async () => {
@@ -144,49 +121,26 @@ describe("confirming", () => {
 		);
 
 		expect(() => test.confirm(test.member("luis"), pending)).toThrow(notFound);
-		expect(() => test.confirm(test.context("ana", { via: "kira" }), pending)).toThrow(notFound);
 		expect(test.confirm(test.context("ana", { session: "another-session" }), pending)).toEqual({
 			result: { id: 1, body: "regar" },
 			entry: 1,
 		});
 	});
 
-	it("works in context on the same device and conversation while the window is open", async () => {
-		const { test, kira } = household();
-		await using _ = test;
-		const pending = pendingFrom(() =>
-			test.invoke(kira, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" }),
-		);
-		test.clock.advance(WINDOW - 1);
-
-		expect(test.confirm(kira, pending)).toMatchObject({ entry: 1 });
-	});
-
-	it("fails in context from another device, another conversation or an empty one", async () => {
-		const { test, kira } = household();
-		await using _ = test;
-		const pending = pendingFrom(() =>
-			test.invoke(kira, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" }),
-		);
-		const from = (options: ContextOptions) =>
-			test.context("ana", { ...IN_CONVERSATION, ...options });
-
-		expect(() => test.confirm(from({ device: "kitchen" }), pending)).toThrow(notFound);
-		expect(() => test.confirm(from({ conversation: "c2" }), pending)).toThrow(notFound);
-		expect(() => test.confirm(from({ conversation: undefined }), pending)).toThrow(notFound);
-		expect(() => test.confirm(from({ conversation: "" }), pending)).toThrow(notFound);
-		expect(test.log()).toEqual([]);
-	});
-
-	it("fails in context from the exact millisecond its window closes, and still works from the app", async () => {
+	it("is denied, and so is rejecting, to a context with via, from any device: it stays unconsumed", async () => {
 		const { test, ana, kira } = household();
 		await using _ = test;
 		const pending = pendingFrom(() =>
 			test.invoke(kira, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" }),
 		);
-		test.clock.advance(WINDOW);
+		const stored = test.pendingConfirmations();
 
-		expect(() => test.confirm(kira, pending)).toThrow(conflict("window-closed"));
+		for (const agent of [kira, test.context("ana", { via: "kira" })]) {
+			expect(() => test.confirm(agent, pending)).toThrow(forbidden);
+			expect(() => test.reject(agent, pending)).toThrow(forbidden);
+		}
+		expect(test.pendingConfirmations()).toEqual(stored);
+		expect(test.log()).toEqual([]);
 		expect(test.confirm(ana, pending)).toMatchObject({ entry: 1 });
 	});
 
@@ -232,8 +186,8 @@ describe("confirming", () => {
 		test.invoke(ana, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" });
 		const pending = pendingFrom(() => test.invoke(kira, "probe.listNotes"));
 
-		expect(test.confirm(kira, pending)).toEqual([{ id: 1, body: "regar", files: [] }]);
-		expect(() => test.confirm(kira, pending)).toThrow(conflict("confirmation-consumed"));
+		expect(test.confirm(ana, pending)).toEqual([{ id: 1, body: "regar", files: [] }]);
+		expect(() => test.confirm(ana, pending)).toThrow(conflict("confirmation-consumed"));
 		// A new read asks again.
 		expect(pendingFrom(() => test.invoke(kira, "probe.listNotes"))).not.toBe(pending);
 	});
@@ -291,7 +245,7 @@ describe("confirming", () => {
 });
 
 describe("pending confirmations across a restart", () => {
-	it("keep their deadlines, which new options do not change", async () => {
+	it("keep their expiry, which new options do not change", async () => {
 		const folder = mkdtempSync(join(tmpdir(), "domus-confirmations-"));
 		const file = join(folder, "domus.db");
 		try {
@@ -300,7 +254,7 @@ describe("pending confirmations across a restart", () => {
 				await using test = createTestPlatform({ modules: [probe], file });
 				test.member("ana");
 				test.prepare.delegation("ana", "probe", "write", "confirm");
-				const kira = test.context("ana", IN_CONVERSATION);
+				const kira = test.context("ana", KIRA);
 				pending = pendingFrom(() =>
 					test.invoke(kira, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" }),
 				);
@@ -309,12 +263,9 @@ describe("pending confirmations across a restart", () => {
 			await using test = createTestPlatform({
 				modules: [probe],
 				file,
-				confirmation: { window: 10 * WINDOW, expiry: 10 * EXPIRY },
+				confirmation: { expiry: 10 * EXPIRY },
 			});
-			const kira = test.context("ana", IN_CONVERSATION);
-			test.clock.advance(WINDOW);
-			expect(() => test.confirm(kira, pending)).toThrow(conflict("window-closed"));
-			test.clock.advance(EXPIRY - WINDOW);
+			test.clock.advance(EXPIRY);
 			expect(() => test.confirm(test.context("ana"), pending)).toThrow(
 				conflict("confirmation-expired"),
 			);
@@ -325,65 +276,61 @@ describe("pending confirmations across a restart", () => {
 });
 
 describe("probe.health on the shared device", () => {
-	/** A platform where Ana has a health record, and the kitchen screen signed in with the device account. */
-	function kitchen() {
+	const PASSWORD = "correct horse battery staple";
+
+	/**
+	 * A platform where Ana has a health record and Paco, the admin, opened probe.health to the device account by
+	 * mistake; the kitchen screen is signed in with the device account.
+	 */
+	async function kitchen() {
 		const test = createTestPlatform({ modules: [probe] });
+		test.prepare.account({ id: "paco", role: "admin" });
+		await test.prepare.password("paco", PASSWORD);
 		const ana = test.member("ana");
 		test.invoke(ana, "probe.recordHealth", { body: "tensión 12/8" }, { idempotencyKey: "k1" });
-		const onScreen = {
-			via: "kira",
-			device: "kitchen-screen",
-			session: undefined,
-			deviceAccount: test.deviceAccount,
-			channel: "contexto",
-			conversation: "c1",
+		const paco = test.context("paco");
+		const opened = {
+			account: test.deviceAccount,
+			area: "probe.health",
+			level: "read",
 		} as const;
+		const { proof } = await test.requestProof(paco, PASSWORD, {
+			action: "platform.setPermission",
+			input: opened,
+		});
+		test.setPermission(paco, opened, { idempotencyKey: "p1", proof });
 		return {
 			test,
 			ana,
-			/** The device account itself, nobody recognized. */
-			screen: test.context(test.deviceAccount, { ...onScreen, identity: "device" }),
-			/** Ana, recognized by voice on the screen. */
-			voice: test.context("ana", { ...onScreen, identity: "voice" }),
+			/** The device account itself, on the kitchen screen. */
+			screen: test.context(test.deviceAccount, {
+				device: "kitchen-screen",
+				identity: "device",
+			}),
 		};
 	}
 
-	it("is not read without a recognized member, even with a row that grants it", async () => {
-		const { test, screen } = kitchen();
+	it("is not read by the device account, even with the area opened by the admin", async () => {
+		const { test, screen } = await kitchen();
 		await using _ = test;
-		test.prepare.grant(test.deviceAccount, "probe.health", "read");
-		test.prepare.delegation(test.deviceAccount, "probe.health", "read", "yes");
 
 		expect(() => test.invoke(screen, "probe.readHealth")).toThrow(forbidden);
+		expect(test.pendingConfirmations()).toEqual([]);
 	});
 
-	it("asks a recognized member to confirm, and reads once confirmed", async () => {
-		const { test, voice } = kitchen();
+	it("is read by a member on her own device, with nothing to confirm", async () => {
+		const { test, ana } = await kitchen();
 		await using _ = test;
 
-		const pending = pendingFrom(() => test.invoke(voice, "probe.readHealth"));
-
-		expect(test.confirm(voice, pending)).toEqual([{ id: 1, body: "tensión 12/8" }]);
-		expect(() => test.confirm(voice, pending)).toThrow(conflict("confirmation-consumed"));
-	});
-
-	it("is not confirmed from the app, where Ana reads it anew; by voice it ends with its window", async () => {
-		const { test, ana, voice } = kitchen();
-		await using _ = test;
-		const pending = pendingFrom(() => test.invoke(voice, "probe.readHealth"));
-
-		expect(() => test.confirm(ana, pending)).toThrow(notFound);
 		expect(test.invoke(ana, "probe.readHealth")).toEqual([{ id: 1, body: "tensión 12/8" }]);
-		test.clock.advance(WINDOW);
-		expect(() => test.confirm(voice, pending)).toThrow(conflict("confirmation-expired"));
-		expect(pendingFrom(() => test.invoke(voice, "probe.readHealth"))).not.toBe(pending);
 	});
 
 	it("does not apply to probe.secret, always private without the rule", async () => {
-		const { test, ana, voice } = kitchen();
+		const { test, ana, screen } = await kitchen();
 		await using _ = test;
 		test.invoke(ana, "probe.recordSecret", { body: "clave" }, { idempotencyKey: "k2" });
 
-		expect(test.invoke(voice, "probe.readSecret")).toEqual([{ id: 1, body: "clave" }]);
+		expect(() => test.invoke(screen, "probe.readSecret")).toThrow(forbidden);
+		expect(test.invoke(ana, "probe.readSecret")).toEqual([{ id: 1, body: "clave" }]);
 	});
 });

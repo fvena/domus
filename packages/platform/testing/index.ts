@@ -3,8 +3,7 @@ import { ORPCError } from "@orpc/server";
 // dbFor; a platform with the real authorization and a clock the test chooses; the way to invoke its actions and
 // undo their entries with a verified context; synthetic verified contexts; the privileged preparation of
 // accounts, roles, passwords, permission rows, delegation rows and sessions, without a session or a proof; the
-// platform's real read of a delegation table and real request of a step-up proof; issuing a mandate, the only way
-// there is to issue one in phase 1e (ADR 0030); a read of its action log
+// platform's real read of a delegation table and real request of a step-up proof; a read of its action log
 // and of its stored pending confirmations; and child processes that hold the platform open or the exclusive lock
 // until the test kills them (ADR 0026); and a Node executable that stops the snapshot's child at its copy (ADR
 // 0027). A rule of .dependency-cruiser.cjs keeps every other importer out, production code of platform included;
@@ -52,7 +51,6 @@ import {
 	setPasswordHash,
 } from "../identity/accounts";
 import { type DelegationTable, setDelegation } from "../identity/delegation";
-import { createKey, type ListedKey, listKeys, revokeKey } from "../identity/keys";
 import {
 	type IssuedProof,
 	type ProofRequest,
@@ -63,7 +61,6 @@ import { sessionEnabledWhere, sessionLivesWhere } from "../identity/sessions";
 import {
 	actionLogOf,
 	actionsOf,
-	appsOf,
 	areasOf,
 	backgroundOf,
 	clockOf,
@@ -78,7 +75,6 @@ export type { Acknowledgement, ProvenOperation, WriteOutcome, WriteReceipt } fro
 export type { IssuedProof, ProofRequest } from "../identity/proofs";
 export type { Annotation, LogEntry } from "../audit";
 export type { DelegationTable } from "../identity/delegation";
-export type { ListedKey } from "../identity/keys";
 export type {
 	Channel,
 	Delegated,
@@ -89,7 +85,6 @@ export type {
 	VerifiedContext,
 } from "../authorization";
 export { type ModuleDatabase, moduleDatabase } from "./module-database";
-export { issueMandate, type MandateIssue, type MandateRow, readMandates } from "./mandates";
 export { type ChildTask, startChild, type TestChild } from "./children";
 export { type FakeNode, fakeNode, type FakeNodeOptions } from "./fake-node";
 export { controlledTimer, type ControlledTimer } from "../background";
@@ -162,8 +157,6 @@ export interface TestBackgroundRuntime {
 	readonly pushServices?: readonly string[];
 	/** How the deliveries reach the push service, such as a fake one that keeps each request. Only here. */
 	readonly fetch?: typeof fetch;
-	/** Connected apps of the test, by name, besides production's: none ever receives mandates. Only here. */
-	readonly apps?: readonly string[];
 }
 
 /**
@@ -185,7 +178,6 @@ export function createPlatformWithClock(
 		channelQueue,
 		pushServices,
 		fetch,
-		apps,
 	}: TestBackgroundRuntime = {},
 ): Platform {
 	return openPlatform(options, {
@@ -201,9 +193,6 @@ export function createPlatformWithClock(
 		...(channelQueue === undefined ? {} : { channelQueue }),
 		...(pushServices === undefined ? {} : { pushServices }),
 		...(fetch === undefined ? {} : { fetch }),
-		...(apps === undefined
-			? {}
-			: { apps: apps.map((name) => ({ name, receivesMandates: false })) }),
 	});
 }
 
@@ -301,8 +290,8 @@ export function readLog(platform: Platform): readonly LogEntry[] {
 }
 
 /**
- * A verified context with any combination of its fields, such as a member recognized by voice on a device
- * signed in with the device account. Production builds one only from a session, at the door.
+ * A verified context with any combination of its fields, such as Kira for a member on a device signed in with the
+ * device account. Production builds one only from a session, at the door.
  */
 export function syntheticContext(fields: VerifiedContext): VerifiedContext {
 	return sealContext(fields);
@@ -478,23 +467,4 @@ export function readSubscriptions(platform: Platform): readonly SubscriptionRow[
 /** The id of the one device account, which the platform created at start. */
 export function deviceAccountOf(platform: Platform): string {
 	return ensureDeviceAccount(connectionOf(platform), areasOf(platform), clockOf(platform)());
-}
-
-/**
- * Creates a key of `app`, one of the platform's connected apps, at the instant of its clock, with the function of the
- * command `keys`, and returns it whole (ADR 0030).
- */
-export function prepareKey(platform: Platform, app: string): string {
-	return createKey(connectionOf(platform), appsOf(platform), app, clockOf(platform)());
-}
-
-/** Every key, as `keys list` shows it, without its secret: plain data, changing it changes nothing. */
-export function readKeys(platform: Platform): readonly ListedKey[] {
-	return listKeys(connectionOf(platform));
-}
-
-/** Revokes the key `id` at the instant of the platform's clock, as `keys revoke` does. An unknown id throws. */
-export function revokeKeyNow(platform: Platform, id: string): void {
-	if (revokeKey(connectionOf(platform), id, clockOf(platform)()).kind === "unknown")
-		throw new Error(`no key ${id}`);
 }

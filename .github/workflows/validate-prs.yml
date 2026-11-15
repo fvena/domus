@@ -128,25 +128,21 @@ jobs:
               run: pnpm test
 
     docker:
-        name: Build the images
+        name: Build the image
         runs-on: ubuntu-latest
-        strategy:
-            fail-fast: false
-            matrix:
-                target: [api, assistant, voice-gateway]
         steps:
             - uses: actions/checkout@v4
-            - name: Build ${{ matrix.target }}
-              run: docker build --file docker/Dockerfile --target ${{ matrix.target }} .
+            - name: Build api
+              run: docker build --file docker/Dockerfile --target api .
 
     containers:
-        name: The containers start healthy
+        name: The container starts healthy
         runs-on: ubuntu-latest
         timeout-minutes: 15
         steps:
             - uses: actions/checkout@v4
             # An image can build and still crash at startup (a bundled native module, a missing setting, a
-            # broken migration): start the three as on the Pi and wait for their health checks.
+            # broken migration): start it as on the Pi and wait for its health check.
             # The api refuses to start without its session secret; CI makes a throwaway one per run.
             - name: A throwaway session secret
               run: echo "DOMUS_AUTH_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
@@ -159,16 +155,7 @@ jobs:
                   chmod 600 "$file"
                   sudo chown 1000:1000 "$file"
                   echo "DOMUS_BACKUP_PASSWORD=$file" >> "$GITHUB_ENV"
-            # The key of Kira is a compose secret too. Empty, assistant starts healthy and stays rejected: CI has
-            # no api key to give it.
-            - name: An empty key of Kira
-              run: |
-                  file="$RUNNER_TEMP/kira-key"
-                  : > "$file"
-                  chmod 600 "$file"
-                  sudo chown 1000:1000 "$file"
-                  echo "DOMUS_KIRA_KEY=$file" >> "$GITHUB_ENV"
-            - name: Start the three containers
+            - name: Start the container
               run: docker compose up --detach --build --wait --wait-timeout 240
             # The restore command as the Pi runs it: its bundle, the mounted secret and reading it. Listing takes no
             # lock, so api may keep running; an empty repository has no snapshot yet and answers without error.

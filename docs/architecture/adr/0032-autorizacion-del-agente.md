@@ -21,3 +21,4 @@ Precisa los ADR 0008, 0022, 0023, 0026, 0028 y 0030: cómo se autoriza el agente
 **Restaurar.** Revoca todos los enlaces y mandatos, y el secreto del cliente del agente, que se vuelve a dar de alta, por la misma razón por la que hoy revoca las llaves (ADR 0026, ADR 0030).
 
 Fecha: 2026-11-15. Preguntas del grilling: Q3, Q4, Q13, Q15, Q16, Q18–Q20 y Q22–Q24 de la separación de Kira.
+Precisado por el ADR 0034: la llave y los mandatos del ADR 0030 ya no siguen vigentes hasta la fase 5, porque salen en la subfase 1f; la fase 5 parte de una puerta sin apps conectadas.

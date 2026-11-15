@@ -6,8 +6,8 @@ import type { Visibility } from "@domus/module-sdk";
 import type { PermissionLevel } from "@domus/module-sdk/contracts";
 
 import type { VerifiedContext } from "./context";
+import { admitsVia } from "./via";
 
-export { admitsMandate } from "./mandates";
 export { newOwnership, visibleTo } from "./visibility";
 
 export {
@@ -44,8 +44,7 @@ export interface RequiredPermission {
 /**
  * What an action asks before it runs: the verified context, which action by its full name, whether it reads
  * or writes, the permission its contract declares and its validated input. When the action is the inverse an
- * undo runs, `undoes` carries the context of the entry it undoes. `confirmed` says the person has confirmed
- * this very operation: the requirement to confirm counts as met, and only that one.
+ * undo runs, `undoes` carries the context of the entry it undoes.
  */
 export interface AuthorizationRequest {
 	readonly context: VerifiedContext;
@@ -54,7 +53,18 @@ export interface AuthorizationRequest {
 	readonly permission: RequiredPermission;
 	readonly input: unknown;
 	readonly undoes?: UndoContext;
+	/**
+	 * The person has confirmed this very operation, so the requirement to confirm counts as met, and only that one.
+	 * A pending confirmation a person answered brings it with {@link AuthorizationRequest.confirmedBy}; a repeat
+	 * under the same key brings it alone, since its acknowledgement runs nothing: only its proof is asked again.
+	 */
 	readonly confirmed?: boolean;
+	/**
+	 * Who confirmed it, when it runs a pending confirmation a person answered: the context of that answer, by the app
+	 * and without via. The operation keeps the context it was born with for everything else; only the proof the
+	 * answer brings is that person's, not of who asked.
+	 */
+	readonly confirmedBy?: Pick<VerifiedContext, "channel" | "via">;
 	/**
 	 * For an operation of the platform on one account's own settings, such as its delegation table: that
 	 * account. Only the account itself reaches them, and the admin those of the device account. Changing
@@ -110,12 +120,11 @@ export interface AccessView {
 }
 
 /** Every decision, the one list the type and the fail-closed check of {@link decisionOf} come from. */
-const DECISIONS = ["allow", "deny", "confirm", "confirm-in-context", "step-up"] as const;
+const DECISIONS = ["allow", "deny", "confirm", "step-up"] as const;
 
 /**
- * Allow, deny, ask the person to confirm first (a pending confirmation), or ask for a step-up proof of this
- * exact operation (GLOSSARY: comprobante). `confirm-in-context` asks for a confirmation that only the channel
- * `contexto` answers, inside its window, and that expires when the window closes: the shared device rule's.
+ * Allow, deny, ask the person to confirm first (a pending confirmation, answered from the app), or ask for a step-up
+ * proof of this exact operation (GLOSSARY: comprobante).
  */
 export type Decision = (typeof DECISIONS)[number];
 
@@ -183,6 +192,9 @@ export function delegationOf(
 /** The decision, in the order of ADR 0023. Pure: everything it reads comes in `request` and `view`. */
 export function decide(request: AuthorizationRequest, view: AccessView): Decision {
 	const { context, permission, subject, sensitive } = request;
+	// Via an agent, of the platform's own operations only reading one's annotations and undoing one's entry.
+	if (context.via !== undefined && !admitsVia(request.action, request.undoes !== undefined))
+		return "deny";
 	// A person's own operation asks for no level: who asks is all that counts. A proof does not match it.
 	if (request.personal === true) {
 		if (context.channel !== "app" || !personByItself(view, context)) return "deny";
@@ -207,10 +219,10 @@ export function decide(request: AuthorizationRequest, view: AccessView): Decisio
 		if (delegated === "confirm") ask = true;
 	}
 	// 3. Sensitive operations ask for a step-up proof, which only an identity proven by password can bring; via
-	// Kira, changing access or delegation is denied whatever it brings. A proof counts only by the channel `app`:
-	// one the person asked for in the app proves nothing when a mandate of that same session brings it, so via
-	// Kira it counts only when the person confirms from the app (ADR 0030). A proof brought to an operation that
-	// is not sensitive does not match it either.
+	// Kira, changing access or delegation is denied whatever it brings. A proof counts only when a person brings
+	// it by the channel `app` and without via: one the person asked for in the app proves nothing when an agent
+	// brings it, so via an agent it counts only when the person confirms from the app (ADR 0030, ADR 0034). A
+	// proof brought to an operation that is not sensitive does not match it either.
 	let stepUp = false;
 	if (permission.level === "manage" || sensitive !== undefined) {
 		if (context.identity !== "password") return "deny";
@@ -219,26 +231,26 @@ export function decide(request: AuthorizationRequest, view: AccessView): Decisio
 			(sensitive === "permissions" || sensitive === "delegation")
 		)
 			return "deny";
-		if (request.proof !== "valid" || context.channel !== "app") stepUp = true;
+		const proofBringer = request.confirmedBy ?? context;
+		if (
+			request.proof !== "valid" ||
+			!asksByItself(proofBringer) ||
+			proofBringer.channel !== "app"
+		)
+			stepUp = true;
 	} else if (request.proof !== undefined) stepUp = true;
 	// 4. An action that always asks for confirmation.
 	if (permission.alwaysConfirm === true) ask = true;
-	// 5. The shared device rule: on a device signed in with the device account, reading an area that declares
-	// `confirmOnSharedDevice` asks a recognized member and is denied to the device account itself. Only the same
-	// person may confirm it there, in the same conversation and inside its window: a confirmation from the app,
-	// even from the member's phone, never lets the shared device say it later.
-	let inContext = false;
+	// 5. The shared device rule: the device account never reads an area that declares `confirmOnSharedDevice`, even
+	// with a row that grants it, so nothing private leaves through a shared screen (ADR 0023, ADR 0034).
 	if (
 		request.kind === "read" &&
-		view.roleOf(context.deviceAccount) === "device" &&
+		view.roleOf(context.account) === "device" &&
 		view.area(permission.area)?.confirmOnSharedDevice === true
-	) {
-		if (context.account === context.deviceAccount) return "deny";
-		ask = true;
-		inContext = true;
-	}
+	)
+		return "deny";
 	// Confirming comes first: an operation that asks both takes its proof when it is confirmed.
-	if (ask && request.confirmed !== true) return inContext ? "confirm-in-context" : "confirm";
+	if (ask && request.confirmed !== true) return "confirm";
 	return stepUp ? "step-up" : "allow";
 }
 
@@ -264,8 +276,8 @@ export function decisionOf(authorizer: Authorizer, request: AuthorizationRequest
 
 /**
  * Whether the context may upload a file (ADR 0028), an operation of the platform: a person's account, by itself.
- * Never the device account, which is shared and would leave a file without a person behind it, nor Kira: the door
- * refuses a key on the routes of files, and phase 5a decides how Kira reaches its conversations' attachments (ADR 0030).
+ * Never the device account, which is shared and would leave a file without a person behind it, nor an agent: phase 5
+ * decides how an agent reaches its conversations' attachments (ADR 0034).
  */
 export function mayUpload(view: AccessView, context: VerifiedContext): boolean {
 	return personByItself(view, context);
@@ -280,9 +292,18 @@ export function maySubscribe(view: AccessView, context: VerifiedContext): boolea
 	return personByItself(view, context);
 }
 
+/**
+ * Whether the context asks by itself, with no agent in between: no via. The only way to the operations of the platform
+ * that stay outside the path of the actions (changing one's password, listing one's sessions, asking for a step-up
+ * proof, confirming or rejecting a pending confirmation), so an agent reaches none of them (ADR 0030, ADR 0034).
+ */
+export function asksByItself(context: Pick<VerifiedContext, "via">): boolean {
+	return context.via === undefined;
+}
+
 /** A person's account, admin or member, asking by itself: no via. */
 function personByItself(view: AccessView, context: VerifiedContext): boolean {
-	return context.via === undefined && isPerson(view, context.account);
+	return asksByItself(context) && isPerson(view, context.account);
 }
 
 /** Whether `account` is a person's: admin or member, never the device account nor one without a role. */
