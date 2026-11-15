@@ -573,9 +573,8 @@ export const deliveries = sqliteTable(
 );
 
 /**
- * A key of a connected app (ADR 0030): its public id, the app it is of, the SHA-256 of its secret in hex, never the
- * secret, when it was created, when it was last used, if ever, and when it was revoked, if it was. Revoking keeps
- * the row. An app may have several live keys at once, to rotate without cutting the service.
+ * The keys of the connected apps, retired (ADR 0034): no code reads or writes the table, which stays only until the
+ * migration of phase 1f removes it.
  */
 export const keys = sqliteTable("platform_keys", {
 	id: text().primaryKey(),
@@ -587,11 +586,8 @@ export const keys = sqliteTable("platform_keys", {
 });
 
 /**
- * A mandate of a connected app (ADR 0030): on whose behalf that app acts, issued by the door from an interaction it
- * authenticated. Kept under the SHA-256 of its id in hex, never the id, with the app it was issued for and the fields
- * of the verified context of its origin in columns: the account represented, the device, the session, the device
- * account, how the identity was proven and the conversation, if any. It is good until `expires_at` and while its
- * session lives; nothing it holds gives a permission.
+ * The mandates of the connected apps, retired (ADR 0034): no code reads or writes the table, which stays only until
+ * the migration of phase 1f removes it.
  */
 export const mandates = sqliteTable(
 	"platform_mandates",

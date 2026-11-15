@@ -275,8 +275,8 @@ export function decisionOf(authorizer: Authorizer, request: AuthorizationRequest
 
 /**
  * Whether the context may upload a file (ADR 0028), an operation of the platform: a person's account, by itself.
- * Never the device account, which is shared and would leave a file without a person behind it, nor Kira: the door
- * refuses a key on the routes of files, and phase 5a decides how Kira reaches its conversations' attachments (ADR 0030).
+ * Never the device account, which is shared and would leave a file without a person behind it, nor an agent: phase 5
+ * decides how an agent reaches its conversations' attachments (ADR 0034).
  */
 export function mayUpload(view: AccessView, context: VerifiedContext): boolean {
 	return personByItself(view, context);

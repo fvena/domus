@@ -4,8 +4,8 @@ Shared code. Packages never import an app or a module. Each exposes its TypeScri
 
 Each part's routes, functions, test helpers and ADRs are in [`docs/agents/packages.md`](../docs/agents/packages.md). Read a part's entry before changing that part or testing against it, and update the entry in the same commit.
 
-- `platform`: identity, authorization, actions and the action log, background jobs and tasks, backups and restoring, files, the live channel and notices, and the door in `http`. Permission, confirmation and visibility are decided only in `platform/authorization` (ADR 0010). module-sdk exposes only `ctx.files` and `ctx.notify` of it, and dependency rules keep modules out of the rest. `@domus/platform/testing` holds what only `test-utils` may import, issuing mandates included.
-- `platform/contracts` (`@domus/platform/contracts`): pure, with no Node and no other part of platform: the platform's own contracts, `PROTOCOL`, and the headers and name of the connected apps. The only part of platform that `web` may import.
+- `platform`: identity, authorization, actions and the action log, background jobs and tasks, backups and restoring, files, the live channel and notices, and the door in `http`. Permission, confirmation and visibility are decided only in `platform/authorization` (ADR 0010). module-sdk exposes only `ctx.files` and `ctx.notify` of it, and dependency rules keep modules out of the rest. `@domus/platform/testing` holds what only `test-utils` may import.
+- `platform/contracts` (`@domus/platform/contracts`): pure, with no Node and no other part of platform: the platform's own contracts and `PROTOCOL`. The only part of platform that `web` may import.
 - `module-sdk`: the only part of platform a module may use: `defineModule`, `@domus/module-sdk/db` and `@domus/module-sdk/contracts`. How a module uses them: `modules/AGENTS.md`.
 - `ui`: the design system, Vue components (phase 2).
 - `i18n`: translation runtime and catalogs.

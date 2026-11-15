@@ -111,6 +111,7 @@ Se quedan la tabla de delegación, `via` con el valor `kira` y las confirmacione
 
 - Toda petición a `/api` que traiga la cabecera `Authorization`, con cualquier valor, o la cabecera del mandato responde `UNAUTHORIZED`, antes de mirar la cookie y también en `status`. Las rutas de archivos y el canal en directo siguen su regla de errores como JSON plano.
 - `/health` y la web compilada no miran esas cabeceras.
+- El log del operador dice qué cabecera rechazó, nunca su valor.
 - Sin esas cabeceras, la puerta hace lo de siempre: con una sesión válida, el contexto verificado de la sesión; sin ninguna, `status` sigue siendo público.
 - La comprobación de Better Auth que rechazaba una llave o un mandato desaparece con ellos; la de la puerta la cubre.
 

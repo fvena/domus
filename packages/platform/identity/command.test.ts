@@ -1,23 +1,17 @@
-import { defineModule } from "@domus/module-sdk";
-import { readAction } from "@domus/module-sdk/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { z } from "zod";
 
 import { createHttpHandler } from "../http";
 import { connectionOf, createPlatform, type Platform } from "../platform";
 import {
 	confirmPending,
 	invokeAction,
-	issueMandate,
 	prepareAccount,
 	prepareDelegation,
-	prepareSession,
 	readDelegationOf,
 	requestProofOf,
 	syntheticContext,
 } from "../testing";
 import { parseAccountsArguments, runAccounts } from "./command";
-import { CONNECTED_APPS, createKey } from "./keys";
 import { accountByEmail } from "./passwords";
 
 const SECRET = "a-very-secret-passphrase";
@@ -280,57 +274,6 @@ describe("runAccounts", () => {
 
 		expect(transcript).toHaveLength(steps.length);
 		for (const secret of [one, two, three]) expect(transcript.join("\n")).not.toContain(secret);
-	});
-});
-
-describe("runAccounts and the mandates of the connected apps", () => {
-	const notes = defineModule({
-		id: "notes",
-		schema: {},
-		migrations: [],
-		contract: { list: readAction({ level: "read" }).output(z.array(z.number())) },
-		actions: { list: () => [] },
-	});
-	const modules = [notes];
-	let platform: Platform;
-	beforeEach(() => {
-		platform = createPlatform({ databaseFile: ":memory:", modules });
-	});
-	afterEach(() => platform.close());
-
-	it("changing a password ends the mandates of every session of that account, and only of it", async () => {
-		await run(platform, createAna, SECRET, SECRET);
-		await run(
-			platform,
-			["create", "--email", "luis@domus.test", "--name", "Luis", "--role", "member"],
-			SECRET,
-			SECRET,
-		);
-		const idOf = (email: string) => accountByEmail(connectionOf(platform), email)?.id ?? "";
-		const door = createHttpHandler({ platform, modules, auth });
-		const key = createKey(connectionOf(platform), CONNECTED_APPS, "kira", Date.now());
-		const mandateOf = (account: string) =>
-			issueMandate(platform, {
-				session: prepareSession(platform, account).session,
-				app: "kira",
-			});
-		const ana = mandateOf(idOf("ana@domus.test"));
-		const luis = mandateOf(idOf("luis@domus.test"));
-		const list = async (mandate: string) =>
-			(
-				await door.fetch(
-					new Request("http://domus/api/rpc/notes/list", {
-						method: "POST",
-						headers: { authorization: `Bearer ${key}`, "domus-mandate": mandate },
-					}),
-				)
-			).status;
-		expect(await list(ana)).toBe(200);
-
-		await run(platform, ["password", "--email", "ana@domus.test"], NEW_SECRET, NEW_SECRET);
-
-		expect(await list(ana)).toBe(401);
-		expect(await list(luis)).toBe(200);
 	});
 });
 
