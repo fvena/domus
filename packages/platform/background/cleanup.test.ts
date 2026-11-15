@@ -100,7 +100,7 @@ describe("the cleanup", () => {
 		using test = withCleanup(2);
 		const insert = test.connection.prepare(
 			`INSERT INTO platform_confirmations (id, account, kind, operation, fingerprint, origin, bound, created_at,
-				window_closes_at, expires_at, state) VALUES (?, 'ana', 'write', '{"undo":1}', 'f', '{}', 0, 0, 0, ?, 'consumed')`,
+				expires_at, state) VALUES (?, 'ana', 'write', '{"undo":1}', 'f', '{}', 0, 0, ?, 'consumed')`,
 		);
 		for (const id of ["a", "b", "c", "d", "e"]) insert.run(id, NOW);
 		insert.run("current", NOW + 1);

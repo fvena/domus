@@ -49,11 +49,6 @@ export interface PendingConfirmation {
 	readonly key?: string;
 	readonly origin: Origin;
 	readonly expiresAt: number;
-	/**
-	 * Born before phase 1f of the shared device rule, to be confirmed only in context, which no longer exists (ADR
-	 * 0034): nothing answers it any more. The migration of phase 1f removes these and the mark.
-	 */
-	readonly contextOnly: boolean;
 	/** `ended` too when the session it was born in was revoked. */
 	readonly state: PendingState;
 }
@@ -104,13 +99,12 @@ interface Row {
 	readonly key: string | null;
 	readonly origin: string;
 	readonly expires_at: number;
-	readonly context_only: number;
 	readonly state: PendingState;
 	/** 0 when it was bound to a session that is gone. */
 	readonly live: number;
 }
 
-const COLUMNS = `id, account, via, kind, operation, fingerprint, key, origin, expires_at, context_only, state,
+const COLUMNS = `id, account, via, kind, operation, fingerprint, key, origin, expires_at, state,
 	(bound = 0 OR session IS NOT NULL) AS live`;
 
 export function createConfirmations(
@@ -133,13 +127,11 @@ export function createConfirmations(
 	const sessionExists = connection.prepare<[string], 1>(
 		"SELECT 1 FROM platform_session WHERE id = ?",
 	);
-	// `window_closes_at` and `context_only` are what is left of the confirmation in context (ADR 0034): with no
-	// meaning, written only because the first takes no null and has no default, until the migration of phase 1f.
 	const insert = connection.prepare(
 		`INSERT INTO platform_confirmations (id, account, via, kind, operation, fingerprint, key, origin, session,
-			bound, created_at, window_closes_at, expires_at, context_only, state)
+			bound, created_at, expires_at, state)
 		VALUES (@id, @account, @via, @kind, @operation, @fingerprint, @key, @origin, @session, @bound, @createdAt,
-			@expiresAt, @expiresAt, 0, 'pending')`,
+			@expiresAt, 'pending')`,
 	);
 	const settle = connection.prepare<[PendingState, number | null, string]>(
 		"UPDATE platform_confirmations SET state = ?, entry = ? WHERE id = ? AND state = 'pending'",
@@ -204,7 +196,6 @@ function pendingOf(row: Row | undefined): PendingConfirmation | undefined {
 		...(row.key === null ? {} : { key: row.key }),
 		origin: JSON.parse(row.origin) as Origin,
 		expiresAt: row.expires_at,
-		contextOnly: row.context_only === 1,
 		state: row.state === "pending" && row.live === 0 ? "ended" : row.state,
 	};
 }

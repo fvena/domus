@@ -217,13 +217,12 @@ export function answeringWith({
 
 	/**
 	 * The pending confirmation `context` may answer, still waiting. A context with via answers none: it is denied
-	 * before any is looked up. Another account's is not found, and so is one born before phase 1f to be confirmed only
-	 * in context, which nothing answers any more (ADR 0034).
+	 * before any is looked up. Another account's is not found.
 	 */
 	function reachable(context: VerifiedContext, id: string): PendingConfirmation {
 		if (!asksByItself(context)) throw new ORPCError("FORBIDDEN");
 		const pending = confirmations.find(id);
-		if (pending === undefined || pending.account !== context.account || pending.contextOnly)
+		if (pending === undefined || pending.account !== context.account)
 			throw new ORPCError("NOT_FOUND", { message: `no pending confirmation "${id}"` });
 
 		if (pending.state === "consumed" || pending.state === "rejected")

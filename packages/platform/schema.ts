@@ -232,12 +232,9 @@ export const delegation = sqliteTable(
  * A pending confirmation (ADR 0023): an operation that waits for the person to confirm it. It keeps the exact
  * operation (`operation`, with its fingerprint), whether it reads or writes, a write's idempotency key, the
  * verified context it was born in and its absolute expiry. `session` is the session it was born in while that
- * session lives: revoking it sets it to null, which ends a pending confirmation that was `bound` to one.
- * `window_closes_at` and `context_only` are what is left of the confirmation in context, retired (ADR 0034): the
- * first has no meaning, and the second marks one born before phase 1f that nothing answers any more. The migration
- * of phase 1f removes both. `entry` links a confirmed write to its
- * entry in the action log. The cleanup (ADR 0025) empties `operation` once it expired and keeps the rest, which
- * still decides the answer.
+ * session lives: revoking it sets it to null, which ends a pending confirmation that was `bound` to one. `entry`
+ * links a confirmed write to its entry in the action log. The cleanup (ADR 0025) empties `operation` once it expired
+ * and keeps the rest, which still decides the answer.
  */
 export const confirmations = sqliteTable(
 	"platform_confirmations",
@@ -255,9 +252,7 @@ export const confirmations = sqliteTable(
 		session: text().references(() => session.id, { onDelete: "set null" }),
 		bound: integer({ mode: "boolean" }).notNull(),
 		createdAt: integer("created_at").notNull(),
-		windowClosesAt: integer("window_closes_at").notNull(),
 		expiresAt: integer("expires_at").notNull(),
-		contextOnly: integer("context_only", { mode: "boolean" }).notNull().default(false),
 		state: text({ enum: ["pending", "consumed", "rejected", "ended"] }).notNull(),
 		entry: integer().references(() => actionLog.entry),
 	},
@@ -570,46 +565,5 @@ export const deliveries = sqliteTable(
 	},
 	(table) => [
 		uniqueIndex("platform_deliveries_notice_subscription").on(table.notice, table.subscription),
-	],
-);
-
-/**
- * The keys of the connected apps, retired (ADR 0034): no code reads or writes the table, which stays only until the
- * migration of phase 1f removes it.
- */
-export const keys = sqliteTable("platform_keys", {
-	id: text().primaryKey(),
-	app: text().notNull(),
-	secretHash: text("secret_hash").notNull(),
-	createdAt: integer("created_at").notNull(),
-	lastUsedAt: integer("last_used_at"),
-	revokedAt: integer("revoked_at"),
-});
-
-/**
- * The mandates of the connected apps, retired (ADR 0034): no code reads or writes the table, which stays only until
- * the migration of phase 1f removes it.
- */
-export const mandates = sqliteTable(
-	"platform_mandates",
-	{
-		hash: text().primaryKey(),
-		app: text().notNull(),
-		account: text()
-			.notNull()
-			.references(() => user.id, { onDelete: "cascade" }),
-		device: text().notNull(),
-		session: text().notNull(),
-		deviceAccount: text("device_account").notNull(),
-		identity: text({ enum: ["password", "voice", "device"] }).notNull(),
-		conversation: text(),
-		issuedAt: integer("issued_at").notNull(),
-		expiresAt: integer("expires_at").notNull(),
-	},
-	(table) => [
-		check(
-			"platform_mandates_identity",
-			sql`${table.identity} IN ('password', 'voice', 'device')`,
-		),
 	],
 );

@@ -4,16 +4,13 @@ import { id, moduleTables, text } from "@domus/module-sdk/db";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { connectionOf, openPlatform, type Platform } from "../platform";
+import { openPlatform, type Platform } from "../platform";
 import {
 	confirmPending,
 	deviceAccountOf,
 	invokeAction,
 	prepareAccount,
 	prepareDelegation,
-	readLog,
-	readPendingConfirmations,
-	rejectPending,
 	syntheticContext,
 } from "../testing";
 
@@ -116,7 +113,7 @@ describe("a pending confirmation with a schema that transforms the input", () =>
 	});
 });
 
-/** A module whose own area declares the shared device rule, and a write that always asks for confirmation. */
+/** A module whose own area declares the shared device rule. */
 const vitalsModule = defineModule({
 	id: "vitals",
 	areas: { vitals: { confirmOnSharedDevice: true } },
@@ -124,19 +121,13 @@ const vitalsModule = defineModule({
 	migrations: [],
 	contract: {
 		read: readAction({ level: "read" }).output(z.string()),
-		note: writeAction({ undoable: false, level: "write", alwaysConfirm: true }).output(
-			z.string(),
-		),
 	},
 	actions: {
 		read: () => "tensión 12/8",
-		note: () => ({ result: "anotado", touched: [] }),
 	},
 });
 
 describe("pending confirmations on a shared device", () => {
-	const notFound = expect.objectContaining({ code: "NOT_FOUND" });
-
 	function withVitals() {
 		const opened = openPlatform(
 			{ databaseFile: ":memory:", modules: [vitalsModule] },
@@ -165,26 +156,5 @@ describe("pending confirmations on a shared device", () => {
 		expect(confirmPending(platform, { context: ana, confirmation: pending })).toBe(
 			"tensión 12/8",
 		);
-	});
-
-	it("leave one born before phase 1f to be confirmed only in context unanswered from the app", () => {
-		const platform = withVitals();
-		const pending = pendingOf(() =>
-			invokeAction(platform, { context: ana, action: "vitals.note", idempotencyKey: "k1" }),
-		);
-		// What the shared device rule left in the database before phase 1f.
-		connectionOf(platform)
-			.prepare("UPDATE platform_confirmations SET context_only = 1 WHERE id = ?")
-			.run(pending);
-		const stored = readPendingConfirmations(platform);
-
-		expect(() => confirmPending(platform, { context: ana, confirmation: pending })).toThrow(
-			notFound,
-		);
-		expect(() => rejectPending(platform, { context: ana, confirmation: pending })).toThrow(
-			notFound,
-		);
-		expect(readPendingConfirmations(platform)).toEqual(stored);
-		expect(readLog(platform)).toEqual([]);
 	});
 });

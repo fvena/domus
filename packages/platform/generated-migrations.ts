@@ -180,4 +180,16 @@ export const generatedMigrations: readonly ModuleMigration[] = [
 			"CREATE TABLE `platform_mandates` (\n\t`hash` text PRIMARY KEY NOT NULL,\n\t`app` text NOT NULL,\n\t`account` text NOT NULL,\n\t`device` text NOT NULL,\n\t`session` text NOT NULL,\n\t`device_account` text NOT NULL,\n\t`identity` text NOT NULL,\n\t`conversation` text,\n\t`issued_at` integer NOT NULL,\n\t`expires_at` integer NOT NULL,\n\tFOREIGN KEY (`account`) REFERENCES `platform_user`(`id`) ON UPDATE no action ON DELETE cascade,\n\tCONSTRAINT \"platform_mandates_identity\" CHECK(\"platform_mandates\".\"identity\" IN ('password', 'voice', 'device'))\n);\n",
 		],
 	},
+	{
+		tag: "0017_damp_carlie_cooper",
+		position: 18,
+		hash: "3ed0d6e3ba41b15eaea1ff0fe8df8f27bd3417c74a3ffcc4ae659621b0a59563",
+		statements: [
+			"DROP TABLE `platform_keys`;",
+			"\nDROP TABLE `platform_mandates`;",
+			"\n-- Written by hand (ADR 0034): the pending confirmations only for contexto, which nothing answers, go before their mark.\nDELETE FROM `platform_confirmations` WHERE `context_only` = 1;",
+			"\nALTER TABLE `platform_confirmations` DROP COLUMN `window_closes_at`;",
+			"\nALTER TABLE `platform_confirmations` DROP COLUMN `context_only`;",
+		],
+	},
 ];

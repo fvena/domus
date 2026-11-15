@@ -1,6 +1,6 @@
 # 05. La migración
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 03, 04
 
 Spec: [`../spec.md`](../spec.md), sección «La migración» y costura 2. ADR 0034 y ADR 0021.
@@ -16,9 +16,18 @@ Una sola migración nueva de la plataforma deja la base sin rastro de las apps c
 
 ## Criterios de aceptación
 
-- [ ] Una instalación limpia y una base de la 1e actualizada quedan con el mismo esquema.
-- [ ] En esa actualización, una pendiente ordinaria sigue con sus datos y su caducidad, y una «solo por `contexto`» ya no está.
-- [ ] Los hashes de las migraciones anteriores no cambian, la base generada nunca se aplica, y dos generaciones seguidas no dejan cambios.
-- [ ] Con restic real, una base de la 1e con notas de `probe`, cerrada y copiada en el formato que espera restaurar, se restaura con `restoreBackup` y el código actual: la plataforma se abre, la migración nueva está aplicada y las notas siguen.
-- [ ] La plataforma de pruebas no gana ninguna opción para arrancar con migraciones a medias.
-- [ ] `pnpm check` pasa, y la CI no deja cambios tras `pnpm db:generate`.
+- [x] Una instalación limpia y una base de la 1e actualizada quedan con el mismo esquema.
+- [x] En esa actualización, una pendiente ordinaria sigue con sus datos y su caducidad, y una «solo por `contexto`» ya no está.
+- [x] Los hashes de las migraciones anteriores no cambian, la base generada nunca se aplica, y dos generaciones seguidas no dejan cambios.
+- [x] Con restic real, una base de la 1e con notas de `probe`, cerrada y copiada en el formato que espera restaurar, se restaura con `restoreBackup` y el código actual: la plataforma se abre, la migración nueva está aplicada y las notas siguen.
+- [x] La plataforma de pruebas no gana ninguna opción para arrancar con migraciones a medias.
+- [x] `pnpm check` pasa, y la CI no deja cambios tras `pnpm db:generate`.
+
+## Comments
+
+- Hecho en el commit «feat(platform): migrate away the keys, the mandates and the confirmation in context».
+- La migración es `packages/platform/migrations/0017_damp_carlie_cooper.sql` (posición 18): borra `platform_keys` y `platform_mandates`, y luego, escrita a mano con un comentario que lo dice, `DELETE FROM platform_confirmations WHERE context_only = 1`, justo antes de quitar `window_closes_at` y `context_only`. drizzle-kit genera `DROP COLUMN` sin reconstruir la tabla. Dos `pnpm db:generate` seguidos no dejan cambios, y las migraciones anteriores (SQL, journal y `generated-migrations.ts`) solo ganan la nueva al final.
+- Salen con ella los restos de la 04: el campo `contextOnly` de `PendingConfirmation`, su comprobación en `reachable`, las dos columnas del `INSERT` y la prueba que preparaba una pendiente antigua con un `UPDATE` (`actions/confirmations.test.ts`); `background/cleanup.test.ts` deja de escribir `window_closes_at`. `docs/agents/packages.md` queda al día.
+- Las pruebas, en `tooling/scripts/phase-1e-database.test.ts`: es el único sitio que puede juntar el ejecutor de migraciones de la plataforma con `probe` y `test-utils` sin saltarse una regla de dependencias. La base de la 1e se escribe con `migrate` hasta `0016_complete_tomorrow_man` (la última de la 1e, por su tag) y las de `probe`, con la cuenta `ana`, notas y pendientes tal como las guardaba la 1e; luego la abre `createTestPlatform`, que aplica la migración nueva (una sola). La pendiente ordinaria se compara, columna a columna, con la fila escrita menos las dos que salen.
+- Restaurar: la copia de la 1e, cerrada, se guarda con restic real desde su carpeta (`domus.db` en la raíz, host `domus`), y se restaura sobre una base viva de ahora que tiene una nota posterior; tras restaurar solo quedan las notas de la copia, la plataforma se abre sin migraciones pendientes y la historia de la plataforma termina en la nueva.
+- «La base generada nunca se aplica» y los hashes ya los cubren `platform-migrations.test.ts` y `migrations.test.ts`, que siguen pasando.
