@@ -16,7 +16,7 @@ export interface SessionOwner {
 /**
  * What a session gives a verified context: its account, device and id, the account itself as the device's, and an
  * identity proven by password, the only way a session is born in phase 1. The door seals a request's context from
- * it, and a mandate born of the session keeps the same fields (ADR 0030).
+ * it.
  */
 export interface SessionOrigin {
 	readonly account: string;

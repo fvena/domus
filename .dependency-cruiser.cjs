@@ -8,13 +8,13 @@
 const DATA_AND_AI_LIBS =
 	"node_modules/(better-sqlite3|drizzle-orm|kysely|ai|@ai-sdk|@anthropic-ai)/";
 
-/** The one part of platform that the browser, assistant and voice-gateway may import. */
+/** The one part of platform that the browser may import. */
 const PLATFORM_CONTRACTS = "packages/platform/contracts/";
 
 /** The pure entry of module-sdk that a module's contracts use (ADR 0022); the browser reaches it through them. */
 const SDK_CONTRACTS = "packages/module-sdk/contracts/";
 
-/** Packages that know nothing of the business, open to modules and to the HTTP-only apps. */
+/** Packages that know nothing of the business, open to modules. */
 const DOMAIN_FREE = "packages/(utils|i18n)/";
 
 module.exports = {
@@ -75,22 +75,11 @@ module.exports = {
 			to: { path: "^packages/(platform|module-sdk)/", pathNot: `^${PLATFORM_CONTRACTS}` },
 		},
 		{
-			name: "assistant-and-voice-gateway-only-talk-to-api",
+			name: "web-never-reaches-platform",
 			comment:
-				"assistant and voice-gateway reach Domus only over HTTP through the api: of platform only the contracts; no module-sdk, no modules, no UI.",
+				"The same rule through any chain of imports: production code of web reaches no part of platform but its contracts, and the contracts entry of module-sdk through a module's contracts. Tests may, through test-utils.",
 			severity: "error",
-			from: { path: "^apps/(assistant|voice-gateway)/" },
-			to: {
-				path: ["^packages/(platform|module-sdk|ui)/", "^modules/"],
-				pathNot: `^${PLATFORM_CONTRACTS}`,
-			},
-		},
-		{
-			name: "programs-never-reach-platform",
-			comment:
-				"The same rule through any chain of imports: production code of web, assistant and voice-gateway reaches no part of platform but its contracts, and the contracts entry of module-sdk through a module's contracts. Tests may, through test-utils.",
-			severity: "error",
-			from: { path: "^apps/(web|assistant|voice-gateway)/", pathNot: "\\.test\\.ts$" },
+			from: { path: "^apps/web/", pathNot: "\\.test\\.ts$" },
 			to: {
 				path: "^packages/(platform|module-sdk)/",
 				pathNot: [`^${PLATFORM_CONTRACTS}`, `^${SDK_CONTRACTS}`],
@@ -160,8 +149,7 @@ module.exports = {
 
 		{
 			name: "contracts-are-pure",
-			comment:
-				"Contracts are imported by the browser, assistant and voice-gateway: no Node built-ins in them.",
+			comment: "Contracts are imported by the browser: no Node built-ins in them.",
 			severity: "error",
 			from: {
 				path: ["^modules/[^/]+/contracts/", `^${PLATFORM_CONTRACTS}`, `^${SDK_CONTRACTS}`],

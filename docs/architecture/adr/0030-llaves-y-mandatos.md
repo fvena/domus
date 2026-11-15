@@ -64,3 +64,4 @@ Ejecutar y consumir la pendiente siguen en una sola transacción. Nunca cuenta u
 
 Fecha: 2026-11-14. Preguntas del grilling: Q1–Q21 de la fase 1e.
 Precisado por el ADR 0032: en la fase 5, la llave y los mandatos se sustituyen por el perfil OAuth de MCP; el mandato sigue como autorización de la conversación alojada.
+Precisado por el ADR 0034: la llave, el mandato, su comando y su regla de gitleaks salen en la subfase 1f, y la puerta responde `UNAUTHORIZED` a `Authorization` y a la cabecera del mandato. Sus garantías de autorización siguen, probadas sobre el contexto verificado sintético.

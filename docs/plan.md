@@ -2,15 +2,15 @@
 
 Única fuente del plan de Domus: qué entra en cada fase, cuándo se da por terminada y en qué estado está. Se construye solo lo que pide la fase en curso, y cada funcionalidad entra después de su propia revisión en grilling ([ADR 0001](architecture/adr/0001-domus-con-kira-dentro.md), [ADR 0031](architecture/adr/0031-domus-con-un-agente-opcional.md)). Al terminar cada fase, lo que ya funciona se publica en la Pi. Cuando una fase cambia de estado, o su grilling fija qué incluye o cuándo termina, se corrige aquí. Las decisiones que la justifican están en [`architecture/README.md`](architecture/README.md) y en los ADR.
 
-| Fase | Qué                            | Estado              |
-| ---- | ------------------------------ | ------------------- |
-| 0    | Esqueleto                      | hecha (2026-11-11)  |
-| 1    | Núcleo                         | en curso (1d3, 1d4) |
-| 2    | Sistema de diseño              | pendiente           |
-| 3    | Personas, cuentas y aparatos   | pendiente           |
-| 4    | Módulo piloto: listas y compra | pendiente           |
-| 5    | Domus con un agente opcional   | pendiente           |
-| 6    | Los demás módulos, uno a uno   | pendiente           |
+| Fase | Qué                            | Estado                  |
+| ---- | ------------------------------ | ----------------------- |
+| 0    | Esqueleto                      | hecha (2026-11-11)      |
+| 1    | Núcleo                         | en curso (1d3, 1d4, 1f) |
+| 2    | Sistema de diseño              | pendiente               |
+| 3    | Personas, cuentas y aparatos   | pendiente               |
+| 4    | Módulo piloto: listas y compra | pendiente               |
+| 5    | Domus con un agente opcional   | pendiente               |
+| 6    | Los demás módulos, uno a uno   | pendiente               |
 
 ## 0. Esqueleto
 
@@ -22,7 +22,7 @@
 
 ## 1. Núcleo
 
-**Estado:** en curso. La 1a está hecha desde el 2026-11-12: la Pi corre `main` con la base de datos. La 1b está hecha desde el 2026-11-12: la Pi corre `main` con el registro de acciones. La 1c está hecha desde el 2026-11-12: la Pi corre `main` con cuentas, sesiones y autorización. La 1d1 está hecha desde el 2026-11-12: la Pi corre `main` con la cola, el planificador y la limpieza diaria. La 1d2 está hecha desde el 2026-11-13: la Pi corre `main` con la copia diaria en `/srv/backups/domus`, su comprobación semanal y el comando para restaurar. Desde el 2026-11-14, la Pi corre `main` con la 1d3 y la 1d4. Las comprobaciones de la 1d4 en la Pi salieron bien ese día, pero se da por hecha cuando cierre la 1d3. Su copia del 2026-11-15 salió bien, y solo espera a su limpieza del 2026-11-16. Desde el 2026-11-15, la Pi corre `main` con la 1e. Sus comprobaciones en la Pi salieron bien ese día, y se da por hecha cuando cierren la 1d3 y la 1d4.
+**Estado:** en curso. La 1a está hecha desde el 2026-11-12: la Pi corre `main` con la base de datos. La 1b está hecha desde el 2026-11-12: la Pi corre `main` con el registro de acciones. La 1c está hecha desde el 2026-11-12: la Pi corre `main` con cuentas, sesiones y autorización. La 1d1 está hecha desde el 2026-11-12: la Pi corre `main` con la cola, el planificador y la limpieza diaria. La 1d2 está hecha desde el 2026-11-13: la Pi corre `main` con la copia diaria en `/srv/backups/domus`, su comprobación semanal y el comando para restaurar. Desde el 2026-11-14, la Pi corre `main` con la 1d3 y la 1d4. Las comprobaciones de la 1d4 en la Pi salieron bien ese día, pero se da por hecha cuando cierre la 1d3. Su copia del 2026-11-15 salió bien, y solo espera a su limpieza del 2026-11-16. Desde el 2026-11-15, la Pi corre `main` con la 1e. Sus comprobaciones en la Pi salieron bien ese día, y se da por hecha cuando cierren la 1d3 y la 1d4. La 1f está decidida ([ADR 0034](architecture/adr/0034-retirar-las-apps-conectadas-antes-de-la-fase-5.md)) y no espera a la 1d3 ni a la 1d4; la fase 1 termina cuando estén las tres.
 
 **Terminada cuando** un módulo de prueba cubre todos los casos de permiso, confirmación y visibilidad. Cada subfase fija en su grilling cuándo termina ella. El tema `date-time` de `utils` (`date-fns` e `Intl`) entra en esta fase, con su primer uso.
 
@@ -67,7 +67,33 @@
     - `keys list` muestra el último uso y la llave revocada;
     - la llave sigue igual tras reiniciar y tras recrear `api`.
 
-Lo que Kira necesitará del núcleo, para el grilling de cada subfase. Desde el [ADR 0032](architecture/adr/0032-autorizacion-del-agente.md), en la fase 5 el «sí» por voz y la regla de la salud en un aparato `device` dan paso a la confirmación siempre en Domus y a la salud vía el agente:
+- **1f. Retirar las apps conectadas.** Decidida en su grilling ([ADR 0034](architecture/adr/0034-retirar-las-apps-conectadas-antes-de-la-fase-5.md)). Adelanta a la fase 1 lo que el [ADR 0031](architecture/adr/0031-domus-con-un-agente-opcional.md) dejaba para la fase 5, porque lo que lo sustituye no lo convierte y hoy no tiene consumidor. Incluye:
+    - quitar las llaves, el comando `keys` y su regla de gitleaks, y los mandatos;
+    - quitar el canal `contexto`, la identidad `voice` y la ventana del «sí» por voz, y reducir la regla del aparato compartido a que la cuenta `device` no lee un área que declara `confirmOnSharedDevice`;
+    - una migración nueva que borra `platform_keys`, `platform_mandates` y las columnas `context_only` y `window_closes_at`, conserva las pendientes ordinarias y quita las que solo se confirmaban por `contexto`;
+    - la puerta, que responde `UNAUTHORIZED` a `Authorization` y a la cabecera del mandato en todo `/api`, y `status` sin la app;
+    - quitar `apps/assistant`, `apps/voice-gateway` y `@domus/utils/connection`, con sus reglas de dependencias, sus servicios y su secreto en Docker, `DOMUS_KIRA_KEY` y su parte de la CI;
+    - reescribir sobre el contexto verificado sintético las pruebas de las obligaciones que siguen para cualquier agente.
+
+    Se quedan la tabla de delegación, `via` con el valor `kira` y las confirmaciones en la app. **Terminada cuando** además las pruebas cubren:
+    - la puerta: `Authorization` o la cabecera del mandato dan `UNAUTHORIZED` en todas las rutas de `/api`, `status` incluido, también junto a una cookie válida; `/health` y la web compilada no cambian; `status` no dice ninguna app;
+    - la migración: la instalación limpia; la actualización desde el esquema de la 1e, con una pendiente ordinaria que sobrevive con su caducidad y una `context_only` que desaparece; los hashes intactos y dos generaciones seguidas sin cambios;
+    - restaurar, con restic real, una copia del esquema anterior a la 1f: aplica la migración nueva, queda operativa y conserva los datos de la casa;
+    - el aparato compartido: la cuenta `device` no lee un área que declara `confirmOnSharedDevice`, y `confirm-in-context` ya no es una decisión;
+    - vía el agente, sobre el contexto sintético: la delegación rebaja y no amplía; un área sin fila es «no»; una pendiente confirmada desde la app conserva su delegación; una acción `manage` no se completa; la clave de idempotencia por cuenta y `via`; `log/read` y deshacer dentro de la delegación, y deshacer denegado al retirarla; `via` en el registro; y un contexto con `via` no confirma ni rechaza aunque declare el canal `app`, mientras la persona sí confirma desde la app;
+    - las reglas: `architecture.test.ts` prueba que salta cada regla que queda, y la configuración de gitleaks carga y una muestra genérica activa una de sus reglas;
+    - pasa `pnpm check` y el build, y la CI solo construye y arranca `api`.
+
+    En la Pi, en el Domus real:
+    - tras desplegar con `--remove-orphans`, `docker compose ps` muestra solo `api`;
+    - la fila de la migración nueva es la misma tras reiniciar y tras recrear `api`;
+    - `status` con un `Bearer` inventado da 401, y una sesión normal entra y lee;
+    - el secreto de Kira y su variable se borran después de comprobar el arranque y la migración;
+    - la copia de esa noche sale bien.
+
+    `despliegue.md`, la guía, los `AGENTS.md`, `docs/agents/packages.md`, la arquitectura y el glosario quedan al día: salen **Llave** y **App conectada**, y **Mandato** queda con el sentido del [ADR 0032](architecture/adr/0032-autorizacion-del-agente.md).
+
+Lo que Kira necesitará del núcleo, para el grilling de cada subfase. Desde el [ADR 0032](architecture/adr/0032-autorizacion-del-agente.md), en la fase 5 el «sí» por voz y la regla de la salud en un aparato `device` dan paso a la confirmación siempre en Domus y a la salud vía el agente; desde el [ADR 0034](architecture/adr/0034-retirar-las-apps-conectadas-antes-de-la-fase-5.md), el «sí» por voz sale ya en la 1f y la regla se reduce a su denegación:
 
 - **1b** (decidido en el [ADR 0022](architecture/adr/0022-acciones.md)): una acción no se repite si algo se reinicia a medias, gracias a la clave de idempotencia. Una escritura declarada deshacible conserva una inversa durante su plazo; deshacer pasa por la autorización y solo se ejecuta si no hay cambios posteriores incompatibles y se cumplen las reglas del módulo. Las escrituras irreversibles lo declaran antes de ejecutarse.
 - **1c** (decidido en el [ADR 0023](architecture/adr/0023-identidad-y-autorizacion.md)): un «sí» solo confirma en el turno siguiente de la misma persona, en el mismo aparato y en un plazo corto (del orden de un minuto, ajustable). Pasado ese plazo, la confirmación sigue pendiente en la app y no la hereda otra sesión ni otro aparato; un «sí» sin una pregunta reciente no confirma nada. La excepción es leer la salud en un aparato con la cuenta `device`: solo se confirma allí mismo, por voz y dentro de ese plazo, y después caduca. La salud no se lee ni se muestra en un aparato con la cuenta `device` salvo que su persona lo pida, y su persona la ve, la corrige y la borra. El admin no ve ni cambia los ajustes de la otra persona. Una voz no reconocida en la cuenta `device` no deja memoria ni conversación; lo que ejecuta conserva su entrada en el registro.
@@ -104,7 +130,7 @@ Su carpeta `assistant/` se escribe como material para cualquier agente, no para 
 
 **Estado:** pendiente.
 
-**Incluye:** lo que necesita Domus para tener un agente conectado opcional, Kira u otro ([ADR 0031](architecture/adr/0031-domus-con-un-agente-opcional.md)). El servidor MCP en la puerta, con las tools generadas de los contratos, el material de los módulos y la versión de la interfaz. El perfil OAuth de MCP: el alta del cliente, el consentimiento, el enlace del agente y su revocación, el mandato de la conversación alojada, la vigencia en cada petición y la rotación del token de renovación; la delegación que nace cerrada, con su preajuste; la confirmación siempre en Domus, la lectura aprobada y la salud vía el agente ([ADR 0032](architecture/adr/0032-autorizacion-del-agente.md)). La conversación alojada por chat y por voz, con su botón, su escucha con palabra de activación y el historial que se pide al agente, tras un prototipo que fija AG-UI 1.0 o un contrato propio ([ADR 0033](architecture/adr/0033-conversacion-alojada-y-voz.md)). Los ajustes para conectar, sustituir y desconectar el agente. Retirar `apps/assistant`, `voice-gateway`, la llave y los mandatos del ADR 0030 cuando lo nuevo está comprobado. No incluye nada interno de Kira: su runtime, su memoria, su voz y sus especialistas van en su propio plan, y las entregas se coordinan.
+**Incluye:** lo que necesita Domus para tener un agente conectado opcional, Kira u otro ([ADR 0031](architecture/adr/0031-domus-con-un-agente-opcional.md)). El servidor MCP en la puerta, con las tools generadas de los contratos, el material de los módulos y la versión de la interfaz. El perfil OAuth de MCP: el alta del cliente, el consentimiento, el enlace del agente y su revocación, el mandato de la conversación alojada, la vigencia en cada petición y la rotación del token de renovación; la delegación que nace cerrada, con su preajuste; la confirmación siempre en Domus, la lectura aprobada y la salud vía el agente ([ADR 0032](architecture/adr/0032-autorizacion-del-agente.md)). La conversación alojada por chat y por voz, con su botón, su escucha con palabra de activación y el historial que se pide al agente, tras un prototipo que fija AG-UI 1.0 o un contrato propio ([ADR 0033](architecture/adr/0033-conversacion-alojada-y-voz.md)). Los ajustes para conectar, sustituir y desconectar el agente. Parte de una puerta sin apps conectadas: `assistant`, `voice-gateway`, la llave y los mandatos del ADR 0030 salen en la 1f ([ADR 0034](architecture/adr/0034-retirar-las-apps-conectadas-antes-de-la-fase-5.md)). No incluye nada interno de Kira: su runtime, su memoria, su voz y sus especialistas van en su propio plan, y las entregas se coordinan.
 
 **Terminada cuando** Domus funciona sin agente y sus pruebas no necesitan a Kira; con datos sintéticos, Kira y después un segundo agente de prueba, configurados uno tras otro, atienden el chat sin tocar el núcleo, con los mismos límites por persona y la auditoría correcta; sustituir el agente invalida al anterior y deja la delegación cerrada; una confirmación vía el agente solo cuenta hecha en Domus; y revocar un enlace corta la siguiente petición.
 

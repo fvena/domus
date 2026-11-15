@@ -1,4 +1,4 @@
-import { createTestPlatform, pendingFrom, TEST_ORIGIN, TEST_START } from "@domus/test-utils";
+import { createTestPlatform, pendingFrom, TEST_START } from "@domus/test-utils";
 import { describe, expect, it } from "vitest";
 
 import probe from "../server";
@@ -127,15 +127,8 @@ describe("the cleanup of the action log", () => {
 	});
 });
 
-/** Kira for Ana, in a conversation on her phone: her writes through Kira ask her to confirm. */
-const KIRA = {
-	via: "kira",
-	device: "ana-phone",
-	session: undefined,
-	channel: "contexto",
-	identity: "password",
-	conversation: "c1",
-} as const;
+/** Kira for Ana, on her phone: her writes through Kira ask her to confirm. */
+const KIRA = { via: "kira", device: "ana-phone", session: undefined } as const;
 
 describe("the cleanup of pending confirmations", () => {
 	it("empties the operation of an expired one, whatever its state, and leaves a current one whole", async () => {
@@ -266,45 +259,5 @@ describe("the cleanup of step-up proofs", () => {
 			{ code: "STEP_UP_REQUIRED", data: undefined },
 			{ code: "STEP_UP_REQUIRED", data: undefined },
 		]);
-	});
-});
-
-describe("the cleanup of mandates", () => {
-	it("answers Kira the same before and after: a current mandate, an expired one and one whose session ended", async () => {
-		await using test = createTestPlatform({ modules: [probe] });
-		test.prepare.account({ id: "ana", role: "member" });
-		await test.prepare.password("ana", PASSWORD);
-		const key = test.prepare.key("kira");
-		const signedIn = async () => {
-			const browser = test.browser();
-			expect((await browser.signIn("ana@domus.test", PASSWORD)).status).toBe(200);
-			return browser;
-		};
-		const laptop = await signedIn();
-		test.clock.set(CLEANUP_AFTER_EXPIRY - DAY);
-		const expired = test.mandate(laptop);
-		const phone = await signedIn();
-		const ended = test.mandate(phone);
-		expect((await phone.signOut()).status).toBe(200);
-		test.clock.set(CLEANUP_AFTER_EXPIRY - 1);
-		const current = test.mandate(laptop);
-		const answers = () =>
-			Promise.all(
-				[current, expired, ended].map(async (mandate) => {
-					const response = await test.door.fetch(
-						new Request(new URL("/api/rpc/probe/listNotes", TEST_ORIGIN), {
-							method: "POST",
-							headers: { authorization: `Bearer ${key}`, "domus-mandate": mandate },
-						}),
-					);
-					return { status: response.status, body: await response.json() };
-				}),
-			);
-		const before = await answers();
-
-		await runCleanup(test);
-
-		expect(await answers()).toEqual(before);
-		expect(before.map(({ status }) => status)).toEqual([200, 401, 401]);
 	});
 });

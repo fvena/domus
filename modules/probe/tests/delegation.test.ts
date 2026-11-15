@@ -1,6 +1,14 @@
-import { createTestPlatform, pendingFrom } from "@domus/test-utils";
+// Via Kira (ADR 0023, ADR 0034): the delegation table lowers and never widens the person's permission, over the
+// synthetic verified context with `via` on the path of the actions; the person confirms what it asked from the app.
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { clientFor } from "@domus/api-client";
+import { createTestPlatform, pendingFrom, platformContract, TEST_ORIGIN } from "@domus/test-utils";
 import { describe, expect, it } from "vitest";
 
+import { probeContract } from "../contracts";
 import probe from "../server";
 
 const forbidden = expect.objectContaining({ code: "FORBIDDEN" });
@@ -85,7 +93,141 @@ describe("probe via Kira, with the delegation table", () => {
 			test.invoke(ana, "probe.addNote", { body: "regar" }, { idempotencyKey: "k1" }),
 		).toThrow(forbidden);
 	});
+
+	it("applies the delegation's no, yes and confirm at each level, manage included", async () => {
+		await using test = createTestPlatform({ modules: [probe] });
+		const kira = test.member("ana", { via: "kira" });
+		test.prepare.grant("ana", "probe", "manage");
+		let keys = 0;
+		const calls = {
+			read: () => test.invoke(kira, "probe.listNotes"),
+			write: () =>
+				test.invoke(
+					kira,
+					"probe.addNote",
+					{ body: "leche" },
+					{ idempotencyKey: `k${++keys}` },
+				),
+			manage: () =>
+				test.invoke(
+					kira,
+					"probe.configure",
+					{ visibility: "public" },
+					{ idempotencyKey: `k${++keys}` },
+				),
+		} as const;
+
+		const seen: Record<string, string> = {};
+		for (const level of ["read", "write", "manage"] as const)
+			for (const value of ["no", "yes", "confirm"] as const) {
+				test.prepare.delegation("ana", "probe", level, value);
+				seen[`${level} ${value}`] = outcome(calls[level]);
+			}
+		expect(seen).toEqual({
+			"read no": "FORBIDDEN",
+			"read yes": "ok",
+			"read confirm": "CONFIRMATION_REQUIRED",
+			"write no": "FORBIDDEN",
+			"write yes": "ok",
+			"write confirm": "CONFIRMATION_REQUIRED",
+			"manage no": "FORBIDDEN",
+			// A manage action delegated still needs its proof, which no context with via brings.
+			"manage yes": "STEP_UP_REQUIRED",
+			"manage confirm": "CONFIRMATION_REQUIRED",
+		});
+	});
+
+	it("denies an area without a row: a module that arrives later is closed to Kira", async () => {
+		const folder = mkdtempSync(join(tmpdir(), "domus-delegation-"));
+		try {
+			const file = join(folder, "domus.db");
+			{
+				await using before = createTestPlatform({ modules: [], file });
+				before.prepare.account({ id: "ana", role: "member" });
+			}
+			await using test = createTestPlatform({ modules: [probe], file });
+
+			expect(() =>
+				test.invoke(test.context("ana", { via: "kira" }), "probe.listNotes"),
+			).toThrow(forbidden);
+			// Without via, the person's own permission in the new area applies.
+			expect(test.invoke(test.context("ana"), "probe.listNotes")).toEqual([]);
+		} finally {
+			rmSync(folder, { recursive: true, force: true });
+		}
+	});
+
+	it("hides another's private record, and answers forbidden to what the delegation denies", async () => {
+		await using test = createTestPlatform({ modules: [probe] });
+		const kira = test.member("ana", { via: "kira" });
+		test.invoke(
+			test.member("luis"),
+			"probe.addNote",
+			{ body: "secreto" },
+			{ idempotencyKey: "k1" },
+		);
+
+		expect(test.invoke(kira, "probe.listNotes")).toEqual([]);
+		expect(test.invoke(kira, "probe.getNote", { id: 1 })).toBeNull();
+		expect(() =>
+			test.invoke(kira, "probe.editNote", { id: 1, body: "visto" }, { idempotencyKey: "k2" }),
+		).toThrow(expect.objectContaining({ code: "NOTE_NOT_FOUND" }));
+
+		test.prepare.delegation("ana", "probe", "write", "no");
+		expect(() =>
+			test.invoke(kira, "probe.editNote", { id: 1, body: "visto" }, { idempotencyKey: "k3" }),
+		).toThrow(forbidden);
+	});
 });
+
+describe("a pending confirmation via Kira, confirmed by the person from the app over HTTP", () => {
+	const PASSWORD = "correct horse battery staple";
+
+	/** Ana, with a password, signed in on a browser of her own: a session other than the agent's. */
+	async function anaSignedIn() {
+		const test = createTestPlatform({ modules: [probe] });
+		test.prepare.account({ id: "ana", role: "member" });
+		await test.prepare.password("ana", PASSWORD);
+		const browser = test.browser();
+		expect((await browser.signIn("ana@domus.test", PASSWORD)).status).toBe(200);
+		const app = clientFor(
+			{ ...platformContract, probe: probeContract },
+			{ baseUrl: TEST_ORIGIN, fetch: browser.fetch },
+		);
+		return { test, app, kira: test.context("ana", { via: "kira" }) };
+	}
+
+	it("keeps the delegation it was born with, and its entry the via of its origin", async () => {
+		const { test, app, kira } = await anaSignedIn();
+		await using _ = test;
+		test.prepare.delegation("ana", "probe", "write", "confirm");
+		const pending = pendingFrom(() =>
+			test.invoke(kira, "probe.addNote", { body: "leche" }, { idempotencyKey: "k1" }),
+		);
+		expect(test.log()).toEqual([]);
+
+		test.prepare.delegation("ana", "probe", "write", "no");
+		await expect(app.confirmations.confirm({ id: pending })).rejects.toMatchObject({
+			code: "FORBIDDEN",
+		});
+		test.prepare.delegation("ana", "probe", "write", "confirm");
+		expect(await app.confirmations.confirm({ id: pending })).toEqual({
+			result: { id: 1, body: "leche" },
+			entry: 1,
+		});
+		expect(test.log()).toMatchObject([{ actor: { account: "ana", via: "kira" } }]);
+	});
+});
+
+/** The code of what a call threw, or `"ok"` when it went through. */
+function outcome(call: () => unknown): string {
+	try {
+		call();
+		return "ok";
+	} catch (error) {
+		return String((error as { code?: unknown }).code);
+	}
+}
 
 describe("the delegation table of a new account", () => {
 	it("copies read and write from the account's permission, with manage denied and nothing to confirm", async () => {
@@ -158,25 +300,16 @@ describe("reading the delegation", () => {
 		expect(() => test.delegation(ana, test.deviceAccount)).toThrow(forbidden);
 	});
 
-	it("via Kira, needs the platform area's read delegated", async () => {
-		await using test = createTestPlatform({ modules: [probe] });
-		const kira = test.member("ana", { via: "kira" });
-
-		expect(test.delegation(kira, "ana").probe).toEqual(MEMBER_START);
-
-		test.prepare.delegation("ana", "platform", "read", "no");
-
-		expect(() => test.delegation(kira, "ana")).toThrow(forbidden);
-	});
-
-	it("via Kira, asks the person when the platform's read is delegated with confirmation", async () => {
+	it("is denied via Kira, whatever the platform's read delegation says, and asks nobody", async () => {
 		await using test = createTestPlatform({ modules: [probe] });
 		const ana = test.member("ana");
 		const kira = test.context("ana", { via: "kira" });
-		test.prepare.delegation("ana", "platform", "read", "confirm");
 
-		const id = pendingFrom(() => test.delegation(kira, "ana"));
-
-		expect(test.confirm(ana, id)).toEqual(test.delegation(ana, "ana"));
+		for (const value of ["yes", "confirm"] as const) {
+			test.prepare.delegation("ana", "platform", "read", value);
+			expect(() => test.delegation(kira, "ana")).toThrow(forbidden);
+		}
+		expect(test.pendingConfirmations()).toEqual([]);
+		expect(test.delegation(ana, "ana").probe).toEqual(MEMBER_START);
 	});
 });

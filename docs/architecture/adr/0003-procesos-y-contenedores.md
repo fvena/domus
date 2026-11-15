@@ -5,3 +5,4 @@ Además de la web hay tres programas: `api` (la puerta), `assistant` (Kira, la p
 Fecha: 2026-11-11. Preguntas del grilling: P1, P28.
 Precisado por el ADR 0025: `api` monta además el repositorio de copias (`/srv/backups/domus`) y recibe la contraseña de restic como secreto de Docker; la cola y las tareas programadas corren dentro de `api`, sin proceso nuevo.
 Precisado por el ADR 0031: a partir de la fase 5, `assistant` y `voice-gateway` salen hacia Kira, y Domus queda con `api` y la web.
+Precisado por el ADR 0034: `assistant` y `voice-gateway` salen en la subfase 1f, antes de la fase 5, y Domus queda con `api` y la web.

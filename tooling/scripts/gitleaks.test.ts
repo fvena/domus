@@ -1,6 +1,6 @@
-// The repository is public: a Domus API key that slips into a commit must stop at gitleaks, in the pre-commit hook
-// and in CI. They read `.gitleaks.toml` at the root; this runs the real gitleaks with it over samples written outside
-// the repository. No sample is ever literal here: each one is built at run time.
+// The repository is public: a secret that slips into a commit must stop at gitleaks, in the pre-commit hook and in
+// CI. They read `.gitleaks.toml` at the root, which keeps gitleaks' default rules; this runs the real gitleaks with
+// it over samples written outside the repository. No sample is ever literal here: each one is built at run time.
 import { randomBytes } from "node:crypto";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,16 +12,6 @@ import { findGitleaks, type Gitleaks, pinnedImage } from "./gitleaks";
 
 const root = join(import.meta.dirname, "../..");
 const config = join(root, ".gitleaks.toml");
-
-/** `bytes` random bytes in base64url, without padding, as the keys use them. */
-function random(bytes: number): string {
-	return randomBytes(bytes).toString("base64url");
-}
-
-/** A key of the form the platform issues: `domus_`, an 11-character id, a dot and a 43-character secret. */
-function sampleKey(): string {
-	return `domus_${random(8)}.${random(32)}`;
-}
 
 let gitleaks: Gitleaks;
 let folder: string;
@@ -49,31 +39,29 @@ describe("the gitleaks configuration", () => {
 		rmSync(folder, { recursive: true, force: true });
 	});
 
-	it("finds a Domus API key", () => {
-		expect(scan({ "key.txt": sampleKey() })).toEqual({ "key.txt": ["domus-api-key"] });
+	it("loads, and flags nothing in a file without a secret", () => {
+		expect(scan({ "notes.txt": "comprar pan y leche" })).toEqual({});
 	});
 
-	it("finds a key inside a line, as in an environment file", () => {
-		expect(scan({ "env.txt": `DOMUS_KIRA_KEY="${sampleKey()}"` })).toEqual({
-			"env.txt": ["domus-api-key"],
-		});
+	// So that loading means something: gitleaks stops on a configuration it cannot read.
+	it("is a configuration gitleaks would refuse if it were malformed", () => {
+		const elsewhere = mkdtempSync(join(tmpdir(), "domus-gitleaks-config-"));
+		try {
+			const broken = join(elsewhere, "broken.toml");
+			writeFileSync(broken, `${readFileSync(config, "utf8")}\n[[rules]\n`);
+			expect(() => gitleaks.scan(folder, broken)).toThrow();
+		} finally {
+			rmSync(elsewhere, { recursive: true, force: true });
+		}
 	});
 
-	it("does not take a string with another prefix or a shorter secret for a key", () => {
-		const key = sampleKey();
-		expect(
-			scan({
-				"prefix.txt": key.replace(/^domus_/, "domux_"),
-				"longer-prefix.txt": `x${key}`,
-				"short.txt": key.slice(0, -1),
-			}),
-		).toEqual({});
-	});
-
-	it("keeps gitleaks' default rules", () => {
+	it("finds a secret by gitleaks' default rules, also inside a line, as in an environment file", () => {
 		// A GitHub token: `ghp_` and 36 letters or digits, here in hex.
-		const token = `ghp_${randomBytes(18).toString("hex")}`;
-		expect(scan({ "github.txt": token })).toEqual({ "github.txt": ["github-pat"] });
+		const token = () => `ghp_${randomBytes(18).toString("hex")}`;
+		expect(scan({ "github.txt": token(), "env.txt": `GITHUB_TOKEN="${token()}"` })).toEqual({
+			"github.txt": ["github-pat"],
+			"env.txt": ["github-pat"],
+		});
 	});
 });
 

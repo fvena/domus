@@ -23,27 +23,20 @@ import {
 	sessionExpiresAt,
 	type SubscriptionRow,
 	invokeAction,
-	issueMandate,
 	type IssuedProof,
-	type ListedKey,
 	type LogEntry,
-	type MandateRow,
 	type ModuleDatabase,
 	moduleDatabase,
 	type PermissionLevel,
 	prepareAccount,
 	prepareDelegation,
 	prepareGrant,
-	prepareKey,
 	preparePassword,
 	prepareSession,
 	type ProvenOperation,
 	readDelegationOf,
-	readKeys,
 	readLog,
-	readMandates,
 	readPendingConfirmations,
-	revokeKeyNow,
 	readSubscriptions,
 	rejectPending,
 	requestProofOf,
@@ -161,8 +154,8 @@ export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	readonly file?: true | string;
 	/** How long the content of a new log entry stays usable, in milliseconds. Unset: the platform's 30 days. */
 	readonly retention?: number;
-	/** The voice window and the expiry of a new pending confirmation, in milliseconds. Unset: 60 s and 24 h. */
-	readonly confirmation?: { readonly window?: number; readonly expiry?: number };
+	/** The expiry of a new pending confirmation, in milliseconds. Unset: 24 h. */
+	readonly confirmation?: { readonly expiry?: number };
 	/**
 	 * Scheduled tasks of the test, declared next to the platform's own and run by the same scheduler and engine.
 	 * Their work is the test's, such as one that holds its job running until the test lets it end.
@@ -215,21 +208,6 @@ export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	 * and {@link TEST_PUSH_SUBJECT} unless given.
 	 */
 	readonly origins?: readonly string[];
-	/**
-	 * Connected apps of the test, by name, besides production's `kira`, for the key of another app: none ever
-	 * receives mandates, and none exists outside test-utils (ADR 0030).
-	 */
-	readonly apps?: readonly string[];
-	/** How long a new mandate is good, in milliseconds. Unset: the platform's 15 minutes. */
-	readonly mandateLife?: number;
-}
-
-/** What a mandate of a test may set besides the session it is born of. */
-export interface MandateOptions {
-	/** The app it is issued for: `kira` unless given. One that receives no mandates throws. */
-	readonly app?: string;
-	/** The conversation it keeps: none unless given. */
-	readonly conversation?: string;
 }
 
 /** The backups of a test platform. */
@@ -334,11 +312,6 @@ export interface TestPreparation {
 		account: string,
 		device?: string,
 	): { readonly session: string; readonly device: string };
-	/**
-	 * Creates a real key of a connected app, `kira` or one of the option `apps`, with the same function as the command
-	 * `keys create`, at the instant of the clock. Returns the whole key, for `Authorization: Bearer`.
-	 */
-	key(app: string): string;
 }
 
 /** What a synthetic context may set besides its account. */
@@ -372,7 +345,7 @@ export interface TestPlatform<
 	dbFor<TSchema extends ModuleSchema>(module: ModuleDefinition<TSchema>): ModuleDatabase<TSchema>;
 	/**
 	 * A synthetic verified context for `account`. Unless `options` say otherwise: no via, a test device and
-	 * session, the account itself as the device's, the app channel, proven by password, no conversation.
+	 * session, the account itself as the device's, the app channel, proven by password.
 	 */
 	context(account: string, options?: ContextOptions): VerifiedContext;
 	/**
@@ -402,7 +375,7 @@ export interface TestPlatform<
 	/**
 	 * Confirms the pending confirmation `id` through the platform's real operation: its operation is evaluated
 	 * again and runs once. Returns a read's result, or a write's result and entry (or acknowledgement). Throws
-	 * `NOT_FOUND` for one out of reach, and a `CONFLICT` with its reason when its window closed, it expired or
+	 * `NOT_FOUND` for one out of reach, and a `CONFLICT` with its reason when it expired or
 	 * it was already consumed or rejected.
 	 */
 	confirm(context: VerifiedContext, id: string, options?: { readonly proof?: string }): unknown;
@@ -479,22 +452,6 @@ export interface TestPlatform<
 	 * state. That exception is only for tests: it shows what is stored, such as that no secret is.
 	 */
 	pendingConfirmations(): readonly Readonly<Record<string, unknown>>[];
-	/** A read-only snapshot of every key, as `keys list` shows it: never its secret. */
-	keys(): readonly ListedKey[];
-	/** Revokes the key `id` at the instant of the clock, as `keys revoke` does. An unknown id throws. */
-	revokeKey(id: string): void;
-	/**
-	 * Issues a real mandate, by the platform's one function of issuing, from the session of `browser`, signed in: it
-	 * keeps that session's account, device, device account and identity, which no option changes, and is good for the
-	 * mandate life from the instant of the clock. Returns its id, for the header `domus-mandate`. A browser not
-	 * signed in, a session that no longer lives and an app that receives no mandates throw.
-	 */
-	mandate(browser: TestBrowser, options?: MandateOptions): string;
-	/**
-	 * A read-only snapshot of every mandate row, expired ones and those of an ended session included, without the
-	 * hash of its id: what is stored, such as that restoring leaves none.
-	 */
-	mandates(): readonly MandateRow[];
 	/**
 	 * Closes the platform and removes the temporary folder it created. Safe to call more than once. Throws while
 	 * the background is active; disposing stops it first.
@@ -542,8 +499,6 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 	channelQueue,
 	push,
 	origins = [TEST_ORIGIN, TEST_PUSH_SUBJECT],
-	apps,
-	mandateLife,
 }: TestPlatformOptions<TModules>): TestPlatform<TModules> {
 	let tempDir: string | undefined;
 	let databaseFile = file ?? ":memory:";
@@ -587,7 +542,6 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 				confirmation,
 				filesDirectory,
 				origins,
-				...(mandateLife === undefined ? {} : { mandateLife }),
 				...(backups === undefined
 					? {}
 					: {
@@ -610,7 +564,6 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 				...(channelQueue === undefined ? {} : { channelQueue }),
 				...(push === undefined ? {} : { pushServices: push.hosts }),
 				fetch: push?.fetch ?? noPushService,
-				...(apps === undefined ? {} : { apps }),
 			},
 		);
 	} catch (error) {
@@ -632,7 +585,6 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		delegation: (account, area, level, value) =>
 			prepareDelegation(platform, account, area, level, value),
 		session: (account, device) => prepareSession(platform, account, device),
-		key: (app) => prepareKey(platform, app),
 	};
 	/** Runs one of the platform's sensitive operations through the real path of the actions. */
 	const operate = (
@@ -686,7 +638,7 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 		platform,
 		modules,
 		auth: { secret: TEST_AUTH_SECRET, origins: [TEST_ORIGIN] },
-		// Tests send bad keys on purpose: why each is refused is the operator's, tested at the door of platform.
+		// Tests send retired credentials on purpose: the operator's log of them is tested at the door of platform.
 		log: () => {},
 	});
 
@@ -773,15 +725,6 @@ export function createTestPlatform<const TModules extends readonly AnyModule[]>(
 			}) as readonly Annotation[],
 		log: () => readLog(platform),
 		pendingConfirmations: () => readPendingConfirmations(platform),
-		keys: () => readKeys(platform),
-		revokeKey: (id) => revokeKeyNow(platform, id),
-		mandate: (browser, { app = "kira", conversation } = {}) =>
-			issueMandate(platform, {
-				session: sessionOfBrowser(browser).session,
-				app,
-				...(conversation === undefined ? {} : { conversation }),
-			}),
-		mandates: () => readMandates(platform),
 		close,
 		// A job the test left held, often by a failed assertion before its release, would keep the stop waiting on
 		// a clock that only the test moves: disposing moves it past the stop margin, so the platform closes and the
