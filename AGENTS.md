@@ -60,7 +60,7 @@ Apps only wire programs together; business logic lands in a module or in platfor
 
 ### Workflow
 
-From idea to merge with the mattpocock skills, step by step and inside the current phase: `docs/agents/workflow.md`.
+Read `docs/agents/workflow.md` before running a mattpocock skill (grill, spec, tickets, implement, review, PR) or closing a subphase on the Pi: it holds this repo's steps for each, the implementer brief and the Pi helpers.
 
 ### Issue tracker
 
