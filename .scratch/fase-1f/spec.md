@@ -90,7 +90,7 @@ Se quedan la tabla de delegación, `via` con el valor `kira` y las confirmacione
 - La regla del aparato compartido queda así: en una lectura de un área que declara `confirmOnSharedDevice`, si la cuenta representada es la cuenta de aparato, se deniega. El caso del miembro reconocido en un aparato compartido desaparece, porque sin voz no puede darse.
 - Las garantías que la 1e cumplía por el canal `contexto` del mandato se cumplen ahora por `via`, dentro de la decisión, para que no dependan de un canal que ya no existe:
     - un comprobante no cuenta en un contexto con `via`; vía el agente, una operación que pide comprobante solo se completa cuando la persona confirma desde la app, como hoy;
-    - un contexto con `via` no confirma ni rechaza, aunque declare el canal `app`;
+    - un contexto con `via` no confirma ni rechaza, aunque declare el canal `app`. Endurece la regla de hoy, que solo cerraba confirmar al mandato porque el mandato llevaba siempre el canal `contexto`;
     - la lista de operaciones de la plataforma que admite un contexto con `via`, hoy `log/read` y `log/undo`, pasa de la puerta a la autorización; cualquier otra operación de la plataforma, también una nueva o desconocida, se deniega vía el agente.
 - Lo demás de la decisión no cambia: permisos por área y nivel, delegación que rebaja, `manage` y operaciones sensibles con comprobante, acciones que siempre piden confirmación, y visibilidad.
 
@@ -98,12 +98,13 @@ Se quedan la tabla de delegación, `via` con el valor `kira` y las confirmacione
 
 - Desaparecen la marca de «solo por `contexto`» y el cierre de su ventana. Una pendiente se confirma o se rechaza solo desde la app, por la misma persona, en sus 24 h.
 - Sale el plazo de unos 60 s de la configuración de los plazos de confirmación.
-- La comprobación al confirmar sigue igual: vuelve a autorizar con el contexto de origen, con su delegación de entonces, y verifica que la operación es exactamente la misma.
+- La comprobación al confirmar sigue igual: vuelve a autorizar con el contexto de origen, con su delegación de entonces, y verifica que la operación es exactamente la misma. Quien confirma no es quien pidió: la persona confirma por el canal `app` y sin `via`, y la operación conserva el `via` de origen para la delegación y para el registro.
+- Mientras las dos columnas sigan en el esquema, se conserva el mínimo código que las escribe, sin significado funcional, porque el cierre de la ventana no admite nulos ni tiene valor por defecto, y una pendiente antigua «solo por `contexto`» sigue sin poder confirmarse desde la app. La migración se lleva los dos restos.
 
 ### La migración (Q7)
 
 - Una migración nueva de la plataforma, generada como las demás desde el esquema, borra la tabla de las llaves, la de los mandatos y las columnas de «solo por `contexto`» y del cierre de su ventana de las confirmaciones.
-- Antes de quitar las columnas, borra las pendientes marcadas como «solo por `contexto`». Las demás pendientes se conservan con sus datos y su caducidad.
+- Antes de quitar las columnas, borra las pendientes marcadas como «solo por `contexto`». El generador no deduce ese borrado: la sentencia se añade a la migración nueva antes de su commit, y dos generaciones seguidas siguen sin dejar cambios. Las demás pendientes se conservan con sus datos y su caducidad.
 - Las migraciones anteriores no cambian. La regla de comprobación de la identidad de los mandatos desaparece con su tabla.
 
 ### La puerta (Q8)
@@ -194,4 +195,16 @@ Quedan al día, al cerrar la 1f:
 
 - El ADR 0034, sus enlaces de vuelta, el README de arquitectura, el glosario y el plan ya están al día en la rama del grilling, con lo que sale marcado como «sale en la 1f». La 1f los deja como vigentes.
 - Algunas decisiones de detalle se toman en esta spec y no en el grilling: que el canal se queda con un solo valor; que las garantías del canal `contexto` pasan a `via` dentro de la decisión; que la lista de operaciones de la plataforma que admite `via` pasa de la puerta a la autorización; que `PROTOCOL` no sube; y que la migración borra las pendientes «solo por `contexto`» antes de quitar sus columnas. Si la implementación muestra que alguna no encaja, se corrige aquí antes de seguir.
+- Los `AGENTS.md` y `docs/agents/packages.md` cambian en el mismo ticket que retira lo que describen; el último ticket completa la guía, `despliegue.md` y el estado del plan tras comprobar la Pi y la copia de la noche.
 - La 1f no espera a la 1d3 ni a la 1d4, pero no puede solaparse con un cambio incompatible en sus migraciones o en el despliegue. Al empezar, se comprueba en el plan si alguna sigue abierta.
+
+## Tareas
+
+| Tarea                                                                 | Qué                                                       | Bloqueada por |
+| --------------------------------------------------------------------- | --------------------------------------------------------- | ------------- |
+| [01](issues/01-las-garantias-via-el-agente-en-la-autorizacion.md)     | Las garantías vía el agente, en la autorización           | —             |
+| [02](issues/02-retirar-assistant-voice-gateway-y-utils-connection.md) | Retirar `assistant`, `voice-gateway` y `utils/connection` | —             |
+| [03](issues/03-retirar-las-llaves-y-los-mandatos.md)                  | Retirar las llaves y los mandatos                         | 01, 02        |
+| [04](issues/04-retirar-el-canal-contexto-y-la-identidad-voice.md)     | Retirar el canal `contexto` y la identidad `voice`        | 03            |
+| [05](issues/05-la-migracion.md)                                       | La migración                                              | 03, 04        |
+| [06](issues/06-la-pi-y-el-cierre.md)                                  | La Pi y el cierre                                         | 05            |
