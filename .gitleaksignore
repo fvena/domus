@@ -1,0 +1,3 @@
+# Findings gitleaks reports that are not secrets, by fingerprint. Each one says why.
+# A made-up key secret in a test, flagged by generic-api-key in 8.24.3; the test now builds it at run time.
+3ac9169bd2ac19250217b9a04606d5eb8bfab62f:packages/platform/identity/keys.test.ts:generic-api-key:52

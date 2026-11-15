@@ -57,7 +57,8 @@ describe("checkKey", () => {
 });
 
 const ID = "AbCdEfGh-_0";
-const SECRET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN-_0";
+// Built at run time and of low entropy, so no secret scanner takes it for a real secret.
+const SECRET = `${"Ab".repeat(20)}-_0`;
 
 describe("parseKey", () => {
 	it("reads the id and the secret of a key of the agreed form", () => {
