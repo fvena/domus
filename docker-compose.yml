@@ -1,5 +1,5 @@
 # Domus: `docker compose up -d --build`, then open http://localhost:3000.
-# Three containers, each restarted on its own (docs/architecture/adr/0003-procesos-y-contenedores.md).
+# One container, api, restarted on its own (docs/architecture/adr/0003-procesos-y-contenedores.md, ADR 0034).
 # The web app is not a container of its own: the api serves its built files.
 name: domus
 
@@ -38,38 +38,6 @@ services:
             DOMUS_AUTH_SECRET: ${DOMUS_AUTH_SECRET:?set DOMUS_AUTH_SECRET in .env}
             DOMUS_ORIGINS: ${DOMUS_ORIGINS:-http://localhost:3000}
 
-    assistant:
-        <<: *hardening
-        build:
-            context: .
-            dockerfile: docker/Dockerfile
-            target: assistant
-        image: domus-assistant:${DOMUS_IMAGE_TAG:-local}
-        # No data volume, by construction: Kira reaches Domus only through the api (adr/0005-kira-aislada.md).
-        # Its key, read once at start: after changing the file, recreate the container (ADR 0030).
-        secrets:
-            - kira-key
-        environment:
-            DOMUS_API_URL: http://api:3000
-            TZ: ${TZ:-Europe/Madrid}
-        depends_on:
-            api:
-                condition: service_healthy
-
-    voice-gateway:
-        <<: *hardening
-        build:
-            context: .
-            dockerfile: docker/Dockerfile
-            target: voice-gateway
-        image: domus-voice-gateway:${DOMUS_IMAGE_TAG:-local}
-        environment:
-            DOMUS_API_URL: http://api:3000
-            TZ: ${TZ:-Europe/Madrid}
-        depends_on:
-            api:
-                condition: service_healthy
-
 volumes:
     domus-data:
     domus-backups:
@@ -79,7 +47,3 @@ secrets:
     # repository, with permissions 600 and owned by uid 1000, the container's `node`.
     backup-password:
         file: ${DOMUS_BACKUP_PASSWORD:?set DOMUS_BACKUP_PASSWORD in .env to the file with the backups password}
-    # The key of Kira, at /run/secrets/kira-key in assistant: a file outside the repository written by
-    # `keys create kira`, with permissions 600 and owned by uid 1000. Empty, assistant starts and stays rejected.
-    kira-key:
-        file: ${DOMUS_KIRA_KEY:?set DOMUS_KIRA_KEY in .env to the file with the key of Kira}

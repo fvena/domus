@@ -121,9 +121,10 @@ Se quedan la tabla de delegación, `via` con el valor `kira` y las confirmacione
 
 ### Herramientas, Docker y CI (Q9)
 
-- Salen las reglas de dependencias que solo existían por los programas y sus casos en `architecture.test.ts`.
+- Salen las reglas de dependencias que solo existían por los programas y sus casos en `architecture.test.ts`. La que alcanzaba la plataforma por cualquier cadena de imports se queda para `web`, como `web-never-reaches-platform`.
+- Del tema `program` de `@domus/utils` salen también lo que solo usaban los dos programas: `readUrl` y el servidor de `/health`. Se quedan `readPort` y `onShutdown`, que usa `api`.
 - `.gitleaks.toml` pierde la regla de las llaves y se queda con las reglas por defecto.
-- `docker-compose.yml` pierde los servicios `assistant` y `voice-gateway` y el secreto `kira-key`; el `Dockerfile`, sus destinos; `.env.local.example`, `DOMUS_KIRA_KEY`; la CI, su matriz de build y su clave vacía.
+- `docker-compose.yml` pierde los servicios `assistant` y `voice-gateway` y el secreto `kira-key`; el `Dockerfile`, sus destinos; `.env.local.example`, `DOMUS_API_URL` y `DOMUS_API_KEY_FILE`, las variables locales de los dos programas (`DOMUS_KIRA_KEY` solo está en el `.env` de la Pi); la CI, su matriz de build y su clave vacía.
 - Sale `tooling/scripts/assistant-acts.test.ts`, que probaba el criterio del ADR 0020 con el cliente de `assistant`.
 
 ### La comprobación en la Pi (Q10)

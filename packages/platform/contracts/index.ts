@@ -1,5 +1,5 @@
 // What platform answers over RPC, besides the modules. Pure: schemas and contracts only, so the
-// browser, assistant and voice-gateway can import it (@domus/platform/contracts).
+// browser can import it (@domus/platform/contracts).
 import { oc } from "@orpc/contract";
 import { z } from "zod";
 
