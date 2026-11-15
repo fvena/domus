@@ -166,7 +166,7 @@ En la 1e no hay turnos de conversación, así que ninguna ruta, comando ni servi
 ### Autorización vía Kira (Q8, Q13, Q14)
 
 - No cambia la decisión. Con `via`, ya se aplica la delegación por área y nivel, y un área sin fila deniega. Una operación sensible pide una identidad acreditada por contraseña y un comprobante, y vía Kira cambiar acceso o delegación se deniega siempre.
-- Una acción `manage` vía Kira con `identity: password` llega a pedir comprobante, pero `proofs/request` no admite mandatos, así que no se completa.
+- Una acción `manage` vía Kira con `identity: password` llega a pedir comprobante, pero `proofs/request` no admite mandatos y un comprobante solo cuenta por el canal `app`, así que no se completa: ni con uno que la persona pidió en la app desde la misma sesión del mandato.
 - Una pendiente creada vía Kira guarda el contexto con el canal `contexto` y la delegación de entonces. Se confirma por la app desde cualquier sesión de la misma persona, durante sus 24 h, como cualquier otra. Por `contexto` no hay forma de confirmarla en la 1e.
 - La clave de idempotencia sigue siendo única por cuenta y `via`.
 - Vía Kira, `log/read` pide la delegación del área `platform` en `read`, porque leer el registro es una lectura de esa área, y `log/undo` la de la inversa, con el área y el nivel de la acción que deshace y la delegación del momento de deshacer, no la de la escritura. Las dos ya lo hacían en el camino de las acciones; la 05 solo les abre la puerta.

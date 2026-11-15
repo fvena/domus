@@ -50,7 +50,7 @@ El mandato es una credencial. No sale en logs, errores ni trazas. El registro de
 - el canal en directo, porque Kira no guarda caché;
 - subir y descargar archivos: la 5a decide cómo accede Kira a los adjuntos de sus conversaciones (ADR 0012), sin abrir por ello las rutas generales de archivos a los mandatos.
 
-Una acción `manage` vía Kira no se completa, porque `proofs/request` no acepta mandatos.
+Una acción `manage` vía Kira no se completa. `proofs/request` no acepta mandatos, y no basta: un comprobante se ata a la sesión, y un mandato de esa misma sesión podría traer uno que la persona pidió en la app. Por eso un comprobante solo cuenta por el canal `app`. Vía Kira cuenta solo cuando la persona confirma desde la app una pendiente que nació de Kira.
 
 **El «sí» lo reconoce la puerta.** Un mandato prueba de dónde viene un contexto, no que la persona apruebe una operación. Por eso `confirmations/confirm` nunca acepta un mandato: si Kira pudiera confirmar, un error del modelo o una instrucción colada en un correo reenviado confirmaría por la persona. Por `contexto` confirma la puerta, que recibe cada turno antes que Kira. Confirma con el contexto de ese turno cuando se cumple todo esto:
 

@@ -222,6 +222,28 @@ describe("Kira with a mandate", () => {
 		).rejects.toMatchObject(unauthorized);
 		expect(test.log()).toHaveLength(1);
 	});
+
+	it("does not take a proof the person asked for in the app from the same session, which stays good for the app", async () => {
+		await using test = await probeWithAna();
+		test.prepare.grant("ana", "probe", "manage");
+		test.prepare.delegation("ana", "probe", "manage", "yes");
+		const browser = await signedIn(test, "ana");
+		const client = kiraWith(test, test.prepare.key("kira"), test.mandate(browser));
+		await client.probe.addNote({ body: "leche" }, keyed("k1"));
+		const input = { visibility: "public" } as const;
+		const { proof } = await app(browser).proofs.request({
+			password: PASSWORD,
+			operation: { action: "probe.configure", input },
+		});
+
+		await expect(
+			client.probe.configure(input, { context: { idempotencyKey: "k2", proof } }),
+		).rejects.toMatchObject({ code: "STEP_UP_REQUIRED" });
+		expect(test.log()).toHaveLength(1);
+		expect(
+			await app(browser).probe.configure(input, { context: { idempotencyKey: "k3", proof } }),
+		).toEqual({ result: { notes: 1 }, entry: 2 });
+	});
 });
 
 describe("authorization via Kira", () => {
