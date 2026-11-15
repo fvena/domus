@@ -1,5 +1,5 @@
-// The real gitleaks for the tests, found as the pre-commit hook finds it: the one on PATH, or else its Docker image
-// with the version the hook pins. Without either, the tests fail with what to install, never skip.
+// The real gitleaks for the tests, found as the pre-commit hook finds it: the one on PATH only at the version the hook
+// pins, or else its Docker image. Without either, the tests fail with what to install, never skip.
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -25,6 +25,18 @@ interface Invocation {
 	seen: string;
 }
 
+/** What the command prints on stdout when it runs and exits 0, or `undefined`. */
+function printed(executable: string, args: string[]): string | undefined {
+	try {
+		return execFileSync(executable, args, {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+	} catch {
+		return undefined;
+	}
+}
+
 /** Answers when the command runs and exits 0. */
 function answers(executable: string, args: string[]): boolean {
 	try {
@@ -35,8 +47,8 @@ function answers(executable: string, args: string[]): boolean {
 	}
 }
 
-/** The image the hook pins, so the tests and the hook scan with the same version. */
-function pinnedImage(): string {
+/** The image the hook pins, so the tests, the hook and CI scan with the same version. */
+export function pinnedImage(): string {
 	const image = /^GITLEAKS_IMAGE=(\S+)$/m.exec(readFileSync(hook, "utf8"))?.[1];
 	if (image === undefined) throw new Error(`no GITLEAKS_IMAGE in ${hook}`);
 	return image;
@@ -84,9 +96,17 @@ function scanner(invoke: (folder: string, config: string, output: string) => Inv
 	};
 }
 
-/** The gitleaks to scan with; throws, with what to install, when there is neither gitleaks nor Docker. */
+/** The version of the image the hook pins, as `gitleaks version` prints it, without the `v`. */
+function pinnedVersion(): string {
+	return pinnedImage().replace(/^.*:v/, "");
+}
+
+/**
+ * The gitleaks to scan with: the one on PATH at the pinned version, or else the pinned image. Throws, with what
+ * to install, when there is neither.
+ */
 export function findGitleaks({ gitleaks = "gitleaks", docker = "docker" } = {}): Gitleaks {
-	if (answers(gitleaks, ["version"])) {
+	if (printed(gitleaks, ["version"])?.trim().replace(/^v/, "") === pinnedVersion()) {
 		return scanner((folder, config, output) => ({
 			command: gitleaks,
 			args: dirScan(folder, config, join(output, "report.json")),
@@ -119,5 +139,5 @@ export function findGitleaks({ gitleaks = "gitleaks", docker = "docker" } = {}):
 			seen: "/scan",
 		}));
 	}
-	throw new Error("gitleaks is required: brew install gitleaks, or start Docker");
+	throw new Error(`gitleaks is required: start Docker, or install gitleaks ${pinnedVersion()}`);
 }

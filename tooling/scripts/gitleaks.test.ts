@@ -2,13 +2,13 @@
 // and in CI. They read `.gitleaks.toml` at the root; this runs the real gitleaks with it over samples written outside
 // the repository. No sample is ever literal here: each one is built at run time.
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { findGitleaks, type Gitleaks } from "./gitleaks";
+import { findGitleaks, type Gitleaks, pinnedImage } from "./gitleaks";
 
 const root = join(import.meta.dirname, "../..");
 const config = join(root, ".gitleaks.toml");
@@ -81,6 +81,27 @@ describe("findGitleaks", () => {
 	it("fails with what to install when there is neither gitleaks nor Docker", () => {
 		expect(() =>
 			findGitleaks({ gitleaks: "/nonexistent/gitleaks", docker: "/nonexistent/docker" }),
-		).toThrow("gitleaks is required: brew install gitleaks, or start Docker");
+		).toThrow("gitleaks is required: start Docker, or install gitleaks 8.24.3");
+	});
+
+	it("does not take a gitleaks on PATH of another version than the pinned one", () => {
+		const bin = mkdtempSync(join(tmpdir(), "domus-gitleaks-bin-"));
+		try {
+			const other = join(bin, "gitleaks");
+			writeFileSync(other, "#!/bin/sh\necho 8.30.1\n");
+			chmodSync(other, 0o755);
+			expect(() => findGitleaks({ gitleaks: other, docker: "/nonexistent/docker" })).toThrow(
+				"gitleaks is required",
+			);
+		} finally {
+			rmSync(bin, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("the pinned gitleaks", () => {
+	it("is the same image in CI as in the pre-commit hook", () => {
+		const workflow = readFileSync(join(root, ".github/workflows/validate-prs.yml"), "utf8");
+		expect(workflow.match(/zricethezav\/gitleaks:\S+/g)).toEqual([pinnedImage()]);
 	});
 });
