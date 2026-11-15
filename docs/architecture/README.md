@@ -2,13 +2,15 @@
 
 Domus es el organizador privado de una casa de dos adultos en España, alojado en una Raspberry Pi 5, con Kira (el asistente de voz y texto) dentro del mismo producto. Este documento recoge las decisiones de arquitectura tomadas en grilling el 2026-11-11 (preguntas P1–P55). Cada decisión importante tiene su ADR en [`adr/`](adr/); si este documento y un ADR no coinciden, manda el ADR más reciente, y se corrigen los dos en el mismo commit.
 
+Lo que describe es lo vigente. A partir de la fase 5, Domus y Kira pasan a ser productos independientes y Domus admite un agente conectado opcional: lo resume la [sección 8](#8-a-partir-de-la-fase-5), y cada apartado que cambia lo avisa.
+
 Idioma: documentos, conversación y el texto que ve la familia en español; código, identificadores, commits y los mensajes de log para quien opera el sistema en inglés. Las instrucciones para agentes (`AGENTS.md`, `docs/agents/`) van en inglés, como el código que describen. El vocabulario compartido está en [`GLOSSARY.md`](../../GLOSSARY.md).
 
 ## 1. Producto y forma de trabajar
 
 Ver [ADR 0001](adr/0001-domus-con-kira-dentro.md) y [ADR 0002](adr/0002-vue-spa-sqlite-y-pwa.md).
 
-- **Un solo producto:** Kira vive en el mismo repositorio y en el mismo producto que Domus.
+- **Un solo producto:** Kira vive en el mismo repositorio y en el mismo producto que Domus. Cambia en la fase 5 ([ADR 0031](adr/0031-domus-con-un-agente-opcional.md)).
 - **Cada funcionalidad entra después de su propia revisión en grilling** (P41).
 - **Tecnología:** SQLite (P37), interfaz en Vue como SPA sin SSR (P38), primero PWA y Capacitor sobre la misma SPA solo si se queda corta (P39). La API son procedimientos oRPC servidos con Hono.
 - **Inicio de sesión y permisos:** Better Auth con correo y contraseña, y step-up ligado a la operación exacta (P36). Los permisos los decide una función pura de `platform/authorization`, sin Permix ([ADR 0023](adr/0023-identidad-y-autorizacion.md)).
@@ -24,6 +26,8 @@ Ver [ADR 0001](adr/0001-domus-con-kira-dentro.md) y [ADR 0002](adr/0002-vue-spa-
 | `assistant`     | Kira, la parte que piensa. Solo habla con `api`.                                                                                                  |
 | `voice-gateway` | Satélites, palabra de activación, STT/TTS y quién habla. Solo habla con `api`.                                                                    |
 
+En la fase 5, `assistant` y `voice-gateway` salen hacia Kira, y la puerta deja de autenticar canales externos y de reconocer el «sí» ([sección 8](#8-a-partir-de-la-fase-5)).
+
 **Una sola puerta** ([ADR 0004](adr/0004-una-sola-puerta.md)):
 
 - `api` autentica todos los canales (app, Telegram, voz, apps conectadas) y pasa las conversaciones a `assistant` (P2, P33). Un turno nunca corre dentro de una petición HTTP.
@@ -31,11 +35,11 @@ Ver [ADR 0001](adr/0001-domus-con-kira-dentro.md) y [ADR 0002](adr/0002-vue-spa-
 - Kira habla con Domus por la API, como cualquier cliente, y nunca abre el núcleo por dentro (P7). Se autentica con la llave de su app, `kira`, de la que puede haber dos vivas durante una rotación, y en cada petición dice de parte de quién habla (P8). La llave dice qué app es. De parte de quién lo dice un mandato que emite la puerta a partir de una interacción que ella autenticó, que muere con su sesión y no da permisos. Un «sí» por `contexto` lo reconoce la puerta, nunca Kira ([ADR 0030](adr/0030-llaves-y-mandatos.md)).
 - **Contrato de conversación:** entra texto con adjuntos y quién habla; sale un flujo de eventos cancelable (trozo, tarjeta, acción a la espera de «sí», fin), con salidas `hablada`, `texto` y `estructurada`.
 
-**Kira aislada por construcción** ([ADR 0005](adr/0005-kira-aislada.md), P51): su contenedor no monta el volumen de datos, la sesión de Claude Code arranca sin herramientas propias (terminal y ficheros) y solo tiene su llave para la API.
+**Kira aislada por construcción** ([ADR 0005](adr/0005-kira-aislada.md), P51): su contenedor no monta el volumen de datos, la sesión de Claude Code arranca sin herramientas propias (terminal y ficheros) y solo tiene su llave para la API. Desde la fase 5 el aislamiento es entre productos, y en la página de Domus no corre código del agente.
 
 **Identidad** ([ADR 0006](adr/0006-identidad-de-kira-y-aparatos.md)):
 
-- Kira actúa como la cuenta con la que entró el aparato. En un aparato con la cuenta `device`, si reconoce la voz de un miembro, actúa como ese miembro mientras dure la conversación; si no, actúa como `device` (P20, P21, P22b).
+- Kira actúa como la cuenta con la que entró el aparato. En un aparato con la cuenta `device`, si reconoce la voz de un miembro, actúa como ese miembro mientras dure la conversación; si no, actúa como `device` (P20, P21, P22b). Desde la fase 5, la voz y las huellas son del agente, y en una pantalla de Domus reconocer una voz no cambia la cuenta ([ADR 0033](adr/0033-conversacion-alojada-y-voz.md)).
 - «Soy Paco» solo vale si la voz coincide (P24).
 - Las huellas de voz son datos personales y viven en Domus; la voz guarda solo una copia para trabajar (P4).
 - Los aparatos se emparejan en Domus con un código y eligen con qué cuenta entran (P26). No hay tipos de aparato: una pantalla de pared es un aparato con la cuenta `device`.
@@ -44,7 +48,7 @@ Ver [ADR 0001](adr/0001-domus-con-kira-dentro.md) y [ADR 0002](adr/0002-vue-spa-
 ## 3. Permisos, IA y visibilidad
 
 - **Perfiles solo para personas** ([ADR 0007](adr/0007-perfiles-y-permisos-si-o-no.md)): `admin` (Paco), `member` (Rocío) y `device` (cuenta compartida). Los permisos son **sí o no**, por área y nivel, unos 50 (P14), sin permisos por acción suelta. Cada contrato declara su área y su nivel (`read`, `write` o `manage`, acumulativos); el admin tiene `manage` en todas y cambia el acceso de `member` y `device` ([ADR 0023](adr/0023-identidad-y-autorizacion.md)).
-- **La IA no es un perfil** ([ADR 0008](adr/0008-la-ia-como-filtro-de-delegacion.md)): es una tabla de delegación que solo rebaja los permisos de la persona por la que habla (P11) y añade «pedir confirmación» a cada permiso (P18).
+- **La IA no es un perfil** ([ADR 0008](adr/0008-la-ia-como-filtro-de-delegacion.md)): es una tabla de delegación que solo rebaja los permisos de la persona por la que habla (P11) y añade «pedir confirmación» a cada permiso (P18). Desde la fase 5 es la tabla del agente conectado, nace denegada entera y toda confirmación se hace en Domus ([ADR 0032](adr/0032-autorizacion-del-agente.md)).
     - Las tareas de administrador por la IA empiezan en «no» y se pueden abrir. Contraseñas, PIN, llaves y emparejamiento no son acciones y quedan siempre fuera (P12).
     - Algunas acciones declaran en su definición que siempre piden confirmación, caso por caso, y nunca se confirma dos veces (P18).
     - La columna «ver» de la tabla decide qué ve la IA: lo que la IA no ve no sale hacia el modelo (P17).
@@ -55,13 +59,13 @@ Ver [ADR 0001](adr/0001-domus-con-kira-dentro.md) y [ADR 0002](adr/0002-vue-spa-
 
 ## 4. IA, memoria y mecanismos generales
 
-- **Una sola configuración de IA** ([ADR 0011](adr/0011-una-configuracion-de-ia.md), P5): AI SDK Core para las llamadas sueltas y un runtime propio del agent con dos adapters, el Claude Agent SDK con la suscripción y AI SDK Core para modelos por API.
+- **Una sola configuración de IA** ([ADR 0011](adr/0011-una-configuracion-de-ia.md), P5): AI SDK Core para las llamadas sueltas y un runtime propio del agent con dos adapters, el Claude Agent SDK con la suscripción y AI SDK Core para modelos por API. Desde la fase 5 es de Kira.
 - **Lo compartido llega a Kira** ([ADR 0012](adr/0012-lo-compartido-llega-a-kira.md), P52): una foto, un PDF, un correo reenviado o un mensaje de Telegram llegan a Kira como conversación con adjunto, y lo que propone se confirma por lote. Los trabajos largos van en segundo plano, con aviso al acabar.
 - **Fechas dichas con palabras** ([ADR 0013](adr/0013-fechas-dichas-con-palabras.md), P53): las interpreta el modelo y la API las valida. Las frases rápidas solo entienden «hoy», «mañana» y los días de la semana.
-- **Memoria** ([ADR 0014](adr/0014-memoria-en-domus.md), P3, P25): vive en Domus, privada de cada persona o pública de la casa, por área. Kira guarda sin pedir aprobación; se puede preguntar «¿qué sabes de mí?» y pedir «olvida…». Las sesiones de Claude Code no son la memoria.
+- **Memoria** ([ADR 0014](adr/0014-memoria-en-domus.md), P3, P25): vive en Domus, privada de cada persona o pública de la casa, por área. Kira guarda sin pedir aprobación; se puede preguntar «¿qué sabes de mí?» y pedir «olvida…». Las sesiones de Claude Code no son la memoria. Desde la fase 5, la memoria es de Kira ([ADR 0031](adr/0031-domus-con-un-agente-opcional.md)).
 - **Tareas programadas generales** ([ADR 0015](adr/0015-tareas-programadas-generales.md), P29, P30): cualquier módulo declara una tarea con su frecuencia, a la hora de la familia; ajustes muestra la lista, la última ejecución y su resultado, y permite cambiar la hora, pausar o lanzar. Solo ejecutan código del repositorio. Siguen las invariantes de Hermes: la siguiente ejecución se marca antes de lanzar, hay registro de ejecuciones, se recupera lo perdido y hay un vigilante de inactividad. La revisión nocturna de la memoria es una tarea más. En la 1d el planificador solo programa mantenimiento de la plataforma; la tarea de un módulo y su actor llegan con la primera ([ADR 0025](adr/0025-segundo-plano.md)).
 - **Segundo plano** ([ADR 0025](adr/0025-segundo-plano.md)): la cola vive en `api`, con un carril corto y otro de mantenimiento. Un trabajo pedido se vuelve a autorizar con la sesión vigente; un aviso, contra su destinatario; el mantenimiento no tiene actor ni pasa por `module-sdk`. Lo que sale de SQLite lo deja la escritura en una bandeja de salida dentro de su transacción. Los eventos en directo son invalidaciones sin contenido, repartidas en memoria tras confirmar a quien veía o ve cada registro, y la app no guarda datos protegidos en el aparato. Los avisos son Web Push a la PWA: cada uno trata de un registro, va a la única suscripción habilitada de cada aparato del destinatario, solo por servicios de push conocidos, y se vuelve a autorizar antes de cada envío ([ADR 0029](adr/0029-eventos-en-directo-y-avisos.md)). Un archivo hereda el acceso de su registro: sus bytes, direccionados por hash, se publican sin perder nada tras un corte; vincularlo o soltarlo cambia su registro y deshacer un borrado lo recupera; y la descarga es una lectura del módulo ([ADR 0028](adr/0028-archivos.md)). Las copias, con restic, son diarias y por ahora en el mismo NVMe, y la instantánea la saca un proceso hijo con `VACUUM INTO` ([ADR 0027](adr/0027-la-instantanea-en-un-proceso-hijo.md)). Restaurar toma un cerrojo exclusivo sobre la base, prepara y sanea la copia aparte (descarta los trabajos pendientes y cierra todas las sesiones) y la instala con un intercambio que resiste un corte ([ADR 0026](adr/0026-copias-de-seguridad-y-restaurar.md)).
-- **Lo que un módulo aporta a Kira** ([ADR 0016](adr/0016-lo-que-un-modulo-aporta-a-kira.md), P31): una skill (`SKILL.md`), frases rápidas y avisos para la iniciativa. Solo texto y descripciones; Kira actúa llamando a acciones por la API.
+- **Lo que un módulo aporta a Kira** ([ADR 0016](adr/0016-lo-que-un-modulo-aporta-a-kira.md), P31): una skill (`SKILL.md`), frases rápidas y avisos para la iniciativa. Solo texto y descripciones; Kira actúa llamando a acciones por la API. Desde la fase 5, ese material se sirve por la interfaz pública a cualquier agente.
 
 ## 5. Estructura del repositorio
 
@@ -120,12 +124,23 @@ El plan por fases, con lo que incluye cada una, cuándo se da por terminada y su
 
 ## 7. Abierto
 
-- **P49, el interruptor para apagar un módulo.** Se decide al revisar los módulos. Si existe, apaga el módulo entero: rutas, tools de Kira y tareas programadas.
+- **P49, el interruptor para apagar un módulo.** Se decide al revisar los módulos. Si existe, apaga el módulo entero: rutas, tools del agente y tareas programadas.
 - **Llamadas entre acciones de módulos** ([ADR 0022](adr/0022-acciones.md)): se deciden con su primer caso real.
 - **Efectos fuera de SQLite que no admiten duplicados** ([ADR 0025](adr/0025-segundo-plano.md)): la bandeja de salida ya existe; la entrega idempotente en destino o con resultado incierto se decide con Home Assistant o AimHarder.
-- **El actor `system` y las tareas por persona** ([ADR 0025](adr/0025-segundo-plano.md)): se deciden con la primera tarea de un módulo y con la revisión de la memoria (fase 7).
+- **El actor `system` y las tareas por persona** ([ADR 0025](adr/0025-segundo-plano.md)): se deciden con la primera tarea de un módulo. La revisión de la memoria ya no es de Domus ([ADR 0031](adr/0031-domus-con-un-agente-opcional.md)).
 - **Borrar datos privados** ([ADR 0022](adr/0022-acciones.md)): antes de admitir datos privados reales se define cómo afecta su borrado al registro de acciones, a las inversas y a las copias de seguridad. La retención 7/4/3 no garantiza un plazo máximo de conservación de lo borrado ([ADR 0026](adr/0026-copias-de-seguridad-y-restaurar.md)).
-- **Se deciden en la fase 5:** la forma del agent, el vocabulario, los evals, los parámetros y el afinado de voz.
+- **En la especificación de la fase 5:** cómo viajan los bytes de un archivo que el agente guarda en Domus, y qué sustituye para el enlace del agente a las reservas y a los archivos preparados ([ADR 0032](adr/0032-autorizacion-del-agente.md)); y el prototipo que fija AG-UI 1.0 o un contrato propio ([ADR 0033](adr/0033-conversacion-alojada-y-voz.md)). La forma del agent, el vocabulario, los evals, los parámetros y el afinado de voz pasan al plan de Kira.
+
+## 8. A partir de la fase 5
+
+Domus funciona como organizador completo sin agente, y Kira es un producto aparte, con su repositorio, en la misma Pi ([ADR 0031](adr/0031-domus-con-un-agente-opcional.md)).
+
+- **Un agente conectado, opcional.** Uno para toda la casa, Kira u otro, que sirve para la conversación alojada y para MCP. Sustituirlo revoca las autorizaciones del anterior.
+- **Qué es de cada uno.** De Kira: los canales externos, sus personas, las conversaciones, la memoria, la voz, la configuración de IA, la iniciativa y los especialistas. De Domus: los datos, las acciones, la autorización, la visibilidad, la delegación, las confirmaciones, el registro, sus avisos y el material de los módulos.
+- **Autorización** ([ADR 0032](adr/0032-autorizacion-del-agente.md)). Perfil OAuth de MCP con el cliente dado de alta por el admin. Cada persona da su enlace del agente, que dura hasta que se revoca; en la conversación alojada el agente usa un mandato que muere con la sesión. Cada petición comprueba en la base que su autorización sigue viva. La delegación nace denegada entera.
+- **Confirmar siempre en Domus.** Nunca vale un «sí» que llegue por el agente. Una lectura confirmada se aprueba y la ejecuta después el agente; las lecturas de salud vía el agente piden siempre confirmación.
+- **Conversación alojada y voz** ([ADR 0033](adr/0033-conversacion-alojada-y-voz.md)). Chat y voz dentro de Domus, con AG-UI 1.0 si el prototipo lo confirma. El historial lo guarda el agente. El detector de la palabra de activación es de Domus, y en su página no corre código del agente.
+- **La confianza que se acepta.** En sus propios canales, el agente decide quién habla; Domus lo limita con la delegación, la visibilidad, las confirmaciones y la revocación, y lo ya entregado queda a cargo del agente.
 
 ## Índice de ADR
 
@@ -161,3 +176,6 @@ El plan por fases, con lo que incluye cada una, cuándo se da por terminada y su
 | [0028](adr/0028-archivos.md)                                            | Archivos                                            |
 | [0029](adr/0029-eventos-en-directo-y-avisos.md)                         | Eventos en directo y avisos                         |
 | [0030](adr/0030-llaves-y-mandatos.md)                                   | Llaves y mandatos                                   |
+| [0031](adr/0031-domus-con-un-agente-opcional.md)                        | Domus con un agente opcional                        |
+| [0032](adr/0032-autorizacion-del-agente.md)                             | Autorización del agente                             |
+| [0033](adr/0033-conversacion-alojada-y-voz.md)                          | Conversación alojada y voz                          |

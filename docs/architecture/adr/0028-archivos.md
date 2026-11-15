@@ -36,3 +36,5 @@ Precisa los ADR 0023, 0025 y 0026: dónde viven los archivos, cómo se suben y s
 
 Fecha: 2026-11-13. Preguntas del grilling: Q1–Q14 de la fase 1d3.
 Precisado por el ADR 0030: un mandato no sube ni descarga archivos. Cómo accede Kira a los adjuntos de sus conversaciones lo decide la 5a.
+Precisado por el ADR 0032: a partir de la fase 5, el agente guarda archivos en Domus con los dos pasos de siempre, y una descarga confirmada se aprueba como una lectura.
+Precisado por el ADR 0033: a partir de la fase 5, los adjuntos de la conversación alojada son del agente.

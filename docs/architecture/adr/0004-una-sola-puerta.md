@@ -4,3 +4,4 @@
 
 Fecha: 2026-11-11. Preguntas del grilling: P2, P7, P8, P33.
 Precisado por el ADR 0030: la llave dice qué app es, nunca de parte de quién. Kira dice de parte de quién presentando un mandato que emite la puerta a partir de una interacción que ella autenticó, y un «sí» por `contexto` lo reconoce la puerta, nunca Kira. «Una sola llave» quiere decir una sola app con su llave, `kira`: durante una rotación puede tener dos vivas.
+Precisado por el ADR 0033: a partir de la fase 5, la puerta no autentica canales externos ni reconoce el «sí»; la conversación con el agente es la conversación alojada.
