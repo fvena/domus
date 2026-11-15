@@ -4,6 +4,7 @@ import {
 	type AccessView,
 	type AreaPolicy,
 	type AuthorizationRequest,
+	type Authorizer,
 	createAuthorizer,
 	decide,
 	decisionOf,
@@ -328,7 +329,7 @@ describe("decide on an action that always asks for confirmation", () => {
 
 describe("decide on a shared device", () => {
 	const view = viewOf({ ana: "member", kitchen: "device" }, { "kitchen/vitals": "read" });
-	/** A read on the kitchen screen: by the device account itself, or by a member recognized by voice. */
+	/** A read on the kitchen screen, signed in with the device account. */
 	const onKitchen = (account: string, area: string, level: PermissionLevel = "read") => {
 		const base = request(account, area, level);
 		return {
@@ -336,46 +337,41 @@ describe("decide on a shared device", () => {
 			context: sealContext({
 				...base.context,
 				deviceAccount: "kitchen",
-				identity: account === "kitchen" ? "device" : "voice",
+				identity: account === "kitchen" ? "device" : "password",
 			}),
 		};
 	};
 
-	it("asks a recognized member to confirm in context only, to read a confirmOnSharedDevice area", () => {
-		expect(decide(onKitchen("ana", "vitals"), view)).toBe("confirm-in-context");
-		expect(decide({ ...onKitchen("ana", "vitals"), confirmed: true }, view)).toBe("allow");
-	});
-
-	it("asks in context only even when the delegation asks to confirm too", () => {
-		const delegating = viewOf(
-			{ ana: "member", kitchen: "device" },
-			{},
-			{ "ana/vitals/read": "confirm" },
-		);
-		const viaKira = { ...onKitchen("ana", "vitals") };
-		const request = {
-			...viaKira,
-			context: sealContext({ ...viaKira.context, via: "kira" }),
-		};
-
-		expect(decide(request, delegating)).toBe("confirm-in-context");
-		expect(decisionOf(createAuthorizer(delegating), request)).toBe("confirm-in-context");
-	});
-
-	it("denies it without a recognized member, even with a row that grants reading", () => {
+	it("denies the device account reading a confirmOnSharedDevice area, even with a row that grants it", () => {
 		expect(decide(onKitchen("kitchen", "vitals"), view)).toBe("deny");
 		expect(decide(onKitchen("kitchen", "shared"), view)).toBe("deny");
 		expect(decide({ ...onKitchen("kitchen", "vitals"), confirmed: true }, view)).toBe("deny");
 	});
 
-	it("does not apply to an always private area without the rule, nor off a shared device", () => {
-		expect(decide(onKitchen("ana", "health"), view)).toBe("allow");
-		expect(decide(onKitchen("ana", "notes"), view)).toBe("allow");
+	it("lets a member read such an area by her own permission, with nothing to confirm", () => {
 		expect(decide(request("ana", "vitals", "read"), view)).toBe("allow");
+		expect(decide(onKitchen("ana", "vitals"), view)).toBe("allow");
+	});
+
+	it("asks via an agent only what the delegation asks", () => {
+		const delegating = viewOf(
+			{ ana: "member", kitchen: "device" },
+			{},
+			{ "ana/vitals/read": "confirm" },
+		);
+
+		expect(decide(request("ana", "vitals", "read", "kira"), delegating)).toBe("confirm");
+	});
+
+	it("does not apply to an always private area without the rule", () => {
+		expect(decide(onKitchen("kitchen", "notes"), view)).toBe("allow");
+		expect(decide(onKitchen("kitchen", "health"), view)).toBe("deny");
 	});
 
 	it("applies to reading, not to writing", () => {
-		expect(decide(onKitchen("ana", "vitals", "write"), view)).toBe("allow");
+		const writing = viewOf({ kitchen: "device" }, { "kitchen/shared": "write" });
+
+		expect(decide(onKitchen("kitchen", "shared", "write"), writing)).toBe("allow");
 	});
 });
 
@@ -438,7 +434,7 @@ describe("decide on a sensitive operation", () => {
 		const { proof: _proof, ...base } = request(account, "notes", "manage");
 		return proof === undefined ? base : { ...base, proof };
 	};
-	const proven = (identity: "password" | "voice" | "device") => {
+	const proven = (identity: "password" | "device") => {
 		const base = manage("paco", "valid");
 		return { ...base, context: sealContext({ ...base.context, identity }) };
 	};
@@ -447,16 +443,6 @@ describe("decide on a sensitive operation", () => {
 		expect(decide(manage("paco"), view)).toBe("step-up");
 		expect(decide(manage("paco", "invalid"), view)).toBe("step-up");
 		expect(decide(manage("paco", "valid"), view)).toBe("allow");
-	});
-
-	it("takes a valid proof only by the channel app: in context, with or without via, it still asks for one", () => {
-		const base = manage("paco", "valid");
-		const inContext = (via?: string) => ({
-			...base,
-			context: sealContext({ ...base.context, channel: "contexto", via }),
-		});
-		expect(decide(inContext(), view)).toBe("step-up");
-		expect(decide(inContext("kira"), view)).toBe("step-up");
 	});
 
 	it("takes no proof via an agent, even by the channel app: only one the person brings when confirming", () => {
@@ -482,9 +468,8 @@ describe("decide on a sensitive operation", () => {
 		).toBe("allow");
 	});
 
-	it("denies it when the identity was proven by voice or by the device, even with a proof", () => {
+	it("denies it when the identity was proven by the device, even with a proof", () => {
 		expect(decide(proven("password"), view)).toBe("allow");
-		expect(decide(proven("voice"), view)).toBe("deny");
 		expect(decide(proven("device"), view)).toBe("deny");
 	});
 
@@ -580,6 +565,12 @@ describe("the production authorizer", () => {
 		expect(isAllowed(authorizer, unproven)).toBe(false);
 	});
 
+	it("denies an answer it does not know, such as the retired confirm-in-context", () => {
+		const authorizer = (() => "confirm-in-context") as unknown as Authorizer;
+
+		expect(decisionOf(authorizer, request("ana", "notes", "read"))).toBe("deny");
+	});
+
 	it("does not take asking for confirmation as allowing", () => {
 		const authorizer = createAuthorizer(
 			viewOf({ ana: "member" }, {}, { "ana/notes/write": "confirm" }),
@@ -631,12 +622,11 @@ describe("decide on a person's own operation, with no level of any area", () => 
 	};
 	const personal = (
 		account: string,
-		options: { via?: string; proof?: "valid" | "invalid"; channel?: "contexto" } = {},
+		options: { via?: string; proof?: "valid" | "invalid" } = {},
 	): AuthorizationRequest => {
 		const base = request(account, "platform", "write", options.via);
 		return {
 			...base,
-			context: sealContext({ ...base.context, channel: options.channel ?? "app" }),
 			personal: true,
 			...(options.proof === undefined ? {} : { proof: options.proof }),
 		};
@@ -647,11 +637,10 @@ describe("decide on a person's own operation, with no level of any area", () => 
 		expect(decide(personal("paco"), platformView)).toBe("allow");
 	});
 
-	it("denies the device account, an account without a role, Kira and the channel in context", () => {
+	it("denies the device account, an account without a role and Kira", () => {
 		expect(decide(personal("kitchen"), platformView)).toBe("deny");
 		expect(decide(personal("nobody"), platformView)).toBe("deny");
 		expect(decide(personal("ana", { via: "kira" }), platformView)).toBe("deny");
-		expect(decide(personal("ana", { channel: "contexto" }), platformView)).toBe("deny");
 	});
 
 	it("asks for no proof, and one it brings does not match it", () => {

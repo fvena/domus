@@ -1,7 +1,8 @@
 // Asking for a step-up proof (ADR 0023), an operation of the platform: the person gives their password again for
 // one exact sensitive operation and gets a proof bound to their account, session, device and that operation's
-// fingerprint, good once and for five minutes. Only an identity proven by password can ask, never one by voice
-// or by the device, and only a person by itself, never an agent on their behalf (ADR 0034). The password is checked first, asynchronously, and the proof stored after, in one
+// fingerprint, good once and for five minutes. Only an identity proven by password can ask, never one by the
+// device, and only a person by itself, never an agent on their behalf (ADR 0034). The password is checked first,
+// asynchronously, and the proof stored after, in one
 // synchronous transaction that checks the password checked is still the current one. Neither the password nor
 // the proof is ever logged or echoed.
 import { ORPCError } from "@orpc/server";

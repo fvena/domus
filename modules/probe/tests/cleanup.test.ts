@@ -127,15 +127,8 @@ describe("the cleanup of the action log", () => {
 	});
 });
 
-/** Kira for Ana, in a conversation on her phone: her writes through Kira ask her to confirm. */
-const KIRA = {
-	via: "kira",
-	device: "ana-phone",
-	session: undefined,
-	channel: "contexto",
-	identity: "password",
-	conversation: "c1",
-} as const;
+/** Kira for Ana, on her phone: her writes through Kira ask her to confirm. */
+const KIRA = { via: "kira", device: "ana-phone", session: undefined } as const;
 
 describe("the cleanup of pending confirmations", () => {
 	it("empties the operation of an expired one, whatever its state, and leaves a current one whole", async () => {

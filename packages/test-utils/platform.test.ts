@@ -139,25 +139,22 @@ describe("createTestPlatform with actions", () => {
 			channel: "app",
 			identity: "password",
 		});
-		// A member recognized by voice on a shared screen signed in with the device account.
+		// Via Kira, without session, on a device signed in with the device account.
 		expect(
 			test.context("ana", {
 				via: "kira",
 				device: "kitchen",
 				session: undefined,
 				deviceAccount: test.deviceAccount,
-				channel: "contexto",
-				identity: "voice",
-				conversation: "c1",
+				identity: "device",
 			}),
 		).toStrictEqual({
 			account: "ana",
 			via: "kira",
 			device: "kitchen",
 			deviceAccount: test.deviceAccount,
-			channel: "contexto",
-			identity: "voice",
-			conversation: "c1",
+			channel: "app",
+			identity: "device",
 		});
 	});
 

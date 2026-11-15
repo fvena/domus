@@ -290,8 +290,8 @@ export function readLog(platform: Platform): readonly LogEntry[] {
 }
 
 /**
- * A verified context with any combination of its fields, such as a member recognized by voice on a device
- * signed in with the device account. Production builds one only from a session, at the door.
+ * A verified context with any combination of its fields, such as Kira for a member on a device signed in with the
+ * device account. Production builds one only from a session, at the door.
  */
 export function syntheticContext(fields: VerifiedContext): VerifiedContext {
 	return sealContext(fields);

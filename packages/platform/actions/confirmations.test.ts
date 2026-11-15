@@ -4,13 +4,15 @@ import { id, moduleTables, text } from "@domus/module-sdk/db";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { openPlatform, type Platform } from "../platform";
+import { connectionOf, openPlatform, type Platform } from "../platform";
 import {
 	confirmPending,
 	deviceAccountOf,
 	invokeAction,
 	prepareAccount,
 	prepareDelegation,
+	readLog,
+	readPendingConfirmations,
 	rejectPending,
 	syntheticContext,
 } from "../testing";
@@ -114,7 +116,7 @@ describe("a pending confirmation with a schema that transforms the input", () =>
 	});
 });
 
-/** A module whose own area asks for confirmation to be read on a shared device. */
+/** A module whose own area declares the shared device rule, and a write that always asks for confirmation. */
 const vitalsModule = defineModule({
 	id: "vitals",
 	areas: { vitals: { confirmOnSharedDevice: true } },
@@ -132,100 +134,57 @@ const vitalsModule = defineModule({
 	},
 });
 
-describe("a pending confirmation born of the shared device rule", () => {
-	const WINDOW = 60 * 1000;
+describe("pending confirmations on a shared device", () => {
 	const notFound = expect.objectContaining({ code: "NOT_FOUND" });
-	const forbidden = expect.objectContaining({ code: "FORBIDDEN" });
-	const conflict = (reason: string) =>
-		expect.objectContaining({ code: "CONFLICT", data: { reason } });
 
-	/** Ana recognized by voice on the kitchen screen, signed in with the device account; `ana` is her phone. */
-	function kitchen() {
-		let now = Date.UTC(2026, 10, 12);
+	function withVitals() {
 		const opened = openPlatform(
 			{ databaseFile: ":memory:", modules: [vitalsModule] },
-			{ clock: () => now },
+			{ clock: () => Date.UTC(2026, 10, 12) },
 		);
 		platform = opened;
 		prepareAccount(opened, { id: "ana", name: "Ana", email: "ana@domus.test", role: "member" });
-		prepareDelegation(opened, "ana", "vitals", "read", "yes");
-		prepareDelegation(opened, "ana", "vitals", "write", "yes");
-		const voice = syntheticContext({
+		prepareDelegation(opened, "ana", "vitals", "read", "confirm");
+		return opened;
+	}
+
+	it("are born to be answered from the app, also one asked via Kira on the kitchen screen", () => {
+		const platform = withVitals();
+		const onScreen = syntheticContext({
 			account: "ana",
 			via: "kira",
 			device: "kitchen",
-			deviceAccount: deviceAccountOf(opened),
-			channel: "contexto",
-			identity: "voice",
-			conversation: "c1",
+			deviceAccount: deviceAccountOf(platform),
+			channel: "app",
+			identity: "password",
 		});
-		// Ana answering on the screen by herself: a context with via never confirms (ADR 0034).
-		const answering = syntheticContext({ ...voice, via: undefined });
-		const readOnScreen = () =>
-			pendingOf(() => invokeAction(opened, { context: voice, action: "vitals.read" }));
-		return {
-			platform: opened,
-			voice,
-			answering,
-			readOnScreen,
-			advance: (milliseconds: number) => {
-				now += milliseconds;
-			},
-		};
-	}
-
-	it("is not found from the app, not even from the member's own phone, which reads anew instead", () => {
-		const { platform: opened, readOnScreen } = kitchen();
-		const pending = readOnScreen();
-
-		expect(() => confirmPending(opened, { context: ana, confirmation: pending })).toThrow(
-			notFound,
+		const pending = pendingOf(() =>
+			invokeAction(platform, { context: onScreen, action: "vitals.read" }),
 		);
-		expect(() => rejectPending(opened, { context: ana, confirmation: pending })).toThrow(
-			notFound,
-		);
-		expect(invokeAction(opened, { context: ana, action: "vitals.read" })).toBe("tensión 12/8");
-	});
 
-	it("is confirmed once in context while its window is open, never by the agent", () => {
-		const { platform: opened, voice, answering, readOnScreen, advance } = kitchen();
-		const pending = readOnScreen();
-		advance(WINDOW - 1);
-
-		expect(() => confirmPending(opened, { context: voice, confirmation: pending })).toThrow(
-			forbidden,
-		);
-		expect(confirmPending(opened, { context: answering, confirmation: pending })).toBe(
+		expect(confirmPending(platform, { context: ana, confirmation: pending })).toBe(
 			"tensión 12/8",
 		);
-		expect(() => confirmPending(opened, { context: answering, confirmation: pending })).toThrow(
-			conflict("confirmation-consumed"),
-		);
 	});
 
-	it("expires the millisecond its window closes, for every channel", () => {
-		const { platform: opened, answering, readOnScreen, advance } = kitchen();
-		const pending = readOnScreen();
-		advance(WINDOW);
-
-		expect(() => confirmPending(opened, { context: answering, confirmation: pending })).toThrow(
-			conflict("confirmation-expired"),
+	it("leave one born before phase 1f to be confirmed only in context unanswered from the app", () => {
+		const platform = withVitals();
+		const pending = pendingOf(() =>
+			invokeAction(platform, { context: ana, action: "vitals.note", idempotencyKey: "k1" }),
 		);
-		expect(() => confirmPending(opened, { context: ana, confirmation: pending })).toThrow(
+		// What the shared device rule left in the database before phase 1f.
+		connectionOf(platform)
+			.prepare("UPDATE platform_confirmations SET context_only = 1 WHERE id = ?")
+			.run(pending);
+		const stored = readPendingConfirmations(platform);
+
+		expect(() => confirmPending(platform, { context: ana, confirmation: pending })).toThrow(
 			notFound,
 		);
-	});
-
-	it("leaves any other pending of the same screen confirmable from the app within its 24 h", () => {
-		const { platform: opened, voice, advance } = kitchen();
-		const pending = pendingOf(() =>
-			invokeAction(opened, { context: voice, action: "vitals.note", idempotencyKey: "k1" }),
+		expect(() => rejectPending(platform, { context: ana, confirmation: pending })).toThrow(
+			notFound,
 		);
-		advance(WINDOW);
-
-		expect(confirmPending(opened, { context: ana, confirmation: pending })).toEqual({
-			result: "anotado",
-			entry: 1,
-		});
+		expect(readPendingConfirmations(platform)).toEqual(stored);
+		expect(readLog(platform)).toEqual([]);
 	});
 });

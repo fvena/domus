@@ -349,19 +349,18 @@ describe("revoking", () => {
 		expect(test.log()).toEqual([]);
 	});
 
-	it("is denied with an identity proven by voice or by the device", async () => {
+	it("is denied with an identity proven by the device", async () => {
 		await using test = await household();
 		const kitchen = test.prepare.session(test.deviceAccount);
 		const paco = test.context("paco");
 		const proof = await proofOf(test, paco, "revokeSession", { session: kitchen.session });
 
-		for (const identity of ["voice", "device"] as const)
-			expect(() =>
-				test.revokeSession(test.context("paco", { identity }), kitchen.session, {
-					idempotencyKey: "r1",
-					proof,
-				}),
-			).toThrow(forbidden);
+		expect(() =>
+			test.revokeSession(test.context("paco", { identity: "device" }), kitchen.session, {
+				idempotencyKey: "r1",
+				proof,
+			}),
+		).toThrow(forbidden);
 	});
 });
 

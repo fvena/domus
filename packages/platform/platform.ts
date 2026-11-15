@@ -62,9 +62,9 @@ export interface PlatformOptions {
 	 */
 	readonly retention?: number;
 	/**
-	 * The deadlines of a new pending confirmation, in milliseconds: its voice window and its expiry,
-	 * {@link DEFAULT_CONFIRMATION_TIMES} for each one unset. Each pending confirmation keeps the absolute
-	 * instants it got when it was born, so a change applies only to new ones.
+	 * The deadline of a new pending confirmation, in milliseconds: its expiry, {@link DEFAULT_CONFIRMATION_TIMES}
+	 * when unset. Each pending confirmation keeps the absolute instant it got when it was born, so a change applies
+	 * only to new ones.
 	 */
 	readonly confirmation?: Partial<ConfirmationTimes>;
 	/**
@@ -87,11 +87,8 @@ export interface PlatformOptions {
 /** The retention of the action log's content unless one is given: 30 days. */
 const DEFAULT_RETENTION = 30 * 24 * 60 * 60 * 1000;
 
-/** A pending confirmation's voice window, 60 seconds, and its expiry, 24 hours, unless others are given. */
-const DEFAULT_CONFIRMATION_TIMES: ConfirmationTimes = {
-	window: 60 * 1000,
-	expiry: 24 * 60 * 60 * 1000,
-};
+/** A pending confirmation's expiry, 24 hours, unless another is given. */
+const DEFAULT_CONFIRMATION_TIMES: ConfirmationTimes = { expiry: 24 * 60 * 60 * 1000 };
 
 export interface Platform {
 	/** How many migrations this start applied, for the log of `apps/api`. */

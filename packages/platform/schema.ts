@@ -231,10 +231,11 @@ export const delegation = sqliteTable(
 /**
  * A pending confirmation (ADR 0023): an operation that waits for the person to confirm it. It keeps the exact
  * operation (`operation`, with its fingerprint), whether it reads or writes, a write's idempotency key, the
- * verified context it was born in and its two absolute deadlines: the voice window and its expiry. `session` is
- * the session it was born in while that session lives: revoking it sets it to null, which ends a pending
- * confirmation that was `bound` to one. `context_only` marks one born of the shared device rule: only the
- * channel `contexto` confirms it, and it expires when its window closes. `entry` links a confirmed write to its
+ * verified context it was born in and its absolute expiry. `session` is the session it was born in while that
+ * session lives: revoking it sets it to null, which ends a pending confirmation that was `bound` to one.
+ * `window_closes_at` and `context_only` are what is left of the confirmation in context, retired (ADR 0034): the
+ * first has no meaning, and the second marks one born before phase 1f that nothing answers any more. The migration
+ * of phase 1f removes both. `entry` links a confirmed write to its
  * entry in the action log. The cleanup (ADR 0025) empties `operation` once it expired and keeps the rest, which
  * still decides the answer.
  */

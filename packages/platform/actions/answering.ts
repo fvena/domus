@@ -18,9 +18,8 @@ import { conflict, internalError } from "./failures";
 import type { RegisteredAction } from "./registry";
 
 /**
- * Confirming or rejecting a pending confirmation: who asks, through which channel, and its id. Never a context with
- * via, whatever its channel. By the app, the same account, from any of its sessions; in context, the same account on
- * the same device in the same conversation while the window is open.
+ * Confirming or rejecting a pending confirmation: who asks and its id. Only the same account, from the app and any of
+ * its sessions; never a context with via.
  */
 export interface ConfirmationCall {
 	readonly context: VerifiedContext;
@@ -218,34 +217,19 @@ export function answeringWith({
 
 	/**
 	 * The pending confirmation `context` may answer, still waiting. A context with via answers none: it is denied
-	 * before any is looked up. Another account's, or one out of reach of this channel, is not found: by the app,
-	 * only the account itself, and never one confirmed only in context; in context, only the same device and the
-	 * same, not empty, conversation.
+	 * before any is looked up. Another account's is not found, and so is one born before phase 1f to be confirmed only
+	 * in context, which nothing answers any more (ADR 0034).
 	 */
 	function reachable(context: VerifiedContext, id: string): PendingConfirmation {
 		if (!asksByItself(context)) throw new ORPCError("FORBIDDEN");
 		const pending = confirmations.find(id);
-		const { origin } = pending ?? {};
-		const inReach =
-			pending !== undefined &&
-			origin !== undefined &&
-			pending.account === context.account &&
-			(context.channel === "app"
-				? !pending.contextOnly
-				: context.device === origin.device &&
-					context.conversation !== undefined &&
-					context.conversation !== "" &&
-					context.conversation === origin.conversation);
-		if (!inReach || pending === undefined)
+		if (pending === undefined || pending.account !== context.account || pending.contextOnly)
 			throw new ORPCError("NOT_FOUND", { message: `no pending confirmation "${id}"` });
 
-		const now = clock();
 		if (pending.state === "consumed" || pending.state === "rejected")
 			throw conflict("confirmation-consumed");
-		if (pending.state === "ended" || now >= pending.expiresAt)
+		if (pending.state === "ended" || clock() >= pending.expiresAt)
 			throw conflict("confirmation-expired");
-		if (context.channel === "contexto" && now >= pending.windowClosesAt)
-			throw conflict("window-closed");
 		return pending;
 	}
 }

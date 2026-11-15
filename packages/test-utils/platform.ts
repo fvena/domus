@@ -154,8 +154,8 @@ export interface TestPlatformOptions<TModules extends readonly AnyModule[]> {
 	readonly file?: true | string;
 	/** How long the content of a new log entry stays usable, in milliseconds. Unset: the platform's 30 days. */
 	readonly retention?: number;
-	/** The voice window and the expiry of a new pending confirmation, in milliseconds. Unset: 60 s and 24 h. */
-	readonly confirmation?: { readonly window?: number; readonly expiry?: number };
+	/** The expiry of a new pending confirmation, in milliseconds. Unset: 24 h. */
+	readonly confirmation?: { readonly expiry?: number };
 	/**
 	 * Scheduled tasks of the test, declared next to the platform's own and run by the same scheduler and engine.
 	 * Their work is the test's, such as one that holds its job running until the test lets it end.
@@ -345,7 +345,7 @@ export interface TestPlatform<
 	dbFor<TSchema extends ModuleSchema>(module: ModuleDefinition<TSchema>): ModuleDatabase<TSchema>;
 	/**
 	 * A synthetic verified context for `account`. Unless `options` say otherwise: no via, a test device and
-	 * session, the account itself as the device's, the app channel, proven by password, no conversation.
+	 * session, the account itself as the device's, the app channel, proven by password.
 	 */
 	context(account: string, options?: ContextOptions): VerifiedContext;
 	/**
@@ -375,7 +375,7 @@ export interface TestPlatform<
 	/**
 	 * Confirms the pending confirmation `id` through the platform's real operation: its operation is evaluated
 	 * again and runs once. Returns a read's result, or a write's result and entry (or acknowledgement). Throws
-	 * `NOT_FOUND` for one out of reach, and a `CONFLICT` with its reason when its window closed, it expired or
+	 * `NOT_FOUND` for one out of reach, and a `CONFLICT` with its reason when it expired or
 	 * it was already consumed or rejected.
 	 */
 	confirm(context: VerifiedContext, id: string, options?: { readonly proof?: string }): unknown;

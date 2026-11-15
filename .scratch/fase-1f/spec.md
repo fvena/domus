@@ -97,9 +97,10 @@ Se quedan la tabla de delegación, `via` con el valor `kira` y las confirmacione
 ### Las confirmaciones (Q6, Q7)
 
 - Desaparecen la marca de «solo por `contexto`» y el cierre de su ventana. Una pendiente se confirma o se rechaza solo desde la app, por la misma persona, en sus 24 h.
-- Sale el plazo de unos 60 s de la configuración de los plazos de confirmación.
+- Sale el plazo de unos 60 s de la configuración de los plazos de confirmación, y con él el conflicto `window-closed`.
+- Una lectura repetida reutiliza su pendiente solo desde la misma sesión; dos lecturas sin sesión nunca comparten una, como antes dos sin conversación.
 - La comprobación al confirmar sigue igual: vuelve a autorizar con el contexto de origen, con su delegación de entonces, y verifica que la operación es exactamente la misma. Quien confirma no es quien pidió: la persona confirma por el canal `app` y sin `via`, y la operación conserva el `via` de origen para la delegación y para el registro.
-- Mientras las dos columnas sigan en el esquema, se conserva el mínimo código que las escribe, sin significado funcional, porque el cierre de la ventana no admite nulos ni tiene valor por defecto, y una pendiente antigua «solo por `contexto`» sigue sin poder confirmarse desde la app. La migración se lleva los dos restos.
+- Mientras las dos columnas sigan en el esquema, se conserva el mínimo código que las escribe, sin significado funcional, porque el cierre de la ventana no admite nulos ni tiene valor por defecto (se escribe con la misma caducidad, y la marca con 0), y una pendiente antigua «solo por `contexto`» sigue sin poder confirmarse ni rechazarse desde la app: no se encuentra. La migración se lleva los dos restos.
 
 ### La migración (Q7)
 

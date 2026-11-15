@@ -116,7 +116,7 @@ export interface Actions {
 	 * Confirms a pending confirmation of the account that asks and runs its operation once, evaluated again
 	 * with the account, via and delegation it was born with. Returns what the operation would have: a read's
 	 * result, which is never kept, or a write's {@link WriteOutcome}. Throws "not found" for another account's,
-	 * a conflict when its window closed, it expired or it was already consumed or rejected, or what the
+	 * a conflict when it expired or it was already consumed or rejected, or what the
 	 * operation throws.
 	 */
 	confirm(call: ConfirmationCall): unknown;
@@ -443,12 +443,10 @@ export function createActions({
 	 * own, or finds the one the same request left before, and answers `CONFIRMATION_REQUIRED` with its id.
 	 */
 	function orPending<T>(pending: NewPending, operation: () => T): T {
-		let contextOnly: boolean;
 		try {
 			return operation();
 		} catch (error) {
 			if (!(error instanceof ConfirmationNeeded)) throw error;
-			contextOnly = error.confirmedIn === "context-only";
 		}
 		const id = connection.transaction(() => {
 			const { kind, origin, fingerprint, key } = pending;
@@ -456,7 +454,7 @@ export function createActions({
 				kind === "read" || key === undefined
 					? confirmations.findRead(origin, fingerprint, clock())
 					: confirmations.findWrite(actorOf(origin), key);
-			if (!earlier) return confirmations.create({ ...pending, contextOnly }, clock());
+			if (!earlier) return confirmations.create(pending, clock());
 			if (earlier.fingerprint !== fingerprint) throw conflict("key-reused");
 			return earlier.id;
 		})();
@@ -1088,17 +1086,11 @@ interface KeyedWrite {
 }
 
 /**
- * Where a pending confirmation may be answered: by the app or in context, or `context-only`, by the channel
- * `contexto` inside its window (the shared device rule).
- */
-type ConfirmedIn = "app-or-context" | "context-only";
-
-/**
- * Authorization asked for confirmation: whatever was opened rolls back and the operation waits, to be answered
- * where `confirmedIn` says.
+ * Authorization asked for confirmation: whatever was opened rolls back and the operation waits for the person to
+ * answer it from the app.
  */
 class ConfirmationNeeded extends Error {
-	constructor(readonly confirmedIn: ConfirmedIn) {
+	constructor() {
 		super("confirmation needed");
 	}
 }
@@ -1120,10 +1112,7 @@ const ANSWERS: Readonly<Record<Decision, () => void>> = {
 		throw new ORPCError("FORBIDDEN");
 	},
 	confirm: () => {
-		throw new ConfirmationNeeded("app-or-context");
-	},
-	"confirm-in-context": () => {
-		throw new ConfirmationNeeded("context-only");
+		throw new ConfirmationNeeded();
 	},
 	"step-up": () => {
 		throw stepUpRequired();

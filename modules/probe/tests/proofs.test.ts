@@ -216,20 +216,18 @@ describe("probe's configure, an action of level manage", () => {
 		).toThrow(stepUp);
 	});
 
-	it("is denied to an identity proven by voice or by the device, which cannot ask for a proof either", async () => {
+	it("is denied to an identity proven by the device, which cannot ask for a proof either", async () => {
 		const { test, paco } = await household();
 		await using _ = test;
 		const { proof } = await test.requestProof(paco, PASSWORD, CONFIGURE);
+		const context = test.context("paco", { identity: "device" });
 
-		for (const identity of ["voice", "device"] as const) {
-			const context = test.context("paco", { identity });
-			expect(() =>
-				test.invoke(context, "probe.configure", PUBLIC, { idempotencyKey: "c1", proof }),
-			).toThrow(forbidden);
-			await expect(test.requestProof(context, PASSWORD, CONFIGURE)).rejects.toMatchObject({
-				code: "FORBIDDEN",
-			});
-		}
+		expect(() =>
+			test.invoke(context, "probe.configure", PUBLIC, { idempotencyKey: "c1", proof }),
+		).toThrow(forbidden);
+		await expect(test.requestProof(context, PASSWORD, CONFIGURE)).rejects.toMatchObject({
+			code: "FORBIDDEN",
+		});
 	});
 
 	it("gives no proof for a wrong password or an operation that is not sensitive", async () => {

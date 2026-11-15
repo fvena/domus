@@ -502,7 +502,7 @@ export function createHttpHandler({
 
 	/**
 	 * The verified context of a request, from its session: the account is the session's and asks itself (no via, the
-	 * app channel, no conversation).
+	 * app channel).
 	 */
 	async function contextOf(
 		request: Request,
