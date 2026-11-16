@@ -21,23 +21,15 @@ Una operación que ejecuta Kira representando a un miembro o a una cuenta de apa
 _Evitar_: suplantar, actuar como.
 
 **Actor** (`actor`):
-Quién pide una acción: la cuenta representada (un miembro o la cuenta de aparato) y, si la lleva otro, la app autenticada que la lleva, como Kira.
+Quién pide una acción: la cuenta representada (un miembro o la cuenta de aparato) y, si la lleva otro en su nombre, quién la lleva (`via`), como Kira.
 _Evitar_: usuario.
 
-**App conectada** (`app`):
-Un programa que habla con Domus por la API con su propia llave, como Kira. Solo puede hacer lo que se le concede de forma expresa; ser una app conectada no da ningún permiso por sí mismo. Sale en la 1f (ADR 0034), y el agente conectado de la fase 5 se autoriza de otra forma (ADR 0032).
-_Evitar_: integración, cliente (para esto), servicio.
-
 **Agente conectado** (`agent`):
-La app conectada que conversa con las personas y actúa en su nombre, como Kira. Domus admite uno para toda la casa, y es opcional: Domus funciona sin él.
-_Evitar_: asistente (para esto), bot, IA.
-
-**Llave** (`key`):
-La credencial de una app conectada: dice qué app es, nunca de parte de quién actúa. Se crea, se cambia y se revoca fuera de las acciones. Sale en la 1f (ADR 0034).
-_Evitar_: token, API key (en el texto en español).
+El programa externo que conversa con las personas y actúa en su nombre, como Kira. Domus admite uno para toda la casa, y es opcional: Domus funciona sin él. Solo puede hacer lo que se le concede de forma expresa. Llega con la fase 5 (ADR 0031, ADR 0032).
+_Evitar_: asistente (para esto), bot, IA, app conectada.
 
 **Mandato** (`mandate`):
-Lo que la puerta da a una app conectada, a partir de una interacción que ella autenticó, para que actúe en nombre de quien la hizo. Ata ese contexto verificado a una sola app, caduca pronto y muere con su origen. No da permisos ni prueba que la persona apruebe nada: lo que pide sigue pasando por la autorización y la delegación vigentes. El de la llave sale en la 1f (ADR 0034); desde la fase 5 es el de la conversación alojada, para el agente, la persona y la conversación, y muere con la sesión de Domus (ADR 0032).
+Previsto para la fase 5 (ADR 0032): la autorización de la conversación alojada, que la puerta da al agente conectado para una persona y una conversación, y que muere con la sesión de Domus de esa persona. No da permisos ni prueba que la persona apruebe nada: lo que pide sigue pasando por la autorización y la delegación vigentes.
 _Evitar_: delegación (que es la tabla), token, token de conversación, sesión de Kira.
 
 **Enlace del agente** (`agent link`):
@@ -65,7 +57,7 @@ Una entrada de una cuenta desde un aparato. Un mismo aparato puede guardar sesio
 _Evitar_: login, conexión.
 
 **Contexto verificado** (`VerifiedContext`):
-Lo que la puerta sabe de quién pide una operación y desde dónde, sacado de sus credenciales: la cuenta representada, `via`, el aparato, la sesión, la cuenta del aparato, el canal, cómo se acreditó la identidad y la conversación. Nada de lo que declare el cliente lo cambia.
+Lo que la puerta sabe de quién pide una operación y desde dónde, sacado de sus credenciales: la cuenta representada, `via`, el aparato, la sesión, la cuenta del aparato, el canal y cómo se acreditó la identidad. Nada de lo que declare el cliente lo cambia.
 _Evitar_: contexto de usuario, identidad declarada.
 
 **Tabla con dueño** (`owned table`):
@@ -89,7 +81,7 @@ La única excepción a que lo oculto no existe: un borrado puede responder que l
 _Evitar_: borrado en cascada, restricción de clave ajena.
 
 **Confirmación pendiente** (`pending confirmation`):
-Una operación exacta que la autorización ha detenido hasta que su persona diga que sí. Caduca, se usa como mucho una vez y no la confirma otra persona ni otra conversación.
+Una operación exacta que la autorización ha detenido hasta que su persona diga que sí. Caduca, se usa como mucho una vez y solo la confirma o la rechaza su persona, desde la app.
 _Evitar_: aprobación, propuesta.
 
 **Comprobante** (`step-up proof`):
@@ -103,7 +95,7 @@ Un área de la vida de la casa (listas, calendario, cocina…) con sus datos, su
 _Evitar_: extensión, plugin, funcionalidad.
 
 **Acción** (`action`):
-Una operación con nombre que lee o cambia los datos de un módulo, con su entrada validada y autorizada siempre, la pida quien la pida. Es el único acceso a esos datos que el módulo tiene en producción. Las migraciones, la preparación de las pruebas y lo que nunca es acción (contraseñas, PIN, llaves, emparejamiento) van por otro camino.
+Una operación con nombre que lee o cambia los datos de un módulo, con su entrada validada y autorizada siempre, la pida quien la pida. Es el único acceso a esos datos que el módulo tiene en producción. Las migraciones, la preparación de las pruebas y lo que nunca es acción (contraseñas, PIN, emparejamiento) van por otro camino.
 _Evitar_: comando, endpoint.
 
 **Registro de acciones** (`action log`):

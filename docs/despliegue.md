@@ -5,14 +5,14 @@ La Pi se llama `kira`: `kira.local` en casa y `kira.taildd967b.ts.net` por Tails
 | Qué          | Dónde                                                                                                                                           |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | Código       | `/home/fvena/domus`, un clon de `fvena/domus` en la rama `main`                                                                                 |
-| Contenedores | `api`, `assistant` y `voice-gateway`, del proyecto de compose `domus`                                                                           |
+| Contenedores | `api`, del proyecto de compose `domus`                                                                                                          |
 | Datos        | el volumen `domus_domus-data`, montado solo en `api`                                                                                            |
 | Archivos     | `/data/files` en ese volumen: los contenidos en `contents/` y las subidas en curso en `incoming/` (ver «Los archivos»)                          |
-| Secretos     | `/home/fvena/domus/.env`, fuera de git (ver «Secretos»), y la llave de Kira en `/home/fvena/.config/domus/kira-key` (ver «Las llaves»)          |
+| Secretos     | `/home/fvena/domus/.env`, fuera de git (ver «Secretos»)                                                                                         |
 | Copias       | el repositorio de restic en `/srv/backups/domus` y su contraseña en `/home/fvena/.config/domus/backup-password` (ver «Las copias de seguridad») |
 | Acceso       | `http://kira.local:3000` en casa; `https://kira.taildd967b.ts.net` por Tailscale, solo dentro de la red (`tailscale serve` → `:3000`)           |
 
-Las imágenes se construyen en la propia Pi, que es arm64, en unos 30 segundos. Docker arranca con el sistema y los contenedores tienen `restart: unless-stopped`, así que vuelven solos tras un corte de luz.
+La imagen se construye en la propia Pi, que es arm64, en unos 30 segundos. Docker arranca con el sistema y el contenedor tiene `restart: unless-stopped`, así que vuelve solo tras un corte de luz.
 
 ## Actualizar
 
@@ -20,19 +20,26 @@ Las imágenes se construyen en la propia Pi, que es arm64, en unos 30 segundos. 
 ssh kira 'cd ~/domus && git pull --ff-only && docker compose up -d --build'
 ```
 
-Se construyen y reinician los tres a la vez. Si `api` cambia de `protocol` y los otros dos no, se quedan en «incompatible» y no hacen nada hasta tener la misma versión (ADR 0020).
+Se construye y se reinicia `api`. Un servicio que sale de `docker-compose.yml` deja su contenedor en marcha hasta que se despliega con `--remove-orphans`: así salieron `assistant` y `voice-gateway` con la 1f (ADR 0034).
 
-Desde la 1c, `docker compose` no arranca sin `DOMUS_AUTH_SECRET` en `.env`; desde la 1d2, sin `DOMUS_BACKUP_PASSWORD`, y desde la 1e, sin `DOMUS_KIRA_KEY`. En una Pi nueva, crea ese fichero antes de actualizar, como dicen «Secretos», «Lo que hay en la Pi» y «Crear la llave de Kira».
+Desde la 1c, `docker compose` no arranca sin `DOMUS_AUTH_SECRET` en `.env`, y desde la 1d2, sin `DOMUS_BACKUP_PASSWORD`. En una Pi nueva, crea ese fichero antes de actualizar, como dicen «Secretos» y «Lo que hay en la Pi».
 
 ## Comprobar
 
 ```bash
-ssh kira 'cd ~/domus && docker compose ps && docker compose logs --no-color assistant voice-gateway | grep "api at"'
+ssh kira 'cd ~/domus && docker compose ps'
 ```
 
-- Los tres contenedores salen `healthy`.
-- `assistant` y `voice-gateway` dicen «api at http://api:3000: ready». Si dicen «does not speak protocol», las imágenes son de versiones distintas: vuelve a construir. Si `assistant` dice «rejects this program», le falta una llave viva (ver «Las llaves»).
+- Sale un solo contenedor, `api`, `healthy`.
 - `curl -s -X POST localhost:3000/api/rpc/status` en la Pi devuelve `{"json":{"service":"domus","protocol":1}}`.
+- Las credenciales que retiró la 1f, la llave y el mandato, nunca cuentan como si no estuvieran (ADR 0034): una petición a `/api` con la cabecera `Authorization`, con cualquier valor, o con `domus-mandate` responde `401`, también en `status` y también junto a una cookie de sesión válida. Esta orden escribe `authorization 401` y `domus-mandate 401`:
+
+    ```bash
+    for h in 'authorization: Bearer inventada' 'domus-mandate: inventado'; do curl -s -o /dev/null -w "${h%%:*} %{http_code}\n" -X POST -H "$h" localhost:3000/api/rpc/status; done
+    ```
+
+    El log de `api` lo apunta con la cabecera y nunca con su valor: `retired credential refused: authorization`.
+
 - `curl -s localhost:3000/health` en la Pi devuelve `{"status":"ok","background":{"status":"ok","backups":"saved"}}` (ver «La lista de tareas y `/health`»).
 - `status` es la única RPC que responde sin sesión (ADR 0023). En la Pi, esta orden escribe `401` para una operación de la plataforma y `404` para una acción de `probe`, que no está en la lista de producción:
 
@@ -53,6 +60,15 @@ ssh kira 'cd ~/domus && docker compose ps && docker compose logs --no-color assi
     ```
 
 - `docker compose logs --no-color api | grep database` dice `database at /data/domus.db: <N> migrations applied`: las que había pendientes en ese arranque, y `0` si no había ninguna. Si una migración falla, `api` no arranca y la base de datos queda como estaba.
+
+Comprobado en la Pi el 2026-11-15, al desplegar la 1f con `main` en `da1913c` y `docker compose up -d --build --remove-orphans`:
+
+- salieron los contenedores de `assistant` y `voice-gateway`, y `docker compose ps` mostró solo `api`, `healthy`;
+- el primer arranque dijo `1 migrations applied`: `0017_damp_carlie_cooper`, en la `position` `18` de `platform`, que conservó su hash y su `applied_at` tras `docker compose restart api` y tras `docker compose up -d --force-recreate api` (ver «Comprobar que los datos persisten»); `platform_keys`, `platform_mandates`, `context_only` y `window_closes_at` ya no están;
+- `status` respondió `{"json":{"service":"domus","protocol":1}}` sin credencial, y `401` con un `Bearer` inventado y con `domus-mandate`; `/health` siguió en `ok`, y sin sesión `log/read` dio `401` y `probe/listNotes`, `404`;
+- con una sesión de Paco, `sessions/list` y `log/read` respondieron `200`, y las mismas peticiones con un `Bearer` añadido, `401`;
+- después se borraron el fichero de la antigua llave de Kira, en `~/.config/domus`, y su línea del `.env`; `docker compose config` siguió bien y `api`, `healthy`;
+- la copia de la primera noche, el 2026-11-16 a las 05:00, acabó `ok` en unos 2 s: restic guardó `74219fd4`, `/health` siguió en `ok` con `backups: saved` y `/data/backup-staging` quedó vacía.
 
 ## Las cuentas
 
@@ -134,87 +150,6 @@ sesiones() { for n in paco paco2 rocio; do curl -s -o /dev/null -w "$n %{http_co
 5. `sesiones` escribe `paco 200`, `paco2 401` y `rocio 200`.
 
 Al terminar, `rm -rf "$D"`: las cookies son sesiones abiertas. Para cerrarlas antes, `rpc -b "$D/<nombre>" -d '{}' localhost:3000/api/auth/sign-out`: sin el `-d '{}'`, `rpc` manda `content-type: application/json` sin cuerpo y Better Auth responde `400`.
-
-## Las llaves
-
-Kira, `assistant`, entra en la api con su llave, `domus_<id>.<secreto>`, y no con una sesión (ADR 0030). La base guarda solo el hash del secreto. La llave vive en `/home/fvena/.config/domus/kira-key`, fichero `600` de `fvena` en una carpeta `700`, que `docker-compose.yml` monta como secret en `/run/secrets/kira-key`. `assistant` la lee una sola vez al arrancar: tras cambiar el fichero, recrea su contenedor, porque un `restart` no ve el fichero nuevo. Con el fichero vacío, o con una llave revocada o inventada, `assistant` arranca y se queda en rechazado: no hace nada que dependa de la api y vuelve a comprobar cada 30 s.
-
-Las llaves se gestionan con el comando `keys` dentro de `api`, en `~/domus`. No piden contraseña ni terminal:
-
-```bash
-docker compose exec -T api node /app/keys.mjs create kira
-docker compose exec -T api node /app/keys.mjs list
-docker compose exec -T api node /app/keys.mjs revoke <id>
-```
-
-`create` escribe en stdout solo la llave, para redirigirla al fichero sin que pase por la pantalla, y en stderr `created the key <id> of kira`. `list` escribe una línea por llave, como `T8qOLZuewtY  kira  created 2026-11-15T09:46:40.297Z  last used 2026-11-15T09:46:40.915Z  live`, nunca el secreto. El último uso se anota como mucho una vez por minuto. `revoke` responde `revoked the key <id> of kira`; la fila se queda, con `revoked <instante>`. Una llave comprometida se revoca en el momento. Pueden vivir varias a la vez, para rotar sin cortar.
-
-### Crear la llave de Kira
-
-En una Pi nueva, o tras restaurar, que revoca todas las llaves. El fichero tiene que existir antes de arrancar los contenedores, aunque sea vacío, y `.env` dice dónde está:
-
-```bash
-umask 077 && mkdir -p ~/.config/domus && : > ~/.config/domus/kira-key
-grep -q '^DOMUS_KIRA_KEY=' ~/domus/.env || echo 'DOMUS_KIRA_KEY=/home/fvena/.config/domus/kira-key' >> ~/domus/.env
-```
-
-Con `api` en marcha, la llave va primero a un fichero aparte, se comprueba su forma y solo entonces sustituye a la anterior:
-
-```bash
-umask 077; F=~/.config/domus/kira-key
-docker compose exec -T api node /app/keys.mjs create kira > $F.new
-grep -Eqx 'domus_[A-Za-z0-9_-]{11}\.[A-Za-z0-9_-]{43}' $F.new && mv $F.new $F
-docker compose up -d --force-recreate assistant
-```
-
-`docker compose logs --no-color assistant | grep "api at" | tail -1` dice `api at http://api:3000: ready`.
-
-### Comprobar la llave
-
-`status` con la llave dice de qué app es. Esta escribe `{"json":{"service":"domus","protocol":1,"app":"kira"}} 200`:
-
-```bash
-curl -s -w " %{http_code}\n" -X POST -H "authorization: Bearer $(cat ~/.config/domus/kira-key)" localhost:3000/api/rpc/status
-```
-
-Con una llave inventada, de la forma buena, responde `401`, y nunca la trata como una petición sin credencial:
-
-```bash
-FAKE="domus_$(head -c 8 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=').$(head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=')"
-curl -s -o /dev/null -w "%{http_code}\n" -X POST -H "authorization: Bearer $FAKE" localhost:3000/api/rpc/status
-```
-
-### Rotar la llave
-
-La nueva se crea y se comprueba antes de tocar la vieja, que se guarda en `.old` hasta que la nueva funciona:
-
-```bash
-umask 077; F=~/.config/domus/kira-key; OLD=$(cut -c7-17 $F)
-docker compose exec -T api node /app/keys.mjs create kira > $F.new
-grep -Eqx 'domus_[A-Za-z0-9_-]{11}\.[A-Za-z0-9_-]{43}' $F.new && cp -p $F $F.old && mv $F.new $F
-docker compose up -d --force-recreate assistant
-```
-
-Si el log de `assistant` dice `ready` y `keys list` muestra el último uso de la nueva, revoca la vieja y borra la copia:
-
-```bash
-docker compose exec -T api node /app/keys.mjs revoke $OLD && rm $F.old
-```
-
-Si dice `rejects this program`, vuelve a la vieja, que sigue viva:
-
-```bash
-mv $F.old $F && docker compose up -d --force-recreate assistant
-```
-
-Comprobado en la Pi el 2026-11-15, con `main` en `c3a2e8a` (`2 migrations applied`):
-
-- con el fichero vacío, `assistant` quedó en rechazado; con la primera llave, `J_8hwLv_DQM`, quedó `ready`;
-- `status` respondió `401` con una llave inventada y `"app":"kira"` con la de Kira;
-- la rotación a `T8qOLZuewtY` dejó `assistant` `ready` y el último uso de la nueva en `keys list`; revocada `J_8hwLv_DQM`, `status` con ella respondió `401`;
-- una rotación con una llave inventada en lugar de la nueva dejó `assistant` en rechazado, y volver a `.old` lo dejó `ready`;
-- tras `docker compose restart api` y tras `docker compose up -d --force-recreate api`, `status` con la llave siguió respondiendo `"app":"kira"`;
-- las órdenes de esta sección, tal cual, rotaron a `OL-PNggBriM`, la llave viva desde entonces, y revocaron `T8qOLZuewtY`.
 
 ## La base de datos
 
@@ -343,7 +278,7 @@ El contenido de la primera está en el almacén, con el nombre que da `sha256sum
 docker compose exec -T api find /data/files -type f
 ```
 
-Escribió `/data/files/contents/ae/aec5af8ea8339032b725746103d6a76ab89b5e383a82ddf949133850602180ca`. Ese archivo preparado no se vincula a nada: caduca a las 24 h, y la limpieza de la noche siguiente lo borra con su contenido, así que la misma orden ya no escribe ninguno.
+Escribió `/data/files/contents/ae/aec5af8ea8339032b725746103d6a76ab89b5e383a82ddf949133850602180ca`. Ese archivo preparado no se vincula a nada: caduca a las 24 h, y la limpieza de la noche siguiente lo borra con su contenido, así que la misma orden ya no escribe ninguno. Así fue: la limpieza del 2026-11-16 a las 04:30 dejó `/data/files` sin ficheros y las tres tablas de archivos vacías.
 
 ## En directo y avisos
 
@@ -481,7 +416,7 @@ Los contenidos de archivo vuelven con la base (ADR 0028). Restaurar prepara tamb
 
 En la Pi, dentro de `~/domus`:
 
-1. Para `api`. `assistant` y `voice-gateway` siguen en marcha, esperando a que vuelva:
+1. Para `api`:
 
     ```bash
     docker compose stop api
@@ -512,8 +447,6 @@ En la Pi, dentro de `~/domus`:
     ```
 
     El log dice `0 migrations applied`: la copia recibió al prepararla las que le faltaban. `/health` sigue contando las 48 h desde la captura de la copia restaurada, así que restaurar una copia de hace diez días deja `backup-stale` hasta la próxima copia.
-
-5. Restaurar revoca todas las llaves, así que `assistant` se queda en rechazado: crea una nueva para Kira como dice «Crear la llave de Kira», desde el `create`.
 
 En un ordenador de desarrollo es `pnpm restore list` o `pnpm restore [--snapshot <id>]`, sobre `<repo>/data`, con `pnpm dev` parado.
 
@@ -576,7 +509,6 @@ Vuelve todo lo que había en la base al capturar la copia: los datos, las contra
 Al sanear, la restauración:
 
 - cierra todas las sesiones: todo el mundo vuelve a entrar;
-- revoca todas las llaves y borra los mandatos, porque una llave revocada después de la copia volvería a valer: hay que crear otra para Kira;
 - anula las confirmaciones pendientes y los comprobantes;
 - descarta los archivos preparados y las referencias soltadas cuyo deshacer ya caducó, y olvida los contenidos a los que no apunta nada, que la limpieza borra del almacén;
 - descarta los trabajos pendientes, en curso o atascados de la copia, que quedan `cancelled` con `discarded by restore`, para no repetir lo que ya salió;
@@ -898,9 +830,3 @@ DOMUS_ORIGINS=http://kira.local:3000,https://kira.taildd967b.ts.net
 Cambiar el secreto cierra todas las sesiones.
 
 La contraseña de las copias no va dentro del `.env`: es un fichero aparte, que `docker-compose.yml` monta como secret en `/run/secrets/backup-password`. El `.env` solo dice dónde está, y `docker compose` tampoco arranca sin él (ver «Las copias de seguridad»).
-
-La llave de Kira tampoco: es `/home/fvena/.config/domus/kira-key`, montada en `assistant` como `/run/secrets/kira-key`, y `.env` la nombra con `DOMUS_KIRA_KEY` (ver «Las llaves»):
-
-```sh
-DOMUS_KIRA_KEY=/home/fvena/.config/domus/kira-key
-```

@@ -1,6 +1,6 @@
 # 08. La Pi y el cierre de la 1e
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01, 02, 03, 04, 05, 06, 07, y el cierre de la 1d3 y la 1d4
 
 Spec: [`../spec.md`](../spec.md), secciones «La comprobación en la Pi» y «Reglas y documentación». ADR 0030 y [`docs/despliegue.md`](../../../docs/despliegue.md).
@@ -35,3 +35,4 @@ La llave de Kira en el Domus real de la Pi, con una rotación que funciona y otr
     - **El mensaje de rechazo** de `assistant` con una llave mala no decía qué hacer antes de «then start assistant again». Ahora dice que se ponga una viva, hecha con `keys create kira`.
     - **Los `AGENTS.md`** de `packages` y de `apps` ya recogían las llaves desde la revisión; `packages` gana que un comprobante solo cuenta por el canal `app`.
     - Falta: cerrar la 1d3 y la 1d4 en el plan, y después marcar la 1e como hecha.
+- 2026-11-16: cerradas la 1d3 y la 1d4, la 1e queda hecha en el plan, y retirada por la 1f.

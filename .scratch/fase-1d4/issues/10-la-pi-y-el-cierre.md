@@ -1,6 +1,6 @@
 # 10. La Pi y el cierre de la 1d4
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 01, 02, 03, 04, 05, 06, 07, 08, 09, y el cierre de la 1d3
 
 Spec: [`../spec.md`](../spec.md), secciones «La comprobación en la Pi» y «Reglas y documentación». Plan, 1d4.
@@ -15,11 +15,11 @@ La comprobación en la Pi y el cierre de la 1d4. La 1d3 tiene que estar cerrada 
 
 ## Criterios de aceptación
 
-- [ ] La 1d3 está cerrada en el plan.
+- [x] La 1d3 está cerrada en el plan.
 - [x] En el ensayo, las cinco comprobaciones salen bien y quedan anotadas, con el tiempo medido de la nota pública.
 - [x] En el Domus real, las dos comprobaciones salen bien y quedan anotadas.
 - [x] `despliegue.md`, la guía, `packages/AGENTS.md`, el plan, el ADR 0029 y el glosario recogen lo construido.
-- [ ] `pnpm check` pasa.
+- [x] `pnpm check` pasa.
 
 ## Comments
 
@@ -32,3 +32,4 @@ La comprobación en la Pi y el cierre de la 1d4. La 1d3 tiene que estar cerrada 
     - **El ADR 0029 y el glosario**, comparados con lo construido: el ADR gana seis precisiones (`about` es `{ type, id }`; los cambios de archivos invalidan su registro; `reset` sale con cada `permissions/set`; el reparto también comprueba la sesión; las confirmaciones pendientes solo miran que su sesión exista; `Retry-After` solo en 429 y 503), y él y la Tabla de área del glosario dicen que una tabla de área nunca está en un área siempre privada.
     - Falta: ver el 2026-11-16 que la copia del 15 salió bien y que la limpieza borró `lista-compra.txt` con su contenido, cerrar la 1d3 en el plan y después la 1d4.
 - 2026-11-15: la copia del 15 salió bien (ver la tarea 10 de la 1d3). Falta la limpieza del 2026-11-16.
+- 2026-11-16: la limpieza de las 04:30 salió bien (ver la tarea 10 de la 1d3). La 1d3 y la 1d4 quedan hechas en el plan.

@@ -1,17 +1,17 @@
 # Guía de Domus
 
-Domus es el organizador privado de una familia de dos adultos que vive en España. Funciona en un ordenador pequeño que tenemos en casa, una Raspberry Pi, y lleva dentro a Kira, una asistente a la que se le puede hablar o escribir. No es un producto para otras casas: lo usamos solo nosotros.
+Domus es el organizador privado de una familia de dos adultos que vive en España. Funciona en un ordenador pequeño que tenemos en casa, una Raspberry Pi. No es un producto para otras casas: lo usamos solo nosotros.
 
 Esta guía explica lo que ya está construido y cómo funciona, sin dar por hecho que sabes programar. Al final de cada tema hay un apartado, «En el código», con los ficheros y comandos para quien los necesite. Si no es tu caso, sáltatelo.
 
 ## Qué hay hoy
 
-Lo construido hasta hoy es la base de Domus. Tres programas arrancan en la Pi y comprueban que se entienden entre ellos, la base de datos se pone al día sola cada vez que Domus arranca, y hay una forma fija de añadir partes nuevas de la vida de casa, que llamamos módulos. Un módulo solo lee y cambia sus datos con acciones, que pasan todas por el mismo camino; cada cambio en los datos queda anotado y se puede deshacer si el módulo lo permite. Para pedirle algo a Domus hay que entrar con una cuenta, y una sola pieza decide qué puede hacer cada persona, qué puede hacer Kira en su nombre y quién ve cada cosa. Las cuentas se crean con un comando en la Pi. Kira entra con su propia llave, y solo puede hablar por una persona con un pase que la puerta saca de una sesión de esa persona. Un registro puede llevar archivos, como la foto de la caldera junto a su nota, y se descargan con las mismas reglas que el registro. Cuando algo cambia, Domus se lo dice al momento a cada app abierta que puede verlo, y puede mandar un aviso al móvil de una persona aunque tenga la app cerrada. Domus también trabaja solo: cada noche limpia lo que ya caducó y hace una copia de seguridad cifrada, con sus archivos, a la hora de la casa, y avisa en su página de salud si algo se atasca o las copias no están al día. Si hace falta, se puede volver a una copia anterior. Y cada cambio en el código pasa unas comprobaciones automáticas antes de entrar.
+Lo construido hasta hoy es la base de Domus. Un programa arranca en la Pi y atiende a quien entra, la base de datos se pone al día sola cada vez que Domus arranca, y hay una forma fija de añadir partes nuevas de la vida de casa, que llamamos módulos. Un módulo solo lee y cambia sus datos con acciones, que pasan todas por el mismo camino; cada cambio en los datos queda anotado y se puede deshacer si el módulo lo permite. Para pedirle algo a Domus hay que entrar con una cuenta, y una sola pieza decide qué puede hacer cada persona, qué puede hacer Kira, la asistente, en su nombre y quién ve cada cosa. Las cuentas se crean con un comando en la Pi. Un registro puede llevar archivos, como la foto de la caldera junto a su nota, y se descargan con las mismas reglas que el registro. Cuando algo cambia, Domus se lo dice al momento a cada app abierta que puede verlo, y puede mandar un aviso al móvil de una persona aunque tenga la app cerrada. Domus también trabaja solo: cada noche limpia lo que ya caducó y hace una copia de seguridad cifrada, con sus archivos, a la hora de la casa, y avisa en su página de salud si algo se atasca o las copias no están al día. Si hace falta, se puede volver a una copia anterior. Y cada cambio en el código pasa unas comprobaciones automáticas antes de entrar.
 
 ## Temas
 
 - [Arquitectura](arquitectura.md): las piezas de Domus, cómo se reparten el trabajo y qué hay en cada carpeta.
-- [Los programas y cómo hablan](programas.md): los tres programas, la web y cómo saben si pueden contar con los demás.
+- [Los programas y cómo hablan](programas.md): el programa de Domus, la web y cómo sabe quien le habla si comparten versión.
 - [Los datos](datos.md): dónde se guarda la información y cómo cambia de forma sin perder nada.
 - [Los módulos](modulos.md): qué es un módulo y qué reglas sigue.
 - [Las acciones](acciones.md): cómo se leen y se cambian los datos, y cómo se deshace un cambio.

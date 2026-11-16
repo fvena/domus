@@ -25,7 +25,7 @@ Node 22 (`.nvmrc`) with corepack, which installs the pnpm `packageManager` names
 | `pnpm db:generate`                  | Migrations and `migrations.ts` of modules     |
 | `pnpm accounts`                     | Create an account or change its password      |
 | `pnpm restore`                      | List the backups or restore one, api stopped  |
-| `docker compose up -d --build`      | The three containers as on the Pi             |
+| `docker compose up -d --build`      | `api` as on the Pi; needs `.env` («Secretos») |
 
 Deploying to and checking the Raspberry Pi: `docs/despliegue.md`.
 
@@ -60,7 +60,7 @@ Apps only wire programs together; business logic lands in a module or in platfor
 
 ### Workflow
 
-From idea to merge with the mattpocock skills, step by step and inside the current phase: `docs/agents/workflow.md`.
+Read `docs/agents/workflow.md` before running a mattpocock skill (grill, spec, tickets, implement, review, PR) or closing a subphase on the Pi: it holds this repo's steps for each, the implementer brief and the Pi helpers.
 
 ### Issue tracker
 

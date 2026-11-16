@@ -1,6 +1,6 @@
 # 06. La Pi y el cierre
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 05
 
 Spec: [`../spec.md`](../spec.md), secciones «La comprobación en la Pi» y «Reglas y documentación». ADR 0034.
@@ -14,9 +14,19 @@ La 1f llega a la Pi, la Pi queda con solo `api`, y la documentación para person
 
 ## Criterios de aceptación
 
-- [ ] `docker compose ps` en la Pi muestra solo `api`.
-- [ ] La fila de la migración nueva conserva posición, hash e instante tras reiniciar y tras recrear `api`.
-- [ ] `status` con un `Bearer` inventado da 401 en la Pi, y una sesión normal entra y lee.
-- [ ] La carpeta del secreto de Kira y `DOMUS_KIRA_KEY` ya no están, borradas después de las tres comprobaciones anteriores.
-- [ ] La copia de la primera noche sale bien.
-- [ ] `despliegue.md`, la guía, el README de arquitectura, el glosario y el plan describen lo que queda.
+- [x] `docker compose ps` en la Pi muestra solo `api`.
+- [x] La fila de la migración nueva conserva posición, hash e instante tras reiniciar y tras recrear `api`.
+- [x] `status` con un `Bearer` inventado da 401 en la Pi, y una sesión normal entra y lee.
+- [x] La carpeta del secreto de Kira y `DOMUS_KIRA_KEY` ya no están, borradas después de las tres comprobaciones anteriores.
+- [x] La copia de la primera noche sale bien.
+- [x] `despliegue.md`, la guía, el README de arquitectura, el glosario y el plan describen lo que queda.
+
+## Comments
+
+- La Pi corre `main` en `da1913c` desde el 2026-11-15, desplegado con `docker compose up -d --build --remove-orphans`: salieron los contenedores de `assistant` y `voice-gateway`, y solo corre `api`, `healthy`.
+- El primer arranque dijo `1 migrations applied`. La fila de `0017_damp_carlie_cooper`, en la posición 18 de `platform`, conservó hash y `applied_at` tras `docker compose restart api` y tras `docker compose up -d --force-recreate api`; `platform_keys`, `platform_mandates`, `context_only` y `window_closes_at` ya no están.
+- `status` sin credencial respondió `{"json":{"service":"domus","protocol":1}}`, y con `Authorization: Bearer` inventado o con `domus-mandate`, `401`; `/health` siguió en `ok`, y sin sesión `log/read` dio `401` y `probe/listNotes`, `404`. Con una sesión de Paco (la contraseña la tecleó él), `sessions/list` y `log/read` dieron `200`, y con un `Bearer` añadido, `401`; la sesión se cerró después.
+- Después se borraron `/home/fvena/.config/domus/kira-key` y `DOMUS_KIRA_KEY` del `.env` de la Pi; `docker compose config` siguió bien y `api`, `healthy`.
+- La documentación queda al día en el commit «docs: close phase 1f on the Pi, waiting only for its first night's copy»: `despliegue.md`, la guía (`seguridad.md`, `permisos.md`, `programas.md`, `arquitectura.md`, `la-pi.md`, la portada y una frase de `acciones.md`, revisadas con `humanizer`), el README de arquitectura, el glosario y el plan, que da la 1f por hecha cuando salga bien la copia.
+- Falta la copia de la primera noche, la del 2026-11-16 a las 05:00. Esta tarea sigue en `ready-for-agent` hasta comprobarla.
+- 2026-11-16: la copia de las 05:00 acabó `ok` en unos 2 s. restic tiene `74219fd4  2026-11-16 05:00:00  domus  292.000 KiB`, `/health` dice `ok` con `backups: saved` y `/data/backup-staging` está vacía. La 1f y la fase 1 quedan hechas en el plan.

@@ -2,7 +2,7 @@
 
 Domus es el organizador privado de una casa de dos adultos en España, alojado en una Raspberry Pi 5, con Kira (el asistente de voz y texto) dentro del mismo producto. Este documento recoge las decisiones de arquitectura tomadas en grilling el 2026-11-11 (preguntas P1–P55). Cada decisión importante tiene su ADR en [`adr/`](adr/); si este documento y un ADR no coinciden, manda el ADR más reciente, y se corrigen los dos en el mismo commit.
 
-Lo que describe es lo vigente. En la subfase 1f salen las apps conectadas: la llave, el mandato, el canal `contexto`, `assistant` y `voice-gateway` ([ADR 0034](adr/0034-retirar-las-apps-conectadas-antes-de-la-fase-5.md)), y cada apartado que cambia lo avisa. A partir de la fase 5, Domus y Kira pasan a ser productos independientes y Domus admite un agente conectado opcional: lo resume la [sección 8](#8-a-partir-de-la-fase-5), y cada apartado que cambia lo avisa.
+Lo que describe es lo vigente. Desde la subfase 1f no hay apps conectadas: Domus es `api` y la web, sin llave, mandato ni canal `contexto` ([ADR 0034](adr/0034-retirar-las-apps-conectadas-antes-de-la-fase-5.md)). A partir de la fase 5, Domus y Kira pasan a ser productos independientes y Domus admite un agente conectado opcional: lo resume la [sección 8](#8-a-partir-de-la-fase-5), y cada apartado que cambia lo avisa.
 
 Idioma: documentos, conversación y el texto que ve la familia en español; código, identificadores, commits y los mensajes de log para quien opera el sistema en inglés. Las instrucciones para agentes (`AGENTS.md`, `docs/agents/`) van en inglés, como el código que describen. El vocabulario compartido está en [`GLOSSARY.md`](../../GLOSSARY.md).
 
@@ -10,7 +10,7 @@ Idioma: documentos, conversación y el texto que ve la familia en español; cód
 
 Ver [ADR 0001](adr/0001-domus-con-kira-dentro.md) y [ADR 0002](adr/0002-vue-spa-sqlite-y-pwa.md).
 
-- **Un solo producto:** Kira vive en el mismo repositorio y en el mismo producto que Domus. Cambia en la fase 5 ([ADR 0031](adr/0031-domus-con-un-agente-opcional.md)).
+- **Un solo producto:** Kira es parte del mismo producto que Domus hasta la fase 5, en la que pasan a ser productos independientes ([ADR 0031](adr/0031-domus-con-un-agente-opcional.md)). Desde la 1f no queda código de Kira en el repositorio ([ADR 0034](adr/0034-retirar-las-apps-conectadas-antes-de-la-fase-5.md)).
 - **Cada funcionalidad entra después de su propia revisión en grilling** (P41).
 - **Tecnología:** SQLite (P37), interfaz en Vue como SPA sin SSR (P38), primero PWA y Capacitor sobre la misma SPA solo si se queda corta (P39). La API son procedimientos oRPC servidos con Hono.
 - **Inicio de sesión y permisos:** Better Auth con correo y contraseña, y step-up ligado a la operación exacta (P36). Los permisos los decide una función pura de `platform/authorization`, sin Permix ([ADR 0023](adr/0023-identidad-y-autorizacion.md)).
@@ -18,44 +18,42 @@ Ver [ADR 0001](adr/0001-domus-con-kira-dentro.md) y [ADR 0002](adr/0002-vue-spa-
 
 ## 2. Procesos, puertas e identidad
 
-**Procesos** ([ADR 0003](adr/0003-procesos-y-contenedores.md)): tres programas además de la web, cada uno en su contenedor Docker y con reinicio independiente (P1, P28):
+**Procesos** ([ADR 0003](adr/0003-procesos-y-contenedores.md), [ADR 0034](adr/0034-retirar-las-apps-conectadas-antes-de-la-fase-5.md)): un programa además de la web, en su contenedor Docker con reinicio propio (P1, P28):
 
-| Programa        | Qué hace                                                                                                                                          |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `api`           | La puerta: autentica, sirve la API y la web compilada, arranca `platform` y los módulos. Único contenedor con el volumen de datos y el de copias. |
-| `assistant`     | Kira, la parte que piensa. Solo habla con `api`.                                                                                                  |
-| `voice-gateway` | Satélites, palabra de activación, STT/TTS y quién habla. Solo habla con `api`.                                                                    |
+| Programa | Qué hace                                                                                                                           |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `api`    | La puerta: autentica, sirve la API y la web compilada, arranca `platform` y los módulos. Monta el volumen de datos y el de copias. |
 
-En la 1f, `assistant` y `voice-gateway` salen, la puerta responde `UNAUTHORIZED` a una llave o a un mandato y desaparece el «sí» por `contexto` ([ADR 0034](adr/0034-retirar-las-apps-conectadas-antes-de-la-fase-5.md)); la fase 5 parte de ahí ([sección 8](#8-a-partir-de-la-fase-5)).
+`assistant` y `voice-gateway` salieron en la 1f; la fase 5 parte de ahí ([sección 8](#8-a-partir-de-la-fase-5)).
 
 **Una sola puerta** ([ADR 0004](adr/0004-una-sola-puerta.md)):
 
-- `api` autentica todos los canales (app, Telegram, voz, apps conectadas) y pasa las conversaciones a `assistant` (P2, P33). Un turno nunca corre dentro de una petición HTTP.
-- La puerta es la parte `http` de `platform`; `apps/api` solo la monta. `assistant` y `voice-gateway` hablan con ella por un `fetch` inyectado, y al arrancar comprueban la versión del protocolo y su llave: conectando, listo, incompatible o rechazado ([ADR 0020](adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md), [ADR 0030](adr/0030-llaves-y-mandatos.md)).
-- Kira habla con Domus por la API, como cualquier cliente, y nunca abre el núcleo por dentro (P7). Se autentica con la llave de su app, `kira`, de la que puede haber dos vivas durante una rotación, y en cada petición dice de parte de quién habla (P8). La llave dice qué app es. De parte de quién lo dice un mandato que emite la puerta a partir de una interacción que ella autenticó, que muere con su sesión y no da permisos. Un «sí» por `contexto` lo reconoce la puerta, nunca Kira ([ADR 0030](adr/0030-llaves-y-mandatos.md)). Todo esto sale en la 1f; sus garantías de autorización siguen como obligaciones de cualquier agente ([ADR 0034](adr/0034-retirar-las-apps-conectadas-antes-de-la-fase-5.md)).
-- **Contrato de conversación:** entra texto con adjuntos y quién habla; sale un flujo de eventos cancelable (trozo, tarjeta, acción a la espera de «sí», fin), con salidas `hablada`, `texto` y `estructurada`.
+- `api` es la única puerta (P2, P33). Hoy autentica un solo canal, la app con su sesión; desde la fase 5 no autentica canales externos, y la conversación con el agente es la conversación alojada ([ADR 0033](adr/0033-conversacion-alojada-y-voz.md)).
+- La puerta es la parte `http` de `platform`; `apps/api` solo la monta, y las pruebas la montan en proceso por su `fetch`. `status` dice el servicio y la versión del protocolo, sin sesión ([ADR 0020](adr/0020-composicion-de-la-api-y-comunicacion-entre-procesos.md)).
+- Un agente habla con Domus por la API, como cualquier cliente, y nunca abre el núcleo por dentro (P7). La puerta responde `UNAUTHORIZED` a toda petición de `/api` que traiga `Authorization` o la cabecera del mandato, también junto a una cookie válida y también en `status`: ninguna credencial retirada baja a anónima. Ninguna credencial de la puerta lleva `via`; las garantías de autorización del [ADR 0030](adr/0030-llaves-y-mandatos.md) siguen como obligaciones de cualquier agente y se prueban sobre el contexto verificado sintético ([ADR 0034](adr/0034-retirar-las-apps-conectadas-antes-de-la-fase-5.md)). En la fase 5 el agente se autoriza con el perfil OAuth de MCP ([ADR 0032](adr/0032-autorizacion-del-agente.md)).
+- **Contrato de conversación** (sin construir; desde la fase 5 lo sustituye la conversación alojada): entra texto con adjuntos y quién habla; sale un flujo de eventos cancelable (trozo, tarjeta, acción a la espera de «sí», fin), con salidas `hablada`, `texto` y `estructurada`.
 
-**Kira aislada por construcción** ([ADR 0005](adr/0005-kira-aislada.md), P51): su contenedor no monta el volumen de datos, la sesión de Claude Code arranca sin herramientas propias (terminal y ficheros) y solo tiene su llave para la API. Desde la fase 5 el aislamiento es entre productos, y en la página de Domus no corre código del agente.
+**Kira aislada por construcción** ([ADR 0005](adr/0005-kira-aislada.md), P51): Kira no toca los datos porque no tiene cómo; solo llega a Domus por la API, con lo que la autorización le permite. Desde la fase 5 el aislamiento es entre productos: el agente llega por MCP con sus autorizaciones, y en la página de Domus no corre código suyo.
 
 **Identidad** ([ADR 0006](adr/0006-identidad-de-kira-y-aparatos.md)):
 
-- Kira actúa como la cuenta con la que entró el aparato. En un aparato con la cuenta `device`, si reconoce la voz de un miembro, actúa como ese miembro mientras dure la conversación; si no, actúa como `device` (P20, P21, P22b). Desde la fase 5, la voz y las huellas son del agente, y en una pantalla de Domus reconocer una voz no cambia la cuenta ([ADR 0033](adr/0033-conversacion-alojada-y-voz.md)).
+- Kira actúa como la cuenta con la que entró el aparato (P20, P21, P22b). La identidad acreditada por la voz salió en la 1f con `voice-gateway` ([ADR 0034](adr/0034-retirar-las-apps-conectadas-antes-de-la-fase-5.md)): hoy se acredita con contraseña o como aparato. Desde la fase 5, la voz y las huellas son del agente, y en una pantalla de Domus reconocer una voz no cambia la cuenta ([ADR 0033](adr/0033-conversacion-alojada-y-voz.md)).
 - «Soy Paco» solo vale si la voz coincide (P24).
 - Las huellas de voz son datos personales y viven en Domus; la voz guarda solo una copia para trabajar (P4).
 - Los aparatos se emparejan en Domus con un código y eligen con qué cuenta entran (P26). No hay tipos de aparato: una pantalla de pared es un aparato con la cuenta `device`.
-- Aparato, sesión y cuenta van separados ([ADR 0023](adr/0023-identidad-y-autorizacion.md)). La puerta construye un contexto verificado (cuenta representada, `via`, aparato, sesión, cuenta del aparato, canal y cómo se acreditó la identidad) y nada de lo que declare el cliente vale como identidad. Las cuentas se crean con `pnpm accounts`, sin registro abierto; quién habla, que acredita la voz, es distinto de quién ejecuta (`via`), y una voz no reconocida en la cuenta `device` no deja memoria ni conversación.
+- Aparato, sesión y cuenta van separados ([ADR 0023](adr/0023-identidad-y-autorizacion.md)). La puerta construye un contexto verificado (cuenta representada, `via`, aparato, sesión, cuenta del aparato, canal y cómo se acreditó la identidad) y nada de lo que declare el cliente vale como identidad. Las cuentas se crean con `pnpm accounts`, sin registro abierto; quién pide es distinto de quién ejecuta (`via`), y una voz no reconocida en la cuenta `device` no deja memoria ni conversación.
 
 ## 3. Permisos, IA y visibilidad
 
 - **Perfiles solo para personas** ([ADR 0007](adr/0007-perfiles-y-permisos-si-o-no.md)): `admin` (Paco), `member` (Rocío) y `device` (cuenta compartida). Los permisos son **sí o no**, por área y nivel, unos 50 (P14), sin permisos por acción suelta. Cada contrato declara su área y su nivel (`read`, `write` o `manage`, acumulativos); el admin tiene `manage` en todas y cambia el acceso de `member` y `device` ([ADR 0023](adr/0023-identidad-y-autorizacion.md)).
 - **La IA no es un perfil** ([ADR 0008](adr/0008-la-ia-como-filtro-de-delegacion.md)): es una tabla de delegación que solo rebaja los permisos de la persona por la que habla (P11) y añade «pedir confirmación» a cada permiso (P18). Desde la fase 5 es la tabla del agente conectado, nace denegada entera y toda confirmación se hace en Domus ([ADR 0032](adr/0032-autorizacion-del-agente.md)).
-    - Las tareas de administrador por la IA empiezan en «no» y se pueden abrir. Contraseñas, PIN, llaves y emparejamiento no son acciones y quedan siempre fuera (P12).
+    - Las tareas de administrador por la IA empiezan en «no» y se pueden abrir. Contraseñas, PIN y emparejamiento no son acciones y quedan siempre fuera (P12).
     - Algunas acciones declaran en su definición que siempre piden confirmación, caso por caso, y nunca se confirma dos veces (P18).
     - La columna «ver» de la tabla decide qué ve la IA: lo que la IA no ve no sale hacia el modelo (P17).
-    - No hay aprobación de lo que propone otra persona, ni aprobación automática, ni modo «solo sugerir» para las apps conectadas.
+    - No hay aprobación de lo que propone otra persona, ni aprobación automática, ni modo «solo sugerir» para el agente.
     - Cada persona edita su tabla, que nace copiando su acceso sin `manage`; la de `device` la lleva el admin, y la IA nunca cambia acceso ni delegación ([ADR 0023](adr/0023-identidad-y-autorizacion.md)).
 - **Visibilidad** ([ADR 0009](adr/0009-visibilidad-privado-o-publico.md)): solo privado o público, con dueño por registro (P19). Cada área elige su valor por defecto; la salud es siempre privada. Ser público deja ver, no editar. El manejador filtra con el predicado que da la autorización, y al escribir, triggers temporales sobre las tablas con dueño comprueban las reglas antes de confirmar ([ADR 0023](adr/0023-identidad-y-autorizacion.md)).
-- **Una sola decisión** ([ADR 0010](adr/0010-una-sola-decision-de-autorizacion.md), P48; recorrido en el [ADR 0022](adr/0022-acciones.md)): `platform/authorization` decide si algo se permite, si pide confirmación y si se puede ver, combinando permisos de la persona, filtro de la IA y visibilidad. Al confirmar lo vuelve a comprobar y verifica que la operación es exactamente la misma. La auditoría guarda las dos identidades: la persona y «vía Kira». La confirmación es una pendiente guardada con su huella y su contexto: un «sí» por voz vale en el mismo aparato, la misma conversación y unos 60 s, hasta que sale en la 1f ([ADR 0034](adr/0034-retirar-las-apps-conectadas-antes-de-la-fase-5.md)); en la app, la misma persona la abre durante 24 h. Las operaciones sensibles piden además un comprobante de un solo uso ligado a esa operación ([ADR 0023](adr/0023-identidad-y-autorizacion.md)).
+- **Una sola decisión** ([ADR 0010](adr/0010-una-sola-decision-de-autorizacion.md), P48; recorrido en el [ADR 0022](adr/0022-acciones.md)): `platform/authorization` decide si algo se permite, si pide confirmación y si se puede ver, combinando permisos de la persona, filtro de la IA y visibilidad. Al confirmar lo vuelve a comprobar y verifica que la operación es exactamente la misma. La auditoría guarda las dos identidades: la persona y «vía Kira». La confirmación es una pendiente guardada con su huella y su contexto, que la misma persona confirma o rechaza en la app durante 24 h; un contexto con `via` nunca confirma ni rechaza, y la cuenta `device` no lee un área que declara `confirmOnSharedDevice` ([ADR 0034](adr/0034-retirar-las-apps-conectadas-antes-de-la-fase-5.md)). Las operaciones sensibles piden además un comprobante de un solo uso ligado a esa operación ([ADR 0023](adr/0023-identidad-y-autorizacion.md)).
 
 ## 4. IA, memoria y mecanismos generales
 
@@ -76,8 +74,6 @@ domus/
   apps/
     api/             la puerta: autentica, sirve la API, arranca platform y los módulos
     web/             Vue SPA / PWA
-    assistant/       Kira, la parte que piensa (solo habla con api)
-    voice-gateway/   satélites, palabra de activación, STT/TTS, quién habla (solo habla con api)
   modules/<módulo>/
     contracts/       solo lo público: esquemas y acciones que ofrece a otros
     server/          tablas, acciones y trabajos
@@ -93,7 +89,7 @@ domus/
     test-utils/      platform en memoria, modelo falso y canal falso
     api-client/      cliente oRPC: clientFor(contrato, transporte), sin contratos propios
   tooling/           configuración de TypeScript compartida y comprobaciones del repositorio
-  docker/            Dockerfile con un destino por programa
+  docker/            Dockerfile con el destino de api y el ensayo de restaurar
   docs/architecture/ + adr/
 ```
 
@@ -101,7 +97,7 @@ domus/
 
 - `apps` son programas, sin lógica de negocio: nada importa una app, y ninguna app usa directamente librerías de datos o de IA.
 - Un módulo importa solo `module-sdk` y los `contracts` de otros, además de los paquetes sin negocio (`utils`, `i18n`; en `web/` también `ui` y `api-client`; en `tests/` también `test-utils`).
-- `assistant` y `voice-gateway` solo hablan con `api` (la regla sale con ellos en la 1f): no importan `module-sdk`, `ui` ni módulos, y de `platform` solo sus contratos (`@domus/platform/contracts`), igual que `web`. Una regla de alcance lo comprueba también por caminos indirectos.
+- `web` habla con `api` por `api-client`: de `platform` solo importa sus contratos (`@domus/platform/contracts`), y a los módulos llega por su entrada `web/`. Una regla de alcance lo comprueba también por caminos indirectos.
 - Los contratos son puros (sin Node), y toda importación tiene que resolverse: un paquete no declarado no se cuela.
 
 Además, `tooling/scripts` comprueba el índice y los enlaces de los ADR, el tamaño de los `AGENTS.md`, y que ningún fichero nombre código anterior al proyecto. Un hook de pre-commit (`.githooks/`) busca secretos con gitleaks en lo que se va a confirmar y pasa lint, formato y tipos; la CI repite todo en cada PR y revisa con gitleaks todos los commits de la rama, porque el repositorio es público. Las normas que piden criterio están en `CODING_STANDARDS.md`.
@@ -112,7 +108,7 @@ Además, `tooling/scripts` comprueba el índice y los enlaces de los ADR, el tam
 
 **Acciones** ([ADR 0022](adr/0022-acciones.md)): un módulo solo lee y cambia sus datos desde el contexto de una acción, y todo llamante recorre el mismo camino en `platform/actions`: validar, autorizar, ejecutar y registrar. Cada contrato declara si es lectura o escritura y, si es escritura, si se puede deshacer. El manejador es síncrono y corre en una transacción junto con su entrada del registro de acciones. Toda escritura lleva una clave de idempotencia, única por cuenta y `via`: repetirla, tras volver a autorizar, devuelve un acuse sin contenido y nunca ejecuta dos veces, tampoco cuando el contenido ha caducado (30 días); la escritura no guarda su resultado ([ADR 0023](adr/0023-identidad-y-autorizacion.md)). Deshacer ejecuta la inversa guardada si nada posterior tocó los mismos registros y la inversa cumple las reglas del módulo, y solo lo pide la misma cuenta que escribió. Las acciones se sirven por HTTP con una sesión válida.
 
-**`utils`:** entra solo lo que no sabe nada del negocio y usan al menos dos sitios, y un tema no importa otro sin motivo. Temas: `connection` (los estados conectando, listo, incompatible y rechazado de los programas que hablan con la api, que sale con ellos en la 1f) y `program` (puerto, direcciones, `/health` y parada de los tres programas); en la fase 1 llega `date-time`: fechas en la hora de la casa sobre `date-fns` y formatos sobre `Intl`. No lleva intérprete de lenguaje; el tiempo meteorológico va a su módulo.
+**`utils`:** entra solo lo que no sabe nada del negocio y usan al menos dos sitios, y un tema no importa otro sin motivo. Temas: `program` (el puerto y la parada de `api`) y `date-time`: fechas en la hora de la casa sobre `date-fns` y formatos sobre `Intl`. No lleva intérprete de lenguaje; el tiempo meteorológico va a su módulo.
 
 **Patrones de OpenClaw y Hermes** (P40): skills como carpetas; cada canal declara su formato; pruebas de escenario con canal falso y modelo falso; una prueba de que el prompt y las tools no cambian entre turnos; un `AGENTS.md` por carpeta con tamaño máximo; la «escalera» de dónde va una funcionalidad nueva (en `AGENTS.md`). No se adoptan tiendas de plugins, proveedores de sobra, «un agent por persona» ni manifiestos enormes.
 
