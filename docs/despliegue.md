@@ -67,7 +67,8 @@ Comprobado en la Pi el 2026-11-15, al desplegar la 1f con `main` en `da1913c` y 
 - el primer arranque dijo `1 migrations applied`: `0017_damp_carlie_cooper`, en la `position` `18` de `platform`, que conservó su hash y su `applied_at` tras `docker compose restart api` y tras `docker compose up -d --force-recreate api` (ver «Comprobar que los datos persisten»); `platform_keys`, `platform_mandates`, `context_only` y `window_closes_at` ya no están;
 - `status` respondió `{"json":{"service":"domus","protocol":1}}` sin credencial, y `401` con un `Bearer` inventado y con `domus-mandate`; `/health` siguió en `ok`, y sin sesión `log/read` dio `401` y `probe/listNotes`, `404`;
 - con una sesión de Paco, `sessions/list` y `log/read` respondieron `200`, y las mismas peticiones con un `Bearer` añadido, `401`;
-- después se borraron el fichero de la antigua llave de Kira, en `~/.config/domus`, y su línea del `.env`; `docker compose config` siguió bien y `api`, `healthy`.
+- después se borraron el fichero de la antigua llave de Kira, en `~/.config/domus`, y su línea del `.env`; `docker compose config` siguió bien y `api`, `healthy`;
+- la copia de la primera noche, el 2026-11-16 a las 05:00, acabó `ok` en unos 2 s: restic guardó `74219fd4`, `/health` siguió en `ok` con `backups: saved` y `/data/backup-staging` quedó vacía.
 
 ## Las cuentas
 
@@ -277,7 +278,7 @@ El contenido de la primera está en el almacén, con el nombre que da `sha256sum
 docker compose exec -T api find /data/files -type f
 ```
 
-Escribió `/data/files/contents/ae/aec5af8ea8339032b725746103d6a76ab89b5e383a82ddf949133850602180ca`. Ese archivo preparado no se vincula a nada: caduca a las 24 h, y la limpieza de la noche siguiente lo borra con su contenido, así que la misma orden ya no escribe ninguno.
+Escribió `/data/files/contents/ae/aec5af8ea8339032b725746103d6a76ab89b5e383a82ddf949133850602180ca`. Ese archivo preparado no se vincula a nada: caduca a las 24 h, y la limpieza de la noche siguiente lo borra con su contenido, así que la misma orden ya no escribe ninguno. Así fue: la limpieza del 2026-11-16 a las 04:30 dejó `/data/files` sin ficheros y las tres tablas de archivos vacías.
 
 ## En directo y avisos
 

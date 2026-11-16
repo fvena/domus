@@ -1,6 +1,6 @@
 # 06. La Pi y el cierre
 
-Status: ready-for-agent
+Status: resolved
 Blocked by: 05
 
 Spec: [`../spec.md`](../spec.md), secciones «La comprobación en la Pi» y «Reglas y documentación». ADR 0034.
@@ -18,7 +18,7 @@ La 1f llega a la Pi, la Pi queda con solo `api`, y la documentación para person
 - [x] La fila de la migración nueva conserva posición, hash e instante tras reiniciar y tras recrear `api`.
 - [x] `status` con un `Bearer` inventado da 401 en la Pi, y una sesión normal entra y lee.
 - [x] La carpeta del secreto de Kira y `DOMUS_KIRA_KEY` ya no están, borradas después de las tres comprobaciones anteriores.
-- [ ] La copia de la primera noche sale bien.
+- [x] La copia de la primera noche sale bien.
 - [x] `despliegue.md`, la guía, el README de arquitectura, el glosario y el plan describen lo que queda.
 
 ## Comments
@@ -29,3 +29,4 @@ La 1f llega a la Pi, la Pi queda con solo `api`, y la documentación para person
 - Después se borraron `/home/fvena/.config/domus/kira-key` y `DOMUS_KIRA_KEY` del `.env` de la Pi; `docker compose config` siguió bien y `api`, `healthy`.
 - La documentación queda al día en el commit «docs: close phase 1f on the Pi, waiting only for its first night's copy»: `despliegue.md`, la guía (`seguridad.md`, `permisos.md`, `programas.md`, `arquitectura.md`, `la-pi.md`, la portada y una frase de `acciones.md`, revisadas con `humanizer`), el README de arquitectura, el glosario y el plan, que da la 1f por hecha cuando salga bien la copia.
 - Falta la copia de la primera noche, la del 2026-11-16 a las 05:00. Esta tarea sigue en `ready-for-agent` hasta comprobarla.
+- 2026-11-16: la copia de las 05:00 acabó `ok` en unos 2 s. restic tiene `74219fd4  2026-11-16 05:00:00  domus  292.000 KiB`, `/health` dice `ok` con `backups: saved` y `/data/backup-staging` está vacía. La 1f y la fase 1 quedan hechas en el plan.
